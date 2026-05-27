@@ -452,10 +452,15 @@ whitelisted helper, backed by a hand-maintained `size → vCPUs` dict.
   wireframe drew it as an indicator (`add_indicator`); the alert
   variant is the only headline that re-renders cleanly when the
   Server or vCPUs change.
-- Playwright verification was skipped: the local browser session is
-  held by a parallel agent. The capacity helper was smoke-tested via
-  `bench execute` against a real `Server`; unit tests cover the
-  total/used/oversubscribed paths.
+- The description nudge also uses the `form-message` slot via
+  `set_headline_alert(text, "yellow")` (not `set_intro`, which routes
+  through the same shared slot but doesn't stack with the capacity
+  headline). The two messages stack as separate alerts and a single
+  `clear_headline()` at the top of every re-render keeps the slot
+  clean.
+- Capacity fetches are guarded by a render token (incremented on every
+  `server` / `vcpus` / `description` change) so a late-resolving prior
+  response cannot double-render the headline.
 
 ### Fighting Desk?
 No. No schema changes; presets are injected into the existing Resources

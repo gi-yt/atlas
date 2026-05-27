@@ -34,35 +34,50 @@ frappe.ui.form.on("Virtual Machine", {
 	},
 	server(frm) {
 		if (frm.is_new()) {
-			render_capacity_indicator(frm);
+			render_creation_messages(frm);
 		}
 	},
 	vcpus(frm) {
 		if (frm.is_new()) {
-			render_capacity_indicator(frm);
+			render_creation_messages(frm);
 		}
 	},
 	description(frm) {
 		if (frm.is_new()) {
-			render_description_nudge(frm);
+			render_creation_messages(frm);
 		}
 	},
 });
 
 
 function render_creation_form_polish(frm) {
-	render_description_nudge(frm);
 	render_size_preset_radios(frm);
-	render_capacity_indicator(frm);
+	render_creation_messages(frm);
+}
+
+
+function render_creation_messages(frm) {
+	// `set_intro` and `dashboard.set_headline_alert` share one DOM slot
+	// (form-message-container) and stack on each call; clearing must happen
+	// once at the top, before re-emitting both the description nudge and
+	// the capacity headline. The render token discards stale async capacity
+	// responses when multiple events (server, vcpus, description) fire in
+	// quick succession.
+	frm._atlas_creation_render_token = (frm._atlas_creation_render_token || 0) + 1;
+	const token = frm._atlas_creation_render_token;
+	frm.dashboard.clear_headline();
+	render_description_nudge(frm);
+	if (frm.doc.server) {
+		render_capacity_indicator(frm, token);
+	}
 }
 
 
 function render_description_nudge(frm) {
 	if (frm.doc.description && frm.doc.description.trim()) {
-		frm.set_intro("");
 		return;
 	}
-	frm.set_intro(
+	frm.dashboard.set_headline_alert(
 		__("Without a description the list will show only a UUID. Add at least a one-word label."),
 		"yellow",
 	);
@@ -114,16 +129,16 @@ function render_size_preset_radios(frm) {
 }
 
 
-function render_capacity_indicator(frm) {
-	if (!frm.doc.server) {
-		frm.dashboard.clear_headline?.();
-		return;
-	}
+function render_capacity_indicator(frm, token) {
+	// Caller (render_creation_messages) is responsible for clearing the
+	// shared headline slot before calling us — we only append. The token
+	// gates against late-resolving responses from a prior render cycle.
 	frappe.call({
 		method: "atlas.atlas.api.server_capacity.capacity_for_server",
 		args: {server: frm.doc.server},
 	}).then(({message}) => {
 		if (!message) return;
+		if (token !== frm._atlas_creation_render_token) return;
 		const total = message.total_vcpus;
 		const used = message.used_vcpus;
 		const requested = parseInt(frm.doc.vcpus || 0, 10);
@@ -135,7 +150,6 @@ function render_capacity_indicator(frm) {
 			"Server capacity: {0} vCPUs requested + {1} used / {2} total ({3} VMs)",
 			[requested, used, total_label, message.virtual_machine_count],
 		);
-		frm.dashboard.clear_headline?.();
 		frm.dashboard.set_headline_alert(
 			oversubscribed
 				? `⚠ ${text} — ${__("Server is oversubscribed. Provision may fail.")}`
