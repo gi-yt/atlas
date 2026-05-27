@@ -29,7 +29,7 @@ def _ensure_image() -> str:
 	return make_image("vm-test-image").name
 
 
-def _insert_vm(server: str, address: str) -> None:
+def _insert_vm(server: str, address: str, status: str = "Pending") -> str:
 	# Insert a row directly to occupy an address. Skip the controller's
 	# before_insert by using db_insert via frappe.get_doc with set_name.
 	name = str(uuid.uuid4())
@@ -43,10 +43,11 @@ def _insert_vm(server: str, address: str) -> None:
 		"memory_megabytes": 512,
 		"disk_gigabytes": 4,
 		"ssh_public_key": "ssh-ed25519 AAAA",
-		"status": "Pending",
+		"status": status,
 	}).insert(ignore_permissions=True, set_name=name)
 	# The controller's before_insert will have allocated its own IPv6; overwrite.
 	frappe.db.set_value("Virtual Machine", name, "ipv6_address", address)
+	return name
 
 
 class TestNetworking(IntegrationTestCase):
@@ -104,3 +105,15 @@ class TestNetworking(IntegrationTestCase):
 			_insert_vm(server_name, f"2001:db8::{octet:x}")
 		with self.assertRaises(frappe.ValidationError):
 			allocate_ipv6(server_name)
+
+	def test_allocate_ipv6_reuses_terminated_addresses(self) -> None:
+		"""Terminated VMs release their address back into the pool."""
+		server_name = "alloc-server-4"
+		_provider_and_server(server_name)
+		for name in frappe.get_all("Virtual Machine", filters={"server": server_name}, pluck="name"):
+			frappe.delete_doc("Virtual Machine", name, ignore_permissions=True, force=True)
+		# ::2 held by a Terminated VM, ::3 still live. The next allocation should
+		# pick ::2 (lowest unused, ignoring Terminated holders).
+		_insert_vm(server_name, "2001:db8::2", status="Terminated")
+		_insert_vm(server_name, "2001:db8::3", status="Running")
+		self.assertEqual(allocate_ipv6(server_name), "2001:db8::2")

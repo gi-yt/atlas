@@ -160,7 +160,8 @@ These are excluded from every phase, per
 - No image build pipeline. No multi-arch.
 - No snapshots, resize, migrate, live migration.
 - No metrics, no alerting, no health-check reconciler.
-- No address reuse on archive.
+- ~~No address reuse on archive.~~ Reverted: Terminated VMs do release their
+  IPv6 address back into the pool (see [`../spec/06-networking.md`](../spec/06-networking.md)).
 - No log-spill-to-file. The Task `Code` field holds full stdout/stderr.
 - No automatic retries.
 - No automatic server reuse outside e2e. The `ensure_bootstrapped_server`

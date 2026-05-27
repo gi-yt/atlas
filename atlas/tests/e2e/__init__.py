@@ -15,6 +15,10 @@ from atlas.tests.e2e import (
 	phase_5,
 	phase_6,
 	phase_7,
+	phase_8,
+	phase_9,
+	phase_10,
+	phase_11,
 )
 from atlas.tests.e2e._shared import (
 	cleanup_droplet,
@@ -45,6 +49,9 @@ def run_all() -> None:
 		("phase-5 (vm provision)", phase_5.run),
 		("phase-6 (vm lifecycle)", phase_6.run),
 		("phase-7 (run task + reboot)", phase_7.run),
+		("phase-8 (validation paths)", phase_8.run),
+		("phase-10 (sync background)", phase_10.run),
+		("phase-11 (ssh transport + bootstrap)", phase_11.run),
 	]
 
 	results: list[tuple[str, str, float]] = []
@@ -73,3 +80,30 @@ def run_all() -> None:
 	failed = [label for label, outcome, _ in results if outcome != "OK"]
 	if failed:
 		raise AssertionError(f"failures: {', '.join(failed)}")
+
+
+def run_all_coverage() -> None:
+	"""Run everything that contributes to e2e coverage in a single bench call.
+
+	Cost: three billable droplets. The shared droplet (used by phases 4-7,
+	10, 11), the phase-2 throwaway, and the phase-3 fresh-provision. Phase 3
+	is the only path that exercises `Server Provider.provision_server` and
+	`finish_provisioning`, so it must run if those modules are to be covered.
+	"""
+	from atlas.tests.e2e import phase_2, phase_3
+
+	# Phase 9 needs no droplet at all; run it first so a transient DO outage
+	# fails fast before we burn an hour bootstrapping.
+	print("--- phase 9 (DO client error paths) ---")
+	phase_9.run()
+
+	# Phase 2 uses its own droplet.
+	print("--- phase 2 (DO smoke test) ---")
+	phase_2.run()
+
+	# Phase 3 also uses its own droplet (fresh provision).
+	print("--- phase 3 (fresh server provision) ---")
+	phase_3.run()
+
+	# The shared-droplet phases.
+	run_all()

@@ -687,3 +687,19 @@ section enumerates the explicit exclusions.
 - Implementation: function and the print message moved together; the
   comment still mentions `terminate-vm.sh` as the host-side counterpart.
 - Resolve: nothing — caller is the operator, who reads the function name.
+
+### N1. IPv6 addresses are reused after VM termination
+
+- Spec (06-networking.md, old): "We deliberately do **not** reuse addresses
+  from archived VMs in this iteration."
+- Plan (00-overview.md, old non-goals): "No address reuse on archive."
+- Implementation (revised 2026-05-27): `allocate_ipv6` now filters by
+  `status != "Terminated"`, releasing the address back into the pool on
+  terminate. Forced by e2e exhaustion: a /124 holds 14 usable addresses; a
+  single shared e2e server runs through them in a few coverage iterations,
+  blocking phase 5/6. Reuse is also the right production behaviour — the
+  audit trail still lives in the `Virtual Machine` row's `creation` /
+  `modified` timestamps.
+- Resolve: spec + plan + unit test updated alongside the code change.
+- **Resolved (e2e coverage iteration):** code, spec, plan, and unit test
+  all match the new policy.

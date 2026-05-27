@@ -41,8 +41,9 @@ def derive_tap(virtual_machine_name: str) -> str:
 def allocate_ipv6(server_name: str) -> str:
 	"""Lowest unused address in the server's /124.
 
-	Skips ::0 (subnet id) and ::1 (host). Considers Terminated VMs as still
-	holding their address — we do not reuse.
+	Skips ::0 (subnet id) and ::1 (host). A VM in status Terminated has
+	released its address back into the pool — only live (non-Terminated)
+	VMs count as occupying an address.
 	"""
 	server = frappe.get_doc("Server", server_name, for_update=True)
 	network = ipaddress.IPv6Network(server.ipv6_virtual_machine_range)
@@ -50,7 +51,7 @@ def allocate_ipv6(server_name: str) -> str:
 		str(ipaddress.IPv6Address(address))
 		for address in frappe.get_all(
 			"Virtual Machine",
-			filters={"server": server_name},
+			filters={"server": server_name, "status": ["!=", "Terminated"]},
 			pluck="ipv6_address",
 		)
 		if address

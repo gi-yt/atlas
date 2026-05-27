@@ -36,21 +36,22 @@ Sequential, scoped per server:
 
 ```
 ipv6_virtual_machine_range = 2a03:b0c0:abcd:1234::/124
-allocations on this server  = ::2, ::3, ::5      # ::4 was archived earlier
-next                        = ::6
+live allocations            = ::2, ::3, ::5      # ::4 was terminated earlier
+next                        = ::4                # ::4 is back in the pool
 ```
 
 `::1` is reserved for the host. We start at `::2`. The algorithm scans
-existing `Virtual Machine.ipv6_address` rows for the server (including
-archived ones — addresses are not reused) and picks the next unused address.
+existing `Virtual Machine.ipv6_address` rows for the server whose status is
+not `Terminated`, and picks the lowest unused address.
 
-When the /124 fills up, provisioning fails with "no IPv6 capacity". The
-operator either archives old VMs (releasing addresses on the next bump of
-the scheme — out of scope here) or provisions a new server.
+When the /124 fills up with live VMs, provisioning fails with "no IPv6
+capacity". The operator either terminates old VMs (immediately releasing
+their addresses) or provisions a new server.
 
-We deliberately do **not** reuse addresses from archived VMs in this
-iteration. Reuse complicates audits ("which VM had this address on
-2026-03-01?") and we have plenty of capacity for the building block.
+Terminated VMs release their address. The audit trail still lives in the
+`Virtual Machine` row (status=Terminated, ipv6_address recorded at the
+time it ran), so "which VM had this address on 2026-03-01?" is answered by
+filtering on `creation`/`modified` — the field itself is not the index.
 
 ## MAC
 

@@ -196,8 +196,8 @@ address (`::0`) automatically, so the `index < 2` actually only excludes
 - `test_allocate_ipv6_picks_first_free_starting_at_2`: empty server returns
   `::2`.
 - `test_allocate_ipv6_skips_used`: with `::2`, `::3` used → returns `::4`.
-- `test_allocate_ipv6_skips_archived_addresses_too`: Archived VMs still
-  hold their addresses (no reuse).
+- `test_allocate_ipv6_reuses_terminated_addresses`: Terminated VMs release
+  their address back into the pool; the next allocation reclaims it.
 - `test_allocate_ipv6_raises_when_full`: fill the /124, assert raise.
 - `test_carve_virtual_machine_range`: a couple of /64 inputs.
 
