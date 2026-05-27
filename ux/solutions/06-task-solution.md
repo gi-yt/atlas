@@ -75,6 +75,14 @@ Atlas / Task / Provision VM · verify vnet_hdr fix on bootstrap-server-177987980
 - `title_field` on the doctype JSON.
 - One `subject: Data, read-only` field (schema change — minimal).
 - `before_insert` controller hook.
+- `atlas.patches.v1_0.backfill_task_subject` to fill the new column on
+  existing rows.
+
+**Implementation status (landed):** §1, §2 (headline, chips, retry,
+sibling-tasks), §3 (enlarged Code-field panes), and §4 (realtime
+`task_update` event on after_insert / on_update with the Task form
+auto-reloading) are wired. §5 (VM status repair on provision failure)
+is deferred.
 
 ### Fighting Desk?
 No. `title_field` is the documented way to do this.

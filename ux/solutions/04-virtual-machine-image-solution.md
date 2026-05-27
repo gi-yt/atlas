@@ -110,7 +110,11 @@ to the server, verifies the SHA-256, and runs sync-image.sh. Expect
 ### Frappe components used
 - Standard `frappe.ui.Dialog` (with `indicator: "orange"`).
 - `frappe.db.get_list("Server", {status: "Active"}, ["name", "region"])`
-  in `before_show`.
+  fetched before the confirm appears.
+
+**Implementation status (landed):** §1 (only_select + Active filter)
+and §2 (Sync to All confirm with target list) are wired. §3 (sync
+status panel) and §4 (locked fields after sync) are deferred.
 
 ### Fighting Desk?
 No.

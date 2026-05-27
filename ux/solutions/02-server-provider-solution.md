@@ -119,12 +119,17 @@ _"Atlas will SSH to `ipv4_address` as `root` and run
 - `frappe.ui.Dialog` with `fieldtype: "HTML"` rows for the read-only
   preview block.
 - `frappe.warn(title, html, proceed_action, "Provision")` — built-in
-  red confirmation dialog.
+  red confirmation dialog (wrapped by `frappe.atlas.confirm_cost`).
 - New whitelisted method `Server Provider.preview_cost()` returning
   `{region, size, image, monthly_cost_usd, currency}`.
-- Server-name regex via `frappe.utils.validate_name` (already used
-  for Server's autoname) — surfaced as a `description` on the
-  Server Name field.
+- Server-name regex enforced client-side; an unknown DO size falls
+  back to "—" in the preview.
+
+**Implementation status (landed):** §1 and §2 are wired. The dialog
+shows region / size / monthly cost above the Server Name field, blocks
+submit on regex mismatch, and on click hands off to `confirm_cost`.
+The Self-Managed branch keeps its existing IPv4/IPv6 fields and skips
+the cost preview.
 
 ### Fighting Desk?
 No. `frappe.warn` is the standard pattern.

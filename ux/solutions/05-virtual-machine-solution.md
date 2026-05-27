@@ -246,7 +246,15 @@ Terminate confirm:
 
 ### Frappe components used
 - `frm.add_custom_button(label, fn, group?)` + `frm.change_custom_button_type(label, group, "primary"|"danger")`.
-- Custom dialog with text-match enable on the danger button.
+- Custom dialog with text-match enable on the danger button — wrapped
+  by `frappe.atlas.confirm_destructive`.
+
+**Implementation status (landed):** §4 is wired. The lifecycle hierarchy
+follows Pending → Provision (primary), Running → Stop primary +
+Restart secondary, Stopped → Start primary + Restart secondary,
+Terminated → no lifecycle buttons. Terminate lives under Actions ▾ as
+danger and requires the operator to type the VM's 8-char short ID
+before the red button enables.
 
 ### Fighting Desk?
 No.
