@@ -43,16 +43,26 @@ suppress Comments via a small client script:
 ```js
 frappe.ui.form.on(<doctype>, {
     onload(frm) {
-        frm.timeline?.timeline_wrapper?.hide();   // comments + activity
-        frm.sidebar?.hide();                      // right rail
+        frm.page.sidebar.hide();              // right rail
+        frm.page.wrapper.find(".new-timeline, .comment-input-container").hide();
+        // Stretch the main column to fill the room the sidebar left behind.
+        frm.page.wrapper
+            .find(".layout-main-section-wrapper")
+            .removeClass("col-lg-8").addClass("col-lg-12");
     },
 });
 ```
 
-`frm.sidebar.hide()` is a single-line Desk override; we apply it
-across the five doctypes via a shared client script bundled in
-`atlas/public/js/atlas_form_overrides.js` and registered in
-`hooks.py`:
+**Drift note (implementation):** The original spec called out
+`frm.sidebar.hide()` and `frm.timeline.timeline_wrapper.hide()`. Neither
+exists on the Desk objects: the sidebar lives on `frm.page.sidebar` and
+the timeline DOM uses the class `.new-timeline` (with the comment box
+in a sibling `.comment-input-container`). We hide the DOM directly via
+`frm.page.wrapper.find(...)`. Same intent, working selectors.
+
+The override is applied across the five doctypes via a shared client
+script bundled in `atlas/public/js/atlas_form_overrides.js` and
+registered in `hooks.py`:
 
 ```python
 doctype_js = {
