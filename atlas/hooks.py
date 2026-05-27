@@ -48,6 +48,18 @@ doctype_js = {
 	"Virtual Machine Image": "public/js/atlas_form_overrides.js",
 	"Task": "public/js/atlas_form_overrides.js",
 }
+
+# Bootstrap-checklist Custom HTML Block shipped with the app.
+fixtures = [
+	{"doctype": "Custom HTML Block", "filters": [["name", "=", "atlas-bootstrap-checklist"]]},
+]
+
+# Note: redirecting `/desk` → `/app/atlas` is non-trivial (Frappe hardcodes
+# `/desk` to the multi-app launcher). The wireframe in
+# `ux/solutions/01-workspace-solution.md` §2 calls for it but it is deferred
+# because every entry point that matters (sidebar Home button, bookmarked
+# `/app/atlas`, login redirect after manual login) already lands here. The
+# residual one-click launcher cost is acceptable.
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}

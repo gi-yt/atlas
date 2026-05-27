@@ -2,6 +2,14 @@
 
 Maps to [research/01-workspace.md](../research/01-workspace.md).
 
+**Implementation status (landed):** §1 (bootstrap checklist), §3 (Fleet at a
+glance with Pending VMs + Failed Tasks 24h, Recent Tasks quick list), and §4
+(no shortcut row, no Reports & Masters duplication) are wired. §2 (skip the
+multi-app launcher) is deferred — Frappe hardcodes `/desk` to the launcher
+template before `website_redirects` can intercept it; operators reach Atlas
+via the sidebar Home button or a bookmark to `/app/atlas`. The one-click
+launcher cost was judged acceptable rather than fighting Desk further.
+
 ## 1. No empty-state / no zero-to-one guidance
 
 ### Problem
@@ -211,3 +219,79 @@ See §3 — the shortcut row is gone; "Browse" lives at the bottom.
 
 ### Fighting Desk?
 No.
+
+---
+
+## Wireframe (as implemented)
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│ ⌂ / Atlas                                                            •••  │
+├────────────────────────────────────────────────────────────────────────────┤
+│  ┌──────────────────────────────────────────────────────────────────────┐ │
+│  │  Get Atlas running                                       Skip setup  │ │
+│  │  ✓  1. Add a Server Provider                  Open Server Provider   │ │
+│  │  ✓  2. Provision a Server                            Open Server     │ │
+│  │  ✓  3. Add a Virtual Machine Image       Open Virtual Machine Image  │ │
+│  │  ✓  4. Provision a Virtual Machine            Open Virtual Machine   │ │
+│  │  Or run `bench --site <site> execute atlas.bootstrap.run` to seed.   │ │
+│  │  Bootstrap complete ✓  All four steps are done.                      │ │
+│  └──────────────────────────────────────────────────────────────────────┘ │
+│                                                                            │
+│  Fleet at a glance                                                         │
+│  ┌────────────┬────────────────┬──────────────────┬──────────────────┐    │
+│  │ Active     │ Running        │ Pending          │ Failed Tasks     │    │
+│  │ Servers    │ Virtual        │ Virtual          │ (24h)            │    │
+│  │            │ Machines       │ Machines (amber) │ (red)            │    │
+│  │ 1          │ 0              │ 0                │ 0                │    │
+│  └────────────┴────────────────┴──────────────────┴──────────────────┘    │
+│                                                                            │
+│  Recent activity                                                           │
+│  ┌──────────────────────────────────────────────────────────────────────┐ │
+│  │ Recent Tasks                                                         │ │
+│  │ noop.sh                       5 hours ago                  ● Pending │ │
+│  │ Bootstrap · atlas-e2e-...     5 hours ago                  ● Success │ │
+│  │ Bootstrap · atlas-e2e-...     5 hours ago                  ● Success │ │
+│  │ Terminate VM · desk-...       5 hours ago                  ● Success │ │
+│  │                              View List                               │ │
+│  └──────────────────────────────────────────────────────────────────────┘ │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+The legacy left sidebar carries Home + the five doctype links unchanged, so
+the workspace itself drops the redundant **Your Shortcuts** row and the
+**Reports & Masters** card section that used to compete with the sidebar.
+
+## Implementation map
+
+| File | Change |
+| --- | --- |
+| [`atlas/atlas/api/workspace.py`](../../atlas/atlas/api/workspace.py) | New whitelisted `bootstrap_status()` returning the four counts. |
+| [`atlas/atlas/workspace/atlas/atlas.json`](../../atlas/atlas/workspace/atlas/atlas.json) | New content layout: custom_block (checklist) → header → 4 number_cards → header → quick_list. Drops `Your Shortcuts` row and `Reports & Masters` section; clears `shortcuts[]`; adds `quick_lists[]` and `custom_blocks[]`. |
+| [`atlas/atlas/number_card/pending_virtual_machines/`](../../atlas/atlas/number_card/pending_virtual_machines/pending_virtual_machines.json) | New amber-tinted card for stuck Pending VMs. |
+| [`atlas/atlas/number_card/failed_tasks_24h/`](../../atlas/atlas/number_card/failed_tasks_24h/failed_tasks_24h.json) | Painted red so the count draws the eye when > 0. |
+| [`atlas/atlas/number_card/tasks_today/`](../../atlas/atlas/number_card/tasks_today/) | Removed — replaced by the more actionable Pending Virtual Machines card. |
+| [`atlas/fixtures/custom_html_block.json`](../../atlas/fixtures/custom_html_block.json) | Ships the `atlas-bootstrap-checklist` Custom HTML Block (HTML + script + style) loaded by the workspace. |
+| [`atlas/hooks.py`](../../atlas/hooks.py) | Registers the Custom HTML Block as a fixture. |
+
+## Drift
+
+- **§2 (app launcher) deferred.** Frappe's website renderer hardcodes
+  `/desk` before `website_redirects` can intervene
+  ([`apps/frappe/frappe/website/path_resolver.py:34`](../../../frappe/frappe/website/path_resolver.py#L34)).
+  `role_home_page = "/app/atlas"` is treated as a website page lookup
+  (not an SPA route) and yields a 404. The accepted gap: a fresh login
+  on `/` lands on the launcher; one click on the Atlas tile then takes
+  the operator to `/app/atlas`. Bookmark + sidebar Home button both go
+  direct.
+- **Pending VMs colour is static**, not threshold-driven. Frappe's
+  Number Card has no built-in "color when count > 0" support; we tint
+  the cards permanently. Visual draw is still proportional to the
+  count (0 in amber is muted; 3 in amber dominates).
+- **`Skip setup` dismiss has two tiers.** The button writes
+  `atlas_bootstrap_dismissed=1` to user defaults and hides the panel
+  for the current session unconditionally. On the *next* page load the
+  panel comes back if any step is still unsatisfied (the user signal
+  is "I'm bootstrapping via the CLI" — they still want a status
+  glance). Once all four are satisfied the dismiss flag promotes to
+  permanent: the checklist stays hidden across reloads.

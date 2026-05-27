@@ -97,6 +97,39 @@ Connections dashboards (the count tiles for Workloads, Tasks, …) stay
 visible — those *are* useful and Frappe renders them on the form
 itself, not in the right rail.
 
+## The workspace
+
+The Atlas workspace is the operator's home. It is restructured around three
+sections, top-to-bottom:
+
+1. **Bootstrap checklist** — a Custom HTML Block shipped as a fixture
+   (`atlas-bootstrap-checklist`) whose script calls
+   `atlas.atlas.api.workspace.bootstrap_status()` and paints a four-step
+   checklist (Provider → Server → Image → VM). Each step turns green when
+   `frappe.db.count(<doctype>)` is at least one. When all four are
+   satisfied the checklist collapses to a "Bootstrap complete ✓" banner
+   and the operator can dismiss it permanently via a per-user default;
+   until then `Skip setup` hides it for the current session only.
+2. **Fleet at a glance** — four `number_card` blocks: Active Servers,
+   Running Virtual Machines, Pending Virtual Machines (tinted amber to
+   draw the eye when stuck), Failed Tasks (24h) (tinted red). Frappe's
+   Number Card doesn't support threshold-driven colour, so the tint is
+   static; visual weight still scales with the count.
+3. **Recent activity** — a `quick_list` block bound to Task. The last
+   ten Task rows with their status, subject, and relative time, so the
+   operator sees what the fleet is doing without leaving the workspace.
+
+The workspace deliberately drops the "Your Shortcuts" row and the
+"Reports & Masters" card section that earlier duplicated the sidebar.
+The sidebar still carries Home and the five doctype links — that *is*
+the right primitive for navigation, so the workspace doesn't repeat it.
+
+The multi-app launcher (`/desk`, `/app/home`) is *not* hidden: Frappe
+short-circuits `/desk` rendering before `website_redirects` can fire
+([`apps/frappe/frappe/website/path_resolver.py:34`](../../frappe/frappe/website/path_resolver.py#L34)),
+so we accept a one-click cost to enter Atlas from a fresh login.
+Bookmarks and the sidebar Home button hit `/app/atlas` directly.
+
 ## Per-doctype consequences
 
 ### Server Provider
