@@ -1,7 +1,11 @@
 # Bootstrapping a server
 
-A server starts as a vanilla Ubuntu 24.04 droplet. Bootstrap is the task that
-turns it into a Firecracker host.
+A server starts as a vanilla Ubuntu host. Ubuntu 24.04 is the supported
+target (this is what the DigitalOcean image gives us). Ubuntu 26.04 is
+known to work on Self-Managed hosts but is not part of the regression
+suite; if the bootstrap script breaks on 26.04, it is a bug we will fix.
+Bootstrap is the task that turns whatever Ubuntu the operator gave us
+into a Firecracker host.
 
 ## The script
 
@@ -72,37 +76,79 @@ appear on stderr of the task because we run the SSH wrapper with `-x`.
 
 ## Provisioning a server end-to-end
 
-`Server Provider.provision_server(server_name)` (whitelisted, called from
-the button) is sync from the operator's perspective for the cheap part
-and async for the slow part:
+`Server Provider.provision_server(...)` is whitelisted and called from the
+**Provision Server** button. Both provider types funnel into the same
+`finish_provisioning` step that actually runs bootstrap.
+
+### DigitalOcean
+
+Signature: `provision_server(server_name)`. Sync for the cheap part,
+async for the slow part:
 
 ```
 1. Validate server_name is unique.
 2. DigitalOceanClient.create_droplet(...).
 3. Insert a Server row with status = "Pending" and provider_resource_id =
    droplet["id"] (region, size copied from provider defaults).
-4. frappe.enqueue("...finish_provisioning", queue="long",
-                  server_name=..., droplet_id=...).
+4. frappe.enqueue("...finish_provisioning", queue="long", server_name=...).
 5. Return the server name immediately.
 ```
 
-`finish_provisioning(server_name, droplet_id)` runs in the long queue:
+The `finish_provisioning(server_name)` worker:
 
 ```
-1. wait_for_active(droplet_id, timeout=600s).
-2. Write ipv4_address, ipv6_address, ipv6_prefix, and
+1. Load Server, read provider_resource_id from the row.
+2. wait_for_active(provider_resource_id, timeout=600s).
+3. Write ipv4_address, ipv6_address, ipv6_prefix, and
    ipv6_virtual_machine_range (the /124 carved from the /64) onto the Server.
-3. status = "Bootstrapping". Save.
-4. wait_for_ssh(connection_for_server(server), timeout=300s).
-5. server.bootstrap()  — synchronous inside the worker; no nested enqueue.
-6. On success: status = "Active". On any exception: status = "Broken"
+4. status = "Bootstrapping". Save.
+5. wait_for_ssh(connection_for_server(server), timeout=300s).
+6. server.bootstrap()  — synchronous inside the worker; no nested enqueue.
+7. On success: status = "Active". On any exception: status = "Broken"
    and re-raise so the Task row carries the failure.
 ```
 
-Failure handling is symmetric: a `Broken` server can be re-bootstrapped by
-clicking **Bootstrap** on the form because `bootstrap-server.sh` is
-idempotent. The droplet is left intact for the operator to delete in DO if
-they choose.
+The worker takes only `server_name`; the droplet id lives on the row, so
+re-running the worker (idempotency check, retry) does not need the caller
+to remember it.
+
+### Self-Managed
+
+Signature: `provision_server(server_name, ipv4_address, ipv6_address,
+ipv6_prefix, ipv6_virtual_machine_range)`. There is no droplet to create
+and nothing to wait for — the host already exists:
+
+```
+1. Validate server_name is unique.
+2. Insert a Server row with status = "Pending", provider_resource_id =
+   "" (empty), region / size empty, and the IPv4 / IPv6 fields copied
+   from the dialog inputs.
+3. frappe.enqueue("...finish_provisioning", queue="long", server_name=...).
+4. Return the server name immediately.
+```
+
+`finish_provisioning` on a Self-Managed server skips the "wait for the
+provider API" and "write networking fields" steps (they were already
+written at insert) and goes straight to:
+
+```
+1. status = "Bootstrapping". Save.
+2. wait_for_ssh(connection_for_server(server), timeout=300s).
+3. server.bootstrap().
+4. On success: status = "Active". On any exception: status = "Broken".
+```
+
+The worker branches on `server.provider.provider_type`. The two paths
+share `wait_for_ssh` and `server.bootstrap()`; only the wait-for-API and
+write-networking-fields steps are DO-specific.
+
+### Common: failure handling
+
+A `Broken` server can be re-bootstrapped by clicking **Bootstrap** on the
+form because `bootstrap-server.sh` is idempotent. For DigitalOcean the
+droplet is left intact for the operator to delete in DO if they choose.
+For Self-Managed the host is the operator's problem; Atlas never touches
+it beyond SSH.
 
 ### Idempotency
 

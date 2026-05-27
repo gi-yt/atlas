@@ -105,10 +105,6 @@ behavior; they just keep doors open.
 - **CLI**. A small `atlas` CLI that calls Frappe's REST API. The DocType
   methods we expose for buttons become the CLI's commands. Pure additive.
 
-- **Bare-metal provider**. A second `provider_type` that doesn't call DO —
-  the operator enters IP, SSH key, region. Provisioning becomes "type in
-  what already exists". Additive.
-
 - **Multi-arch**. Drop the `ARCHITECTURE` hard-coding; allow `aarch64`. The
   Firecracker CI publishes aarch64 artifacts. Additive on
   `Server` and the image record.
@@ -154,3 +150,8 @@ behavior; they just keep doors open.
   Documented the DigitalOcean /124 routing constraint. VMs are now UUIDs
   and keep their name on archive. Shell scripts live in `atlas/scripts/`,
   not embedded in markdown.
+- `v0.3` — added the `Self-Managed` provider type. `Provision Server`
+  now takes IPv4/IPv6 inputs for self-managed hosts instead of calling a
+  cloud API. `ipv6_virtual_machine_range` is no longer assumed to be a
+  /124 — any prefix length is accepted. Ubuntu 26.04 is acknowledged as
+  a working (but untested) host OS.

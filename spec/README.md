@@ -11,7 +11,8 @@ keep it the source of truth.
 
 ## Goals
 
-- Track servers (the hosts that run Firecracker).
+- Track servers (the hosts that run Firecracker), whether provisioned through
+  a cloud API or registered after the operator built them by hand.
 - Track virtual machines that run on those servers.
 - Bootstrap a fresh server so it can host virtual machines.
 - Provision, start, stop, and delete Ubuntu 24.04 Firecracker virtual machines.
@@ -150,15 +151,15 @@ module only when the operator gets a new button.
 
 ### Entry points
 
-- `bench --site atlas.local execute atlas.tests.e2e.run_all` — runs
+- `bench --site atlas.tests.local execute atlas.tests.e2e.run_all` — runs
   every use case that takes a server against **one shared bootstrapped
   droplet** (`reuse=True, keep=True`), then deletes it at the end. The
   regression entry point.
-- `bench --site atlas.local execute atlas.tests.e2e.run_all_coverage` —
+- `bench --site atlas.tests.local execute atlas.tests.e2e.run_all_coverage` —
   same, plus the dedicated-droplet use cases
   (`digitalocean_client.run`, `server_provisioning.run`). Cost: three
   billable droplets.
-- `bench --site atlas.local execute atlas.tests.e2e.use_cases.<use_case>.run`
+- `bench --site atlas.tests.local execute atlas.tests.e2e.use_cases.<use_case>.run`
   — happy-path-plus-validation for one use case. Use cases that need
   the shared bootstrapped server expose `run_against_shared(reuse=True,
   keep=True)` as well; they use the `phase()` context manager from

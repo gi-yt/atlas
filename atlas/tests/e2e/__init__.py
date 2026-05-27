@@ -13,9 +13,9 @@ end. `run_all_coverage()` additionally runs the dedicated-droplet use cases
 Use cases that bring their own droplet semantics (or no droplet at all) are
 not orchestrated here — they are invoked directly:
 
-    bench --site atlas.local execute atlas.tests.e2e.use_cases.ssh_primitive.run
-    bench --site atlas.local execute atlas.tests.e2e.use_cases.digitalocean_client.run
-    bench --site atlas.local execute atlas.tests.e2e.use_cases.server_provisioning.run
+    bench --site atlas.tests.local execute atlas.tests.e2e.use_cases.ssh_primitive.run
+    bench --site atlas.tests.local execute atlas.tests.e2e.use_cases.digitalocean_client.run
+    bench --site atlas.tests.local execute atlas.tests.e2e.use_cases.server_provisioning.run
 """
 
 import time

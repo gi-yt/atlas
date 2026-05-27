@@ -26,22 +26,35 @@ Notation in the Form layout sections:
 
 ## Server Provider
 
-One row per cloud account. Only `DigitalOcean` is implemented in this
-iteration.
+One row per source of servers. Two provider types are implemented:
+
+- `DigitalOcean` — Atlas calls the DO API to create the droplet.
+- `Self-Managed` — the operator brings their own host. Atlas does not
+  create or destroy anything; the provider only carries the SSH
+  credentials.
+
+The required-ness of every field below depends on `provider_type`. The
+"Reqd" column lists which types require it.
 
 ### Fields
 
-| Field             | Type     | Reqd | Read-only | Default | Notes                                              |
-| ----------------- | -------- | ---- | --------- | ------- | -------------------------------------------------- |
-| `provider_name`   | Data     | Y    |           |         | Primary key. Unique. e.g. `digitalocean-production`. |
-| `provider_type`   | Select   | Y    |           |         | Options: `DigitalOcean`.                           |
-| `is_active`       | Check    |      |           | 1       |                                                    |
-| `api_token`       | Password | Y    |           |         | DigitalOcean personal access token.                |
-| `ssh_key_id`      | Data     | Y    |           |         | Fingerprint of the SSH key pre-loaded on droplets. |
-| `ssh_private_key` | Password | Y    |           |         | Matching private key. Atlas uses this to SSH in.   |
-| `default_region`  | Data     | Y    |           |         | e.g. `blr1`.                                       |
-| `default_size`    | Data     | Y    |           |         | Must support nested virtualization.                |
-| `default_image`   | Data     | Y    |           |         | e.g. `ubuntu-24-04-x64`.                           |
+| Field             | Type     | Reqd                  | Read-only | Default | Notes                                              |
+| ----------------- | -------- | --------------------- | --------- | ------- | -------------------------------------------------- |
+| `provider_name`   | Data     | All                   |           |         | Primary key. Unique. e.g. `digitalocean-production`, `home-lab`. |
+| `provider_type`   | Select   | All                   |           |         | Options: `DigitalOcean`, `Self-Managed`. `set_only_once`. |
+| `is_active`       | Check    |                       |           | 1       |                                                    |
+| `api_token`       | Password | `DigitalOcean`        |           |         | DigitalOcean personal access token. Ignored for `Self-Managed`. |
+| `ssh_key_id`      | Data     | `DigitalOcean`        |           |         | Fingerprint of the SSH key pre-loaded on droplets. Ignored for `Self-Managed` (no API to register the key with). |
+| `ssh_private_key` | Password | All                   |           |         | Matching private key. Atlas uses this to SSH in as `root`. For `Self-Managed`, the public half must already be in the host's `authorized_keys`. |
+| `default_region`  | Data     | `DigitalOcean`        |           |         | e.g. `blr1`. Ignored for `Self-Managed`.           |
+| `default_size`    | Data     | `DigitalOcean`        |           |         | Must support nested virtualization. Ignored for `Self-Managed`. |
+| `default_image`   | Data     | `DigitalOcean`        |           |         | e.g. `ubuntu-24-04-x64`. Ignored for `Self-Managed`. |
+
+The controller's `validate` enforces the table: switching `provider_type`
+is forbidden (the field is `set_only_once`); the DO-only fields are
+required when `provider_type = DigitalOcean` and otherwise left blank.
+Self-Managed rows that accidentally carry a DO field are not rejected —
+the field is ignored.
 
 ### Form layout
 
@@ -59,6 +72,10 @@ default_region
   default_image
 ```
 
+The DigitalOcean-only sections stay on the form for both types but the
+fields inside them are non-required for `Self-Managed`. (Hiding them
+conditionally is a desk-only nicety; the spec does not require it.)
+
 ### List view
 
 - Columns (left to right): `provider_name`, `provider_type`, `is_active`,
@@ -67,9 +84,18 @@ default_region
 
 ### Buttons
 
-- **Provision Server** — opens a dialog asking for a `server_name`; creates a
-  droplet, inserts a `Server`, runs the bootstrap task.
-- **Test Connection** — pings the DigitalOcean account endpoint.
+- **Provision Server** — opens a dialog. The dialog's fields depend on
+  `provider_type`:
+  - `DigitalOcean`: one field, `server_name`. Atlas calls the DO API,
+    inserts the `Server`, runs the bootstrap task. Region, size, image
+    come from the provider defaults.
+  - `Self-Managed`: `server_name`, `ipv4_address`, `ipv6_address`,
+    `ipv6_prefix`, `ipv6_virtual_machine_range`. Atlas inserts the
+    `Server` directly with the operator-supplied values and runs the
+    bootstrap task. No API call. See
+    [03-bootstrapping.md](./03-bootstrapping.md).
+- **Test Connection** — `DigitalOcean` only: pings the DO account
+  endpoint. Hidden for `Self-Managed`.
 
 ---
 
@@ -84,22 +110,26 @@ One row per host. Name is operator-chosen (e.g. `server-blr1-01`).
 | `server_name`                  | Data                   | Y    |           |         | Primary key. Unique.                                           |
 | `provider`                     | Link → Server Provider | Y    |           |         |                                                                |
 | `status`                       | Select                 | Y    |           | Pending | `Pending`, `Bootstrapping`, `Active`, `Draining`, `Broken`, `Archived`. |
-| `provider_resource_id`         | Data                   |      | Y         |         | DigitalOcean droplet id.                                       |
-| `region`                       | Data                   |      | Y         |         | Copied from provider defaults at insert.                       |
-| `size`                         | Data                   |      | Y         |         | Copied from provider defaults at insert.                       |
-| `ipv4_address`                 | Data                   |      | Y         |         | The SSH endpoint. Set by `finish_provisioning`.                |
-| `ipv6_address`                 | Data                   |      | Y         |         | The server's own IPv6 (typically `::1` of /64; whatever DO assigns). |
-| `ipv6_prefix`                  | Data                   |      | Y         |         | The /64 routed to this server.                                 |
-| `ipv6_virtual_machine_range`   | Data                   |      | Y         |         | The /124 carved from the /64 we hand out from.                 |
+| `provider_resource_id`         | Data                   |      | Y         |         | DigitalOcean droplet id. Empty for `Self-Managed` providers.   |
+| `region`                       | Data                   |      | Y         |         | Copied from provider defaults at insert. Empty for `Self-Managed`. |
+| `size`                         | Data                   |      | Y         |         | Copied from provider defaults at insert. Empty for `Self-Managed`. |
+| `ipv4_address`                 | Data                   |      | Y         |         | The SSH endpoint. Set by `finish_provisioning` (DigitalOcean) or by the operator at provision time (Self-Managed). |
+| `ipv6_address`                 | Data                   |      | Y         |         | The server's own IPv6. Whatever the host actually answers on. |
+| `ipv6_prefix`                  | Data                   |      | Y         |         | The full prefix routed to this server (typically a /64). Informational. |
+| `ipv6_virtual_machine_range`   | Data                   |      | Y         |         | The subnet Atlas allocates VM addresses from. Any prefix length: `/64`, `/80`, `/124`, ... For `DigitalOcean` this is the /124 derived from the /64 (see [06-networking.md](./06-networking.md)). For `Self-Managed` the operator types it in; it can be the whole extra subnet the host already has routed to it. |
 | `architecture`                 | Data                   |      | Y         |         | Set by bootstrap.                                              |
 | `firecracker_version`          | Data                   |      | Y         |         | Set by bootstrap.                                              |
 | `kernel_version`               | Data                   |      | Y         |         | Set by bootstrap.                                              |
 | `notes`                        | Text                   |      |           |         |                                                                |
 
-The split between `ipv6_prefix` (/64) and `ipv6_virtual_machine_range` (/124)
-is because DigitalOcean assigns a /64 but only the first /124 is actually
-routable inside DO's fabric. We hand out addresses inside the /124 only.
-Details in [06-networking.md](./06-networking.md).
+The split between `ipv6_prefix` and `ipv6_virtual_machine_range` is
+because on DigitalOcean a /64 is advertised but only the first /124 is
+actually routable; we hand out addresses inside that /124 only. On
+Self-Managed hosts the operator might have an entire extra /64 (or /80,
+or /48) routed to the box and so the VM range can be much larger than
+/124. Atlas treats `ipv6_virtual_machine_range` as "the subnet I am
+allowed to allocate from" and does not try to derive it. Details in
+[06-networking.md](./06-networking.md).
 
 ### Form layout
 

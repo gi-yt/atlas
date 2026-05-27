@@ -36,8 +36,9 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Provider Type",
-   "options": "DigitalOcean",
-   "reqd": 1
+   "options": "DigitalOcean\nSelf-Managed",
+   "reqd": 1,
+   "set_only_once": 1
   },
   {
    "fieldname": "column_break_header",
@@ -59,14 +60,12 @@
   {
    "fieldname": "api_token",
    "fieldtype": "Password",
-   "label": "API Token",
-   "reqd": 1
+   "label": "API Token"
   },
   {
    "fieldname": "ssh_key_id",
    "fieldtype": "Data",
-   "label": "SSH Key ID",
-   "reqd": 1
+   "label": "SSH Key ID"
   },
   {
    "fieldname": "ssh_private_key",
@@ -83,8 +82,7 @@
    "fieldname": "default_region",
    "fieldtype": "Data",
    "in_list_view": 1,
-   "label": "Default Region",
-   "reqd": 1
+   "label": "Default Region"
   },
   {
    "fieldname": "column_break_defaults",
@@ -93,18 +91,16 @@
   {
    "fieldname": "default_size",
    "fieldtype": "Data",
-   "label": "Default Size",
-   "reqd": 1
+   "label": "Default Size"
   },
   {
    "fieldname": "default_image",
    "fieldtype": "Data",
-   "label": "Default Image",
-   "reqd": 1
+   "label": "Default Image"
   }
  ],
  "links": [],
- "modified": "2026-05-27 00:00:00.000000",
+ "modified": "2026-05-28 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Atlas",
  "name": "Server Provider",

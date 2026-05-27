@@ -17,14 +17,14 @@ bench install-app atlas
 
 ## Verify locally
 
-After installing on an `atlas.local` site, set the DigitalOcean
+After installing on an `atlas.tests.local` site, set the DigitalOcean
 credentials and run the shared-droplet end-to-end suite:
 
 ```bash
-bench --site atlas.local set-config -p atlas_do_token <DO_TOKEN>
-bench --site atlas.local set-config -p atlas_ssh_key_id <FINGERPRINT>
-bench --site atlas.local set-config -p atlas_ssh_private_key "$(cat ~/.ssh/atlas-test)"
-bench --site atlas.local execute atlas.tests.e2e.run_all
+bench --site atlas.tests.local set-config -p atlas_do_token <DO_TOKEN>
+bench --site atlas.tests.local set-config -p atlas_ssh_key_id <FINGERPRINT>
+bench --site atlas.tests.local set-config -p atlas_ssh_private_key "$(cat ~/.ssh/atlas-test)"
+bench --site atlas.tests.local execute atlas.tests.e2e.run_all
 ```
 
 The run takes ~9 minutes and creates one billable droplet that is

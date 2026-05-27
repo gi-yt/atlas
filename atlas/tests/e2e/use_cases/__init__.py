@@ -14,6 +14,6 @@ one billable droplet. The dedicated-droplet modules
 ([digitalocean_client](./digitalocean_client.py),
 [server_provisioning](./server_provisioning.py)) are invoked directly:
 
-    bench --site atlas.local execute atlas.tests.e2e.use_cases.digitalocean_client.run
-    bench --site atlas.local execute atlas.tests.e2e.use_cases.server_provisioning.run
+    bench --site atlas.tests.local execute atlas.tests.e2e.use_cases.digitalocean_client.run
+    bench --site atlas.tests.local execute atlas.tests.e2e.use_cases.server_provisioning.run
 """

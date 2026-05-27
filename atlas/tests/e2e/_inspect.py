@@ -8,7 +8,7 @@ def dump_recent_tasks(server_name: str | None = None, limit: int = 20) -> None:
 
 	With `server_name=None`, lists across all servers. Provides the truncated
 	stdout/stderr view that's useful from the operator console (e.g. via
-	`bench --site atlas.local execute atlas.tests.e2e._inspect.dump_recent_tasks`).
+	`bench --site atlas.tests.local execute atlas.tests.e2e._inspect.dump_recent_tasks`).
 	"""
 	filters: dict = {"server": server_name} if server_name else {}
 	tasks = frappe.get_all(

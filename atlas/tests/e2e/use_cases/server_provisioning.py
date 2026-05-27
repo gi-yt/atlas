@@ -161,6 +161,6 @@ def _check_finish_provisioning_idempotent(server) -> None:
 	from atlas.atlas.doctype.server_provider.server_provider import finish_provisioning
 
 	assert server.provider_resource_id, "shared server has no provider_resource_id"
-	finish_provisioning(server.name, int(server.provider_resource_id))
+	finish_provisioning(server.name)
 	server.reload()
 	assert server.status == "Active", server.status

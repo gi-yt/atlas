@@ -11,7 +11,11 @@ per-droplet — to give each VM its own v4 we'd need NAT or paid floating IPs.
 For the building block we sidestep the v4 question entirely. A future
 "egress" layer can NAT64 from above Atlas.
 
-## What DigitalOcean actually gives us
+## What the host actually gives us
+
+This depends on the provider type.
+
+### DigitalOcean
 
 DO advertises a /64 to the droplet, but only a **/124 (16 addresses) is
 usable** for onward routing — addresses outside that /124 are not reachable
@@ -30,6 +34,22 @@ which leaves 15 for VMs. That is enough for the size of droplet we're using
 in this iteration (`s-2vcpu-4gb-intel` realistically fits 5–10 VMs anyway).
 When we move to bigger metal, we will revisit the addressing scheme.
 
+### Self-Managed
+
+The operator tells Atlas, at provision time, exactly which prefix is
+available for VM addresses. Atlas does not derive it and does not assume
+any specific prefix length:
+
+- `Server.ipv6_prefix` is informational — typically the full prefix
+  routed to the host (e.g. a /64).
+- `Server.ipv6_virtual_machine_range` is what Atlas actually allocates
+  from. It can be a /124 (matching the DO model), a /96, an /80, a full
+  /64, or anything else the operator's upstream has given them. The
+  allocator below does not care about the length.
+
+A Self-Managed host with an extra /64 routed to it lifts the 15-VM cap
+that constrains DO droplets.
+
 ## Allocation
 
 Sequential, scoped per server:
@@ -42,11 +62,13 @@ next                        = ::4                # ::4 is back in the pool
 
 `::1` is reserved for the host. We start at `::2`. The algorithm scans
 existing `Virtual Machine.ipv6_address` rows for the server whose status is
-not `Terminated`, and picks the lowest unused address.
+not `Terminated`, and picks the lowest unused address inside
+`ipv6_virtual_machine_range` (whatever its prefix length).
 
-When the /124 fills up with live VMs, provisioning fails with "no IPv6
+When the range fills up with live VMs, provisioning fails with "no IPv6
 capacity". The operator either terminates old VMs (immediately releasing
-their addresses) or provisions a new server.
+their addresses) or provisions a new server. On a DigitalOcean /124 this
+ceiling is 15; on a Self-Managed /64 it is effectively unbounded.
 
 Terminated VMs release their address. The audit trail still lives in the
 `Virtual Machine` row (status=Terminated, ipv6_address recorded at the
@@ -81,13 +103,19 @@ net.ipv6.conf.default.forwarding = 1
 net.ipv6.conf.all.proxy_ndp = 1
 ```
 
-`proxy_ndp` is the trick that makes the whole scheme work. Each VM has its
-address routed to a per-VM tap device, but DigitalOcean's upstream router
-asks NDP "who has 2a03:b0c0:abcd:1234::2?" on the uplink (`eth0`). With
-proxy NDP enabled and an explicit `ip -6 neigh add proxy` entry on the
-uplink for each VM address, the host answers on the VM's behalf. The
-upstream router delivers to the host MAC; the host's route table sends it
-out the right tap.
+`proxy_ndp` is the trick that makes the DigitalOcean scheme work. Each
+VM has its address routed to a per-VM tap device, but DO's upstream
+router asks NDP "who has 2a03:b0c0:abcd:1234::2?" on the uplink (`eth0`).
+With proxy NDP enabled and an explicit `ip -6 neigh add proxy` entry on
+the uplink for each VM address, the host answers on the VM's behalf.
+The upstream router delivers to the host MAC; the host's route table
+sends it out the right tap.
+
+On Self-Managed hosts where the entire `ipv6_virtual_machine_range` is
+**routed** to the host (not advertised on-link), the upstream router
+already knows where to send those packets and proxy-NDP is a no-op.
+`vm-network-up.sh` still adds the proxy-NDP entry — it costs nothing on
+a routed prefix and keeps the script identical across providers.
 
 We also create one nftables table (`inet atlas`) with one `forward` chain.
 The table is **not** persisted to `/etc/nftables.conf`; instead

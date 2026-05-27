@@ -23,7 +23,7 @@
               |                                       |
    +----------v----------+                +-----------v---------+
    |   Server A          |                |   Server B          |
-   |   (DO droplet)      |                |   (DO droplet)      |
+   |   (DO droplet)      |                |   (self-managed)    |
    |                     |                |                     |
    |  /var/lib/atlas/    |                |  /var/lib/atlas/    |
    |    images/          |                |    images/          |
@@ -51,20 +51,31 @@ uploads the script, runs it, and records the result.
 
 ### Server Provider
 
-For this iteration there is one provider: DigitalOcean. The
-`Server Provider` document stores the DO API token and the defaults Atlas
-uses to create droplets. The provider knows how to create and delete a
-droplet. It does nothing else.
+Two provider types are implemented:
 
-The provider abstraction exists so we can later add a "bare metal" provider
-without changing how virtual machines are managed. It is not designed for
-multi-cloud; only one type is implemented at a time.
+- **DigitalOcean.** The `Server Provider` document stores the DO API token
+  and the defaults Atlas uses to create droplets. The provider knows how to
+  create and delete a droplet.
+- **Self-Managed.** The operator has already built the host (any cloud,
+  bare metal, a server in a cupboard). The provider document only stores
+  the SSH credentials Atlas uses to reach those hosts. There is no API to
+  call; "Provision Server" just registers a `Server` row pointing at an
+  IPv4 the operator types in, then bootstraps it.
+
+Both types end up at the same place — a `Server` row Atlas can SSH into —
+and from there every other DocType behaves identically. The provider
+abstraction is not designed for multi-cloud; it is designed to keep the
+"how did this host come to exist?" question out of the rest of the
+system.
 
 ### Server
 
-A `Server` document represents one droplet. It is created by clicking
-"Provision Server" on a `Server Provider`, which calls the DO API, inserts a
-`Server` document, waits for SSH, then bootstraps the host.
+A `Server` document represents one host. It is created by clicking
+"Provision Server" on a `Server Provider`. For `DigitalOcean` providers
+this calls the DO API and waits for the droplet to come up; for
+`Self-Managed` providers the operator types in the IP and IPv6 details of
+a host they have already built. Both paths end the same way: insert the
+`Server` row, wait for SSH, then bootstrap the host.
 
 ### Virtual Machine
 
