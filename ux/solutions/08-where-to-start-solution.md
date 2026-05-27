@@ -178,16 +178,33 @@ Once the three above are in, the next-best uses of effort are:
 
 1. **Workspace bootstrap checklist + dashboard rebuild**
    ([01-workspace-solution.md §1, §3, §4](./01-workspace-solution.md)).
-   High first-impression impact for new operators.
+   High first-impression impact for new operators. **(Landed.)**
 2. **Hide the app launcher** (skip `/desk`, land on `/app/atlas` directly).
-   One-line `hooks.py` change.
+   One-line `hooks.py` change. **(Deferred — see 01-workspace §2.)**
 3. **VM-form upgrades** — short-ID list rendering, IPv6 copy chip,
    capacity preview, terminated-VM "Re-provision as new" action.
+   **(Landed: list short-ID + IPv6 copy chip [05 §1], Pending IPv6 chip
+   + auto-expand [05 §2], SSH command + copy [05 §5], terminated
+   Re-provision + Delete record [05 §3]. Capacity preview / size
+   presets / creation form polish [05 §6] deferred.)**
 4. **Image sync status panel** so the operator can see "which servers
-   have this image?" without grepping Task history.
+   have this image?" without grepping Task history. **(Landed: per-active
+   server table + Sync now shortcut [04 §3].)**
+5. **VM status repair on provision failure** so failed provisions stop
+   leaving the VM stuck in Pending. **(Landed: Task.on_update
+   propagates Failure → VM Failed [06 §5].)**
+6. **Server form running-Task headline + Recent Tasks panel** so
+   in-flight activity is visible without leaving the Server form.
+   **(Landed [03 §2].)**
+7. **Image kernel/rootfs lock after first successful sync** so editing
+   doesn't silently invalidate the audit trail. **(Landed [04 §4].)**
 
 After that the long tail of polish: ANSI colours, autocomplete on
-provider region/size/image, etc.
+provider region/size/image, VM-creation form size presets and capacity
+preview ([05 §6](./05-virtual-machine-solution.md#6-creation-form-is-too-generic)),
+provider dashboard indicators ([02 §4](./02-server-provider-solution.md#4-api-token-and-ssh-private-key-unverifiable))
+and live autocomplete for default region/size/image
+([02 §5](./02-server-provider-solution.md#5-default-regionsizeimage-are-free-text-data-fields)).
 
 ## What deliberately does not land
 

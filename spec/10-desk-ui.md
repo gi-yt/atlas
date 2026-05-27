@@ -154,6 +154,12 @@ Bookmarks and the sidebar Home button hit `/app/atlas` directly.
 - **Reboot** is danger. It demands the operator type the server name
   in a `confirm_destructive` dialog that also shows the running-VM
   count.
+- A yellow **headline alert** announces any Pending/Running Task on
+  this server, linking to the Task form. The alert refreshes on the
+  `task_update` realtime event.
+- A **Recent Tasks** dashboard section lists the last five Tasks for
+  this server with status pill and relative time. Same realtime hook
+  refreshes the list.
 
 ### Virtual Machine
 
@@ -161,11 +167,37 @@ Bookmarks and the sidebar Home button hit `/app/atlas` directly.
   - `Pending` / `Failed` → **Provision** primary.
   - `Stopped` → **Start** primary, **Restart** secondary.
   - `Running` → **Stop** primary, **Restart** secondary.
-  - `Terminated` → no lifecycle buttons.
+  - `Terminated` → no lifecycle buttons; instead **Re-provision as
+    new** is primary and **Delete record** is danger (under
+    `Actions ▾`).
 - **Terminate** is always available (until status = Terminated),
   under `Actions ▾`, danger. The `confirm_destructive` dialog shows
   IPv6, image, server, and demands the operator type the VM's 8-char
   short ID.
+- The form header carries an `IPv6 [...]` chip — clicking copies
+  `ssh root@<ipv6>` to the clipboard. The Networking section
+  auto-expands while the VM is `Pending` so the address is visible
+  before Provision.
+- The Access section renders the same `ssh root@<ipv6>` command in a
+  monospace box with a copy button (the IPv6 is the only stable
+  identifier outside the desk).
+- **Terminated** records render a red dashboard headline
+  (`⛔ Terminated <when>. This record is kept for audit; the VM no
+  longer exists.`); the **Re-provision as new** button opens a new VM
+  form with the same server / image / vcpus / memory / disk / ssh key
+  and a `(clone)`-suffixed description pre-filled.
+- The list view shows `<description> · <short id>` in the subject
+  column, an IPv6 copy chip, and status-coloured indicators
+  (`Pending` orange, `Running` green, `Stopped`/`Terminated` grey,
+  `Failed` red).
+- When the linked provision Task ends in `Failure`, the
+  Task.on_update hook flips the VM's `status` from `Pending`/`Running`
+  to `Failed` via `frappe.db.set_value` and publishes a
+  `virtual_machine_update` realtime event. The VM form subscribes and
+  reloads. For `Pending`/`Failed` VMs the client also renders a red
+  intro that links to the most recent provision-vm.sh Failure Task —
+  the operator clicks the link, reads the error, and clicks Provision
+  again to retry.
 
 ### Virtual Machine Image
 
@@ -178,6 +210,19 @@ Bookmarks and the sidebar Home button hit `/app/atlas` directly.
   out it shows a `confirm_cost` dialog listing the active servers and
   reminding the operator each download fetches kernel + rootfs from
   the public internet.
+- A **Sync Status** table at the top of the form lists each Active
+  server with the last successful `sync-image.sh` Task for this image
+  (`<when ago>` plus a clickable Task name). Servers never synced show
+  **never** and a **Sync now →** shortcut that opens the Sync to
+  Server dialog with the server pre-filled.
+- Once any successful sync exists for an image, the kernel and rootfs
+  fields (`kernel_url`, `kernel_filename`, `kernel_sha256`,
+  `rootfs_url`, `rootfs_filename`, `rootfs_sha256`) are **locked**.
+  Server-side `validate` throws on any change; the client mirrors the
+  lock via `read_only` and shows a blue intro: "This image has been
+  synced. To change kernel or rootfs, create a new image
+  (e.g. `<name>-v2`)." Editing in place would silently invalidate prior
+  audit rows that reference a different digest.
 
 ### Task
 
@@ -200,6 +245,10 @@ Bookmarks and the sidebar Home button hit `/app/atlas` directly.
   (or Server when the Task has no VM) — so the operator can hop
   between Tasks for one workload without navigating through the VM
   form.
+- `Task.on_update` propagates status to linked records. For Failure
+  with `script = provision-vm.sh` it flips the linked VM's status to
+  `Failed` and publishes a `virtual_machine_update` realtime event —
+  the VM form re-renders without manual refresh.
 
 ## Why this isn't a custom SPA
 
