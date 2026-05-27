@@ -112,9 +112,9 @@ to the server, verifies the SHA-256, and runs sync-image.sh. Expect
 - `frappe.db.get_list("Server", {status: "Active"}, ["name", "region"])`
   fetched before the confirm appears.
 
-**Implementation status (landed):** §1 (only_select + Active filter)
-and §2 (Sync to All confirm with target list) are wired. §3 (sync
-status panel) and §4 (locked fields after sync) are deferred.
+**Implementation status (landed):** §1 (only_select + Active filter),
+§2 (Sync to All confirm with target list), §3 (sync status panel), and
+§4 (locked fields after sync) are wired.
 
 ### Fighting Desk?
 No.
@@ -196,10 +196,15 @@ dialog with the server pre-filled.
 
 ### Frappe components used
 - New whitelisted method `Virtual Machine Image.sync_status()`.
-- HTML field in the form (no doctype-schema change required — the
-  client script renders into a `frm.dashboard` HTML region or
-  `frm.fields_dict["...html_field..."]`). Easier alternative: add a
-  small "Sync Status" Section with an HTML field to the doctype JSON.
+- A small "Sync Status" Section with a `sync_status_html` HTML field on
+  the doctype JSON, populated client-side from the whitelisted method.
+
+**Implementation status (landed):** §3 is wired. The Image form renders
+a per-active-server table above the Kernel section showing the last
+successful sync for each Active server, with relative time and a link
+to the Task. Servers with no successful sync show **never** and a
+**Sync now →** shortcut that opens the Sync to Server dialog with the
+server pre-filled.
 
 ### Fighting Desk?
 No.
@@ -281,6 +286,13 @@ script sets each locked field to read-only and renders a small intro:
 - `frm.set_df_property(fieldname, "read_only", 1)` on the client.
 - Server-side `validate` enforces the same; client only mirrors UX.
 - `frm.set_intro(html, "blue")`.
+
+**Implementation status (landed):** §4 is wired. Server-side `validate`
+throws on any change to `kernel_url`/`kernel_filename`/`kernel_sha256`/
+`rootfs_url`/`rootfs_filename`/`rootfs_sha256` once a successful
+`sync-image.sh` Task references the image. Client-side, the same six
+fields flip to `read_only` and a blue intro tells the operator to
+create a new image (`<image>-v2`) instead of editing in place.
 
 ### Fighting Desk?
 No.

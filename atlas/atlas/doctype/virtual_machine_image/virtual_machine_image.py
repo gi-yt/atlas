@@ -1,6 +1,15 @@
 import frappe
 from frappe.model.document import Document
 
+LOCKED_AFTER_SYNC = (
+	"kernel_url",
+	"kernel_filename",
+	"kernel_sha256",
+	"rootfs_url",
+	"rootfs_filename",
+	"rootfs_sha256",
+)
+
 
 class VirtualMachineImage(Document):
 	def validate(self) -> None:
@@ -8,6 +17,84 @@ class VirtualMachineImage(Document):
 			value = self.get(field) or ""
 			if value and not value.startswith("https://"):
 				frappe.throw(f"{field} must be an https:// URL, got: {value}")
+		self._enforce_locked_after_sync()
+
+	def _enforce_locked_after_sync(self) -> None:
+		"""Once a successful sync exists, kernel/rootfs fields are frozen.
+
+		Editing them post-sync silently invalidates the audit trail (old Task
+		rows record one digest; the image row now claims another). The fix is
+		to create a new image (`ubuntu-24.04-v2`) instead.
+		"""
+		if self.is_new():
+			return
+		if not self._has_successful_sync():
+			return
+		original = self.get_doc_before_save()
+		if not original:
+			return
+		for field in LOCKED_AFTER_SYNC:
+			if getattr(self, field) != getattr(original, field):
+				frappe.throw(
+					f"{field} cannot change after the image has been synced. "
+					f"Create a new image (e.g. {self.name}-v2) instead."
+				)
+
+	def _has_successful_sync(self) -> bool:
+		"""Returns True if any Task with script=sync-image.sh and status=Success
+		references this image in its variables."""
+		return bool(
+			frappe.db.exists(
+				"Task",
+				{
+					"script": "sync-image.sh",
+					"status": "Success",
+					"variables": ("like", f'%"IMAGE_NAME": "{self.name}"%'),
+				},
+			)
+		)
+
+	@frappe.whitelist()
+	def sync_status(self) -> list[dict]:
+		"""For each Active server, the last successful sync-image.sh Task
+		referencing this image. None if never synced.
+
+		Returned shape:
+		  [{"server": "...", "synced_at": "...", "task": "..."}, ...]
+		"""
+		servers = frappe.get_all(
+			"Server",
+			filters={"status": "Active"},
+			fields=["name", "region"],
+			order_by="name asc",
+		)
+		results: list[dict] = []
+		for server in servers:
+			last = frappe.db.sql(
+				"""
+				SELECT name, modified
+				FROM `tabTask`
+				WHERE server = %(server)s
+				  AND script = 'sync-image.sh'
+				  AND status = 'Success'
+				  AND variables LIKE %(image_pattern)s
+				ORDER BY modified DESC
+				LIMIT 1
+				""",
+				{
+					"server": server.name,
+					"image_pattern": f'%"IMAGE_NAME": "{self.name}"%',
+				},
+				as_dict=True,
+			)
+			row = last[0] if last else None
+			results.append({
+				"server": server.name,
+				"region": server.region,
+				"synced_at": row["modified"].isoformat() if row else None,
+				"task": row["name"] if row else None,
+			})
+		return results
 
 	@frappe.whitelist()
 	def sync_to_all_servers(self) -> list[str]:

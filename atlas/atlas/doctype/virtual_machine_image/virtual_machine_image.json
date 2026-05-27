@@ -12,6 +12,8 @@
   "column_break_header",
   "is_active",
   "default_disk_gigabytes",
+  "section_break_sync_status",
+  "sync_status_html",
   "section_break_kernel",
   "kernel_url",
   "kernel_filename",
@@ -58,6 +60,17 @@
    "in_list_view": 1,
    "label": "Default Disk (GB)",
    "reqd": 1
+  },
+  {
+   "fieldname": "section_break_sync_status",
+   "fieldtype": "Section Break",
+   "label": "Sync Status",
+   "collapsible": 0
+  },
+  {
+   "fieldname": "sync_status_html",
+   "fieldtype": "HTML",
+   "label": "Sync Status"
   },
   {
    "fieldname": "section_break_kernel",
