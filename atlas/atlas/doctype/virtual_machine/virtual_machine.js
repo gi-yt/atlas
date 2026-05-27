@@ -11,9 +11,17 @@ const SECONDARY_BY_STATUS = {
 };
 
 
+const SIZE_PRESETS = [
+	{key: "small", label: "Small", vcpus: 1, memory_megabytes: 512, disk_gigabytes: 4},
+	{key: "medium", label: "Medium", vcpus: 2, memory_megabytes: 2048, disk_gigabytes: 10},
+	{key: "large", label: "Large", vcpus: 4, memory_megabytes: 8192, disk_gigabytes: 40},
+];
+
+
 frappe.ui.form.on("Virtual Machine", {
 	refresh(frm) {
 		if (frm.is_new()) {
+			render_creation_form_polish(frm);
 			return;
 		}
 		add_lifecycle_buttons(frm);
@@ -24,7 +32,118 @@ frappe.ui.form.on("Virtual Machine", {
 		render_ssh_command_field(frm);
 		subscribe_to_realtime(frm);
 	},
+	server(frm) {
+		if (frm.is_new()) {
+			render_capacity_indicator(frm);
+		}
+	},
+	vcpus(frm) {
+		if (frm.is_new()) {
+			render_capacity_indicator(frm);
+		}
+	},
+	description(frm) {
+		if (frm.is_new()) {
+			render_description_nudge(frm);
+		}
+	},
 });
+
+
+function render_creation_form_polish(frm) {
+	render_description_nudge(frm);
+	render_size_preset_radios(frm);
+	render_capacity_indicator(frm);
+}
+
+
+function render_description_nudge(frm) {
+	if (frm.doc.description && frm.doc.description.trim()) {
+		frm.set_intro("");
+		return;
+	}
+	frm.set_intro(
+		__("Without a description the list will show only a UUID. Add at least a one-word label."),
+		"yellow",
+	);
+}
+
+
+function render_size_preset_radios(frm) {
+	// Inject preset radios immediately above the `vcpus` input. Avoids a
+	// new HTML schema field; the wireframe puts presets at the top of the
+	// Resources section.
+	const vcpus_field = frm.fields_dict.vcpus;
+	if (!vcpus_field || !vcpus_field.$wrapper) return;
+	const $form_group = vcpus_field.$wrapper.closest(".frappe-control").parent();
+	if (!$form_group.length) return;
+	$form_group.find(".atlas-size-presets-row").remove();
+	const radios = SIZE_PRESETS.map((preset) => `
+		<label class="atlas-size-preset" style="margin-right: 1em;">
+			<input type="radio" name="atlas-size-preset" value="${preset.key}"
+				data-vcpus="${preset.vcpus}"
+				data-memory="${preset.memory_megabytes}"
+				data-disk="${preset.disk_gigabytes}">
+			<b>${frappe.utils.escape_html(preset.label)}</b>
+			<span class="text-muted small">
+				(${preset.vcpus} / ${preset.memory_megabytes} MB / ${preset.disk_gigabytes} GB)
+			</span>
+		</label>
+	`).join("");
+	const $row = $(`
+		<div class="atlas-size-presets-row form-group" style="margin-bottom: 0.75em;">
+			<label class="control-label">${__("Size preset")}</label>
+			<div class="atlas-size-presets" style="display: flex; flex-wrap: wrap; gap: 0.5em;">
+				${radios}
+				<label class="atlas-size-preset">
+					<input type="radio" name="atlas-size-preset" value="custom" checked>
+					<b>${__("Custom")}</b>
+					<span class="text-muted small">(${__("set values below")})</span>
+				</label>
+			</div>
+		</div>
+	`);
+	$form_group.prepend($row);
+	$row.off("change.atlas-preset").on("change.atlas-preset", "input[name='atlas-size-preset']", (event) => {
+		const target = event.currentTarget;
+		if (target.value === "custom") return;
+		frm.set_value("vcpus", parseInt(target.dataset.vcpus, 10));
+		frm.set_value("memory_megabytes", parseInt(target.dataset.memory, 10));
+		frm.set_value("disk_gigabytes", parseInt(target.dataset.disk, 10));
+	});
+}
+
+
+function render_capacity_indicator(frm) {
+	if (!frm.doc.server) {
+		frm.dashboard.clear_headline?.();
+		return;
+	}
+	frappe.call({
+		method: "atlas.atlas.api.server_capacity.capacity_for_server",
+		args: {server: frm.doc.server},
+	}).then(({message}) => {
+		if (!message) return;
+		const total = message.total_vcpus;
+		const used = message.used_vcpus;
+		const requested = parseInt(frm.doc.vcpus || 0, 10);
+		const projected = used + requested;
+		const total_label = total != null ? total : "—";
+		const oversubscribed = total != null && projected > total;
+		const color = oversubscribed ? "red" : (total != null && projected === total ? "orange" : "blue");
+		const text = __(
+			"Server capacity: {0} vCPUs requested + {1} used / {2} total ({3} VMs)",
+			[requested, used, total_label, message.virtual_machine_count],
+		);
+		frm.dashboard.clear_headline?.();
+		frm.dashboard.set_headline_alert(
+			oversubscribed
+				? `⚠ ${text} — ${__("Server is oversubscribed. Provision may fail.")}`
+				: text,
+			color,
+		);
+	});
+}
 
 
 function add_lifecycle_buttons(frm) {

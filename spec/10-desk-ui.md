@@ -198,6 +198,17 @@ Bookmarks and the sidebar Home button hit `/app/atlas` directly.
   intro that links to the most recent provision-vm.sh Failure Task —
   the operator clicks the link, reads the error, and clicks Provision
   again to retry.
+- The **creation form** (new VM) shows three affordances on top of the
+  raw schema: a yellow `Description` nudge until the operator types a
+  label; `Small / Medium / Large / Custom` size-preset radios above the
+  vCPUs input that write all three Int fields in one click; and a
+  dashboard headline `Server capacity: X requested + Y used / Z total
+  (N VMs)`. The headline turns orange at the cap and red — with a
+  `⚠ Server is oversubscribed` suffix — when projected use exceeds
+  total. Capacity is computed by
+  `atlas.atlas.api.server_capacity.capacity_for_server`, backed by a
+  hand-maintained `size → vCPUs` dict (same maintenance model as the
+  monthly-cost dict on Server Provider).
 
 ### Virtual Machine Image
 

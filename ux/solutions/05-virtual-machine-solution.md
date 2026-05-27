@@ -425,6 +425,38 @@ No.
 - HTML field for the preset radios.
 - Dashboard indicator (`frm.dashboard.add_indicator`).
 
+**Implementation status (landed):** Description nudge, size presets, and
+capacity preview are wired. The new-VM form now renders a yellow
+`Without a description the list will show only a UUID` intro until the
+operator types a description, three radio presets (`Small 1/512 MB/4 GB`,
+`Medium 2/2 GB/10 GB`, `Large 4/8 GB/40 GB`, plus `Custom`) above the
+vCPUs input that write all three Int fields in one click, and a
+dashboard headline showing `Server capacity: X requested + Y used / Z
+total (N VMs)`. The headline turns orange at the cap and red when
+projected use exceeds total — with `⚠ Server is oversubscribed.
+Provision may fail.` appended. Capacity is fetched via the new
+[atlas.atlas.api.server_capacity.capacity_for_server](../../atlas/atlas/api/server_capacity.py)
+whitelisted helper, backed by a hand-maintained `size → vCPUs` dict.
+
+**Drift note:**
+
+- The deferred `default_vm_public_key` field on `Server Provider` is
+  **not landed.** Auto-filling the VM's SSH public key from the
+  provider's default would need a new `Code` field on `Server Provider`
+  plus a `validate`/`onload` hook. Skipped to keep this commit
+  schema-free; the operator still pastes the key per VM.
+- Size presets are injected into the Resources section via DOM
+  prepend on the `vcpus` field's `.form-group`, not a new `HTML` field
+  in the doctype JSON. Same reason — no schema change.
+- The capacity headline reuses `frm.dashboard.set_headline_alert`. The
+  wireframe drew it as an indicator (`add_indicator`); the alert
+  variant is the only headline that re-renders cleanly when the
+  Server or vCPUs change.
+- Playwright verification was skipped: the local browser session is
+  held by a parallel agent. The capacity helper was smoke-tested via
+  `bench execute` against a real `Server`; unit tests cover the
+  total/used/oversubscribed paths.
+
 ### Fighting Desk?
-No. One new field on Server Provider is the only schema addition; the
-rest is client script + dashboard.
+No. No schema changes; presets are injected into the existing Resources
+section.

@@ -185,8 +185,10 @@ Once the three above are in, the next-best uses of effort are:
    capacity preview, terminated-VM "Re-provision as new" action.
    **(Landed: list short-ID + IPv6 copy chip [05 §1], Pending IPv6 chip
    + auto-expand [05 §2], SSH command + copy [05 §5], terminated
-   Re-provision + Delete record [05 §3]. Capacity preview / size
-   presets / creation form polish [05 §6] deferred.)**
+   Re-provision + Delete record [05 §3], creation form polish —
+   description nudge, size presets, capacity preview [05 §6]. The
+   provider-default SSH key auto-fill from 05 §6 remains deferred —
+   it needs a `default_vm_public_key` field on `Server Provider`.)**
 4. **Image sync status panel** so the operator can see "which servers
    have this image?" without grepping Task history. **(Landed: per-active
    server table + Sync now shortcut [04 §3].)**
