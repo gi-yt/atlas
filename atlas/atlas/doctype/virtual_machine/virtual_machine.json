@@ -56,7 +56,8 @@
    "in_standard_filter": 1,
    "label": "Server",
    "options": "Server",
-   "reqd": 1
+   "reqd": 1,
+   "set_only_once": 1
   },
   {
    "fieldname": "image",
@@ -65,7 +66,8 @@
    "in_standard_filter": 1,
    "label": "Image",
    "options": "Virtual Machine Image",
-   "reqd": 1
+   "reqd": 1,
+   "set_only_once": 1
   },
   {
    "fieldname": "column_break_header",
@@ -93,7 +95,8 @@
    "fieldtype": "Select",
    "label": "Size preset",
    "no_copy": 1,
-   "options": "Custom\nSmall (1 vCPU / 512 MB / 4 GB)\nMedium (2 vCPU / 2048 MB / 10 GB)\nLarge (4 vCPU / 8192 MB / 40 GB)"
+   "options": "Custom\nSmall (1 vCPU / 512 MB / 4 GB)\nMedium (2 vCPU / 2048 MB / 10 GB)\nLarge (4 vCPU / 8192 MB / 40 GB)",
+   "set_only_once": 1
   },
   {
    "fieldname": "column_break_resources_0",
@@ -104,7 +107,8 @@
    "fieldname": "vcpus",
    "fieldtype": "Int",
    "label": "vCPUs",
-   "reqd": 1
+   "reqd": 1,
+   "set_only_once": 1
   },
   {
    "fieldname": "column_break_resources_1",
@@ -115,7 +119,8 @@
    "fieldname": "memory_megabytes",
    "fieldtype": "Int",
    "label": "Memory (MB)",
-   "reqd": 1
+   "reqd": 1,
+   "set_only_once": 1
   },
   {
    "fieldname": "column_break_resources_2",
@@ -126,7 +131,8 @@
    "fieldname": "disk_gigabytes",
    "fieldtype": "Int",
    "label": "Disk (GB)",
-   "reqd": 1
+   "reqd": 1,
+   "set_only_once": 1
   },
   {
    "collapsible": 1,

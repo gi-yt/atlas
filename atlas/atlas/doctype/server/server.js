@@ -4,46 +4,8 @@ frappe.ui.form.on("Server", {
 			return;
 		}
 		add_buttons(frm);
-		render_running_task_headline(frm);
-		subscribe_to_realtime(frm);
 	},
 });
-
-
-function render_running_task_headline(frm) {
-	frm.dashboard.clear_headline?.();
-	frappe.db.get_list("Task", {
-		fields: ["name", "subject", "script", "status", "started", "modified"],
-		filters: {
-			server: frm.doc.name,
-			status: ["in", ["Pending", "Running"]],
-		},
-		order_by: "modified desc",
-		limit: 1,
-	}).then((rows) => {
-		if (!rows.length) return;
-		const task = rows[0];
-		const subject = task.subject || task.script || task.name;
-		const when_started_html = task.started
-			? frappe.datetime.comment_when(task.started)
-			: `<span class="text-muted small">${__("just now")}</span>`;
-		const link = `<a href="/app/task/${encodeURIComponent(task.name)}">${frappe.utils.escape_html(subject)} →</a>`;
-		frm.dashboard.set_headline_alert(
-			`⏵ ${__("Running task")}: ${link} <span class="text-muted small">${when_started_html}</span>`,
-			"yellow",
-		);
-	});
-}
-
-
-function subscribe_to_realtime(frm) {
-	if (frm._atlas_server_realtime_registered) return;
-	frm._atlas_server_realtime_registered = true;
-	frappe.realtime.on("task_update", (data) => {
-		if (!data || data.server !== frm.doc.name) return;
-		render_running_task_headline(frm);
-	});
-}
 
 
 function add_buttons(frm) {

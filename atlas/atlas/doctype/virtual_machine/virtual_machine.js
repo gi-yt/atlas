@@ -25,12 +25,10 @@ frappe.ui.form.on("Virtual Machine", {
 	},
 	refresh(frm) {
 		if (frm.is_new()) {
-			render_creation_messages(frm);
 			return;
 		}
 		add_lifecycle_buttons(frm);
 		add_terminated_actions(frm);
-		render_dashboard_chips(frm);
 		render_status_intro(frm);
 		expand_networking_for_pending(frm);
 		subscribe_to_realtime(frm);
@@ -41,16 +39,6 @@ frappe.ui.form.on("Virtual Machine", {
 		frm.set_value("vcpus", preset.vcpus);
 		frm.set_value("memory_megabytes", preset.memory_megabytes);
 		frm.set_value("disk_gigabytes", preset.disk_gigabytes);
-	},
-	server(frm) {
-		if (frm.is_new()) {
-			render_creation_messages(frm);
-		}
-	},
-	vcpus(frm) {
-		if (frm.is_new()) {
-			render_creation_messages(frm);
-		}
 	},
 });
 
@@ -65,41 +53,6 @@ function auto_select_server(frm) {
 		if (rows.length === 1) {
 			frm.set_value("server", rows[0]);
 		}
-	});
-}
-
-
-function render_creation_messages(frm) {
-	frm._atlas_creation_render_token = (frm._atlas_creation_render_token || 0) + 1;
-	const token = frm._atlas_creation_render_token;
-	frm.dashboard.clear_headline();
-	if (frm.doc.server) {
-		render_capacity_indicator(frm, token);
-	}
-}
-
-
-function render_capacity_indicator(frm, token) {
-	// Only surface the headline when the host is oversubscribed — green/blue
-	// "you have headroom" banners crowd the form without adding signal.
-	frappe.call({
-		method: "atlas.atlas.api.server_capacity.capacity_for_server",
-		args: {server: frm.doc.server},
-	}).then(({message}) => {
-		if (!message) return;
-		if (token !== frm._atlas_creation_render_token) return;
-		const total = message.total_vcpus;
-		const used = message.used_vcpus;
-		const requested = parseInt(frm.doc.vcpus || 0, 10);
-		const projected = used + requested;
-		if (total == null || projected <= total) {
-			return;
-		}
-		const text = __(
-			"Server is oversubscribed: {0} requested + {1} used / {2} total ({3} VMs). Provision may fail.",
-			[requested, used, total, message.virtual_machine_count],
-		);
-		frm.dashboard.set_headline_alert(`⚠ ${text}`, "red");
 	});
 }
 
@@ -204,31 +157,11 @@ function maybe_alert_cloned() {
 }
 
 
-function render_dashboard_chips(frm) {
-	frm.dashboard.clear_headline?.();
-	if (frm.doc.ipv6_address) {
-		const safe = frappe.utils.escape_html(frm.doc.ipv6_address);
-		const indicator_color =
-			frm.doc.status === "Running" ? "green" :
-			frm.doc.status === "Pending" ? "orange" :
-			frm.doc.status === "Failed" ? "red" : "grey";
-		frm.dashboard.add_indicator(`IPv6 [${safe}]`, indicator_color);
-	}
-}
-
-
 function render_status_intro(frm) {
 	frm.set_intro("");
 	const status = frm.doc.status;
 
 	if (status === "Terminated") {
-		const when_html = frm.doc.last_stopped
-			? frappe.datetime.comment_when(frm.doc.last_stopped)
-			: `<span>${__("earlier")}</span>`;
-		frm.dashboard.set_headline_alert(
-			`⛔ ${__("Terminated")} ${when_html}. ${__("This record is kept for audit; the VM no longer exists.")}`,
-			"red",
-		);
 		return;
 	}
 
