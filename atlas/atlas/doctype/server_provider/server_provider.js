@@ -150,11 +150,10 @@ function confirm_provision(frm, values, is_self_managed) {
 			`<b>${frappe.utils.escape_html(values.region)}</b>`,
 		])}</p>`;
 
-	frappe.atlas.confirm_cost({
-		title: is_self_managed ? __("Bootstrap a self-managed server?") : __("Create a billable droplet?"),
-		body_html: body,
-		proceed_label: __("Provision"),
-		proceed() {
+	frappe.warn(
+		is_self_managed ? __("Bootstrap a self-managed server?") : __("Create a billable droplet?"),
+		body,
+		() => {
 			frm.call("provision_server", values).then(({message: server_name}) => {
 				frappe.show_alert({
 					message: __("Provisioning {0}; watch the Task list.", [values.title]),
@@ -163,25 +162,16 @@ function confirm_provision(frm, values, is_self_managed) {
 				frappe.set_route("Form", "Server", server_name);
 			});
 		},
-	});
+		__("Provision"),
+		true,
+	);
 }
 
 
 function confirm_archive(frm) {
-	frappe.atlas.confirm_destructive({
-		title: __("Archive {0}?", [frm.doc.provider_name]),
-		body_html: "",
-		match_string: frm.doc.provider_name,
+	frappe.atlas.confirm_archive(frm, {
+		match: frm.doc.provider_name,
 		match_label: __("Type the provider name to confirm"),
-		proceed_label: __("Archive"),
-		proceed() {
-			frm.call("archive").then(() => {
-				frappe.show_alert({
-					message: __("Provider archived."),
-					indicator: "blue",
-				});
-				frm.reload_doc();
-			});
-		},
+		alert_message: __("Provider archived."),
 	});
 }

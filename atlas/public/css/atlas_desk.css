@@ -90,3 +90,38 @@
 .list-view .no-result .btn {
 	margin-top: 16px;
 }
+
+
+/* ---------------------------------------------------------------------- *
+ * IPv6 copy chip — rendered by virtual_machine_list.js as the row's
+ * `ipv6_address` cell. Wraps a `<code>` with the address and a copy
+ * glyph; clicking the chip copies `ssh root@<ipv6>` to the clipboard.
+ *
+ * The chip lives inline inside the list cell, so we keep padding tight
+ * and let the icon fade in on row hover to avoid icon noise across a
+ * long list.
+ * ---------------------------------------------------------------------- */
+
+.atlas-ipv6-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 1px 6px;
+	border-radius: 4px;
+	cursor: pointer;
+}
+
+.atlas-ipv6-chip:hover {
+	background: var(--surface-gray-2, #f3f3f3);
+}
+
+.atlas-ipv6-chip .atlas-copy-icon {
+	opacity: 0;
+	font-size: 11px;
+	transition: opacity 0.1s ease-in;
+}
+
+.list-row:hover .atlas-ipv6-chip .atlas-copy-icon,
+.atlas-ipv6-chip:hover .atlas-copy-icon {
+	opacity: 0.7;
+}

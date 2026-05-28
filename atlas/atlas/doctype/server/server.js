@@ -52,21 +52,10 @@ function confirm_reboot(frm) {
 
 
 function confirm_archive(frm) {
-	frappe.atlas.confirm_destructive({
-		title: __("Archive {0}?", [frm.doc.title]),
-		body_html: "",
-		match_string: frm.doc.title,
+	frappe.atlas.confirm_archive(frm, {
+		match: frm.doc.title,
 		match_label: __("Type the server title to confirm"),
-		proceed_label: __("Archive"),
-		proceed() {
-			frm.call("archive").then(() => {
-				frappe.show_alert({
-					message: __("Server archived."),
-					indicator: "blue",
-				});
-				frm.reload_doc();
-			});
-		},
+		alert_message: __("Server archived."),
 	});
 }
 

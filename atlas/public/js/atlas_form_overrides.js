@@ -99,6 +99,25 @@ frappe.atlas.confirm_destructive = function ({
 	return dialog;
 };
 
+frappe.atlas.confirm_archive = function (frm, {match, match_label, alert_message}) {
+	frappe.atlas.confirm_destructive({
+		title: __("Archive {0}?", [match]),
+		body_html: "",
+		match_string: match,
+		match_label: match_label,
+		proceed_label: __("Archive"),
+		proceed() {
+			frm.call("archive").then(() => {
+				frappe.show_alert({
+					message: alert_message,
+					indicator: "blue",
+				});
+				frm.reload_doc();
+			});
+		},
+	});
+};
+
 frappe.atlas.task_started = function (frm, label, task_name) {
 	frappe.show_alert({
 		message: __("{0} Task: {1}", [
@@ -108,10 +127,6 @@ frappe.atlas.task_started = function (frm, label, task_name) {
 		indicator: "blue",
 	}, 6);
 	frappe.set_route("Form", "Task", task_name);
-};
-
-frappe.atlas.short_id = function (name) {
-	return (name || "").slice(0, 8);
 };
 
 frappe.atlas.strip_desk_chrome = function (frm) {
@@ -159,9 +174,6 @@ for (const doctype of [
 	frappe.ui.form.on(doctype, {
 		onload(frm) {
 			frappe.atlas.strip_desk_chrome(frm);
-			frm.set_window_title = function () {
-				frappe.atlas.set_window_title(frm);
-			};
 		},
 		refresh(frm) {
 			frappe.atlas.strip_desk_chrome(frm);

@@ -48,6 +48,11 @@ frappe.listview_settings["Virtual Machine"] = {
 					message: __("SSH command copied: {0}", [`<code>${frappe.utils.escape_html(command)}</code>`]),
 					indicator: "green",
 				}, 4);
+			}).catch(() => {
+				frappe.show_alert({
+					message: __("Could not copy to clipboard."),
+					indicator: "orange",
+				});
 			});
 		});
 	},

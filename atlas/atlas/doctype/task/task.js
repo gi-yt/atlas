@@ -8,9 +8,6 @@ frappe.ui.form.on("Task", {
 		pretty_print_variables(frm);
 		subscribe_to_realtime(frm);
 	},
-	onload(frm) {
-		frm._atlas_realtime_registered = false;
-	},
 });
 
 
