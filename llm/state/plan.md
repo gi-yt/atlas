@@ -4,6 +4,21 @@ Run every per-VM Firecracker process under the **jailer** binary: de-privileged
 uid/gid, chrooted, cgroup-isolated. Reverses "root everywhere" for the
 Firecracker *child process only* (Atlas still SSHes in as root to run Tasks).
 
+> **Merge update (GitHub main, after implementation).** main advanced 9 commits —
+> **ipv4-egress** (NAT44), **images** (Ubuntu cloud-image cutover), **hardening**
+> (CIS sysctls/sshd/modules/KSM/swap) all landed. Merged in and adapted; 10
+> conflicts resolved (5 code, 5 spec). Most were additive "keep both" (jailer
+> install + hardening coexist in `bootstrap-server.sh`; jail vars + v4 link vars
+> coexist in `_provision_variables`). **The one genuinely-adapted piece:**
+> ipv4-egress put the guest's private v4 + masquerade on a *host-netns tap*; my
+> jailer moved the tap *into a per-VM netns*. Reconciled in `vm-network-up.sh` —
+> the guest's v4 gateway (`IPV4_HOST_CIDR`) now lives on the tap **inside the
+> netns**, the namespace forwards v4 veth↔tap, a `169.254.0.0/30` link-local
+> transit carries it across the veth, and the host's existing `100.64.0.0/16`
+> masquerade (unchanged) catches it. The v4-egress e2e (`phase5-ipv4-egress.sh`)
+> is the bench check for this seam. CIS `net.ipv4.ip_forward=1` deviation is
+> already in the merged bootstrap, which my NAT44-over-netns needs.
+
 Scope, Success, and the four reject-on-sight rules are pinned in
 `scratch/active.md` § firecracker-production. This plan resolves the open design
 risks into concrete edits and a phase order. **Two standing constraints from the
