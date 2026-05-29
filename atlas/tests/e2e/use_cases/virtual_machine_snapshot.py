@@ -32,13 +32,6 @@ def run(reuse: bool = True, keep: bool = True) -> None:
 	run_against_shared(reuse=reuse, keep=keep)
 
 
-# Every snapshot/restore/resize/rebuild/clone/pause/resume step is probed
-# on-host; the unit-dup guards (shrink-rejected, pause-from-paused, clone
-# guards) are cheap in-memory throws that ride along. The smoke path is the
-# full run — there is no host work to trim without dropping a real disk op.
-run_smoke = run_against_shared
-
-
 def run_against_shared(reuse: bool = True, keep: bool = True) -> None:
 	with phase("vm-snapshot", reuse=reuse, keep=keep) as server:
 		image_doc = ensure_image_on_server(server.name)
@@ -81,6 +74,13 @@ def run_against_shared(reuse: bool = True, keep: bool = True) -> None:
 
 		clone.reload()
 		clone.terminate()
+
+
+# Every snapshot/restore/resize/rebuild/clone/pause/resume step is probed
+# on-host; the unit-dup guards (shrink-rejected, pause-from-paused, clone
+# guards) are cheap in-memory throws that ride along. The smoke path is the
+# full run — there is no host work to trim without dropping a real disk op.
+run_smoke = run_against_shared
 
 
 def _check_snapshot_and_restore(server_name: str, vm) -> None:

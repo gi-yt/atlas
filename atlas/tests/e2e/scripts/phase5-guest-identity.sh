@@ -125,14 +125,20 @@ esac
 
 # 9. sshd password auth off. sshd -T output is lowercase keys, value as-is.
 #    Use awk to extract the global setting tolerantly (whitespace, CR/LF).
+#    awk must NOT `exit` on first match: under `set -o pipefail` an early exit
+#    closes the pipe while `sshd -T` is still writing, `sshd` takes SIGPIPE
+#    (141), and the whole `set -e` block aborts. Drain all output and keep the
+#    last match instead.
 pwauth="$(sshd -T 2>/dev/null \
-    | awk 'tolower($1)=="passwordauthentication"{print tolower($2); exit}' \
+    | awk 'tolower($1)=="passwordauthentication"{v=tolower($2)} END{print v}' \
     | tr -d '\r')"
 [ "$pwauth" = "no" ] \
     || fail "sshd PasswordAuthentication is '$pwauth', want 'no'"
 
-# 10. Swap on /swapfile.
-swapon --show=NAME --noheadings | grep -qx /swapfile \
+# 10. Swap on /swapfile. Capture first (a bare `... | grep -q` would let grep
+#     exit on match and SIGPIPE the producer under pipefail, as in check 9).
+swap_names="$(swapon --show=NAME --noheadings)"
+printf '%s\n' "$swap_names" | grep -qx /swapfile \
     || fail "swap on /swapfile not active"
 
 # 11. This is the Ubuntu cloud image (the source we cut over to).
