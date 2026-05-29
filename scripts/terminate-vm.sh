@@ -19,7 +19,8 @@ if sudo test -f "${vm_directory}/network.env"; then
     sudo /var/lib/atlas/bin/vm-network-down.sh "$VIRTUAL_MACHINE_NAME" || true
 fi
 
+# Removing the VM directory takes the jail tree (rootfs, kernel link, config,
+# API socket) with it — they all live under jail/ inside this directory.
 sudo rm -rf "$vm_directory"
-sudo rm -f "/var/lib/atlas/run/${VIRTUAL_MACHINE_NAME}.sock"
 
 echo "Deleted ${VIRTUAL_MACHINE_NAME}."

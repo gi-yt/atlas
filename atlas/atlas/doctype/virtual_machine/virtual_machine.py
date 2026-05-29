@@ -3,7 +3,16 @@ import uuid
 import frappe
 from frappe.model.document import Document
 
-from atlas.atlas.networking import allocate_ipv6, derive_mac, derive_tap
+from atlas.atlas.networking import (
+	allocate_ipv6,
+	cgroup_args,
+	derive_mac,
+	derive_netns,
+	derive_tap,
+	derive_uid,
+	derive_veth_pair,
+	resource_limit_args,
+)
 from atlas.atlas.ssh import run_task
 
 # Never change after insert — identity and the key the rootfs was built with.
@@ -262,6 +271,7 @@ class VirtualMachine(Document):
 			"DISK_GB": str(self.disk_gigabytes),
 			"VIRTUAL_MACHINE_IPV6": self.ipv6_address,
 			"SSH_PUBLIC_KEY": self.ssh_public_key,
+			"ATLAS_FC_UID": str(derive_uid(self.name)),
 		}
 		if source_type == "snapshot":
 			if not source:
@@ -357,6 +367,7 @@ class VirtualMachine(Document):
 
 	def _provision_variables(self) -> dict:
 		image = frappe.get_doc("Virtual Machine Image", self.image)
+		host_veth, namespace_veth = derive_veth_pair(self.name)
 		variables = {
 			"VIRTUAL_MACHINE_NAME": self.name,
 			"IMAGE_NAME": self.image,
@@ -369,6 +380,18 @@ class VirtualMachine(Document):
 			"TAP_DEVICE": self.tap_device,
 			"VIRTUAL_MACHINE_IPV6": self.ipv6_address,
 			"SSH_PUBLIC_KEY": self.ssh_public_key,
+			# Jail isolation parameters. All derived from the VM's own UUID and
+			# resource fields, so the on-host jail is reconstructible from the
+			# row. provision-vm.sh writes jail.env (read by the systemd unit) and
+			# network.env (read by vm-network-up.sh) from these.
+			"ATLAS_FC_UID": str(derive_uid(self.name)),
+			"ATLAS_NETNS": derive_netns(self.name),
+			"HOST_VETH": host_veth,
+			"NAMESPACE_VETH": namespace_veth,
+			"ATLAS_CGROUP_ARGS": " ".join(
+				cgroup_args(self.vcpus, self.memory_megabytes, self.disk_gigabytes)
+			),
+			"ATLAS_RESOURCE_ARGS": " ".join(resource_limit_args(self.disk_gigabytes)),
 		}
 		# Clone: seed the disk from a snapshot's rootfs instead of the pristine
 		# image. The kernel still comes from the image; provision-vm.sh's image

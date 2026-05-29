@@ -40,14 +40,18 @@ In summary, in this order:
    `Broken`. (apt's `DPkg::Lock::Timeout` is set too, but it does not cover
    the `apt-get update` *lists* lock on this apt version, so the explicit
    wait is the load-bearing fix.)
-3. Installs Firecracker at `/usr/local/bin/firecracker` if not at the pinned
-   version.
+3. Installs Firecracker **and the jailer** at `/usr/local/bin/{firecracker,jailer}`
+   if either is missing or not at the pinned version. Both ship in the same
+   release tarball, so this is one download. Production runs every VM under the
+   jailer; a host bootstrapped before the jailer existed picks it up on re-run
+   (the gate checks both binaries).
 4. Writes `/etc/sysctl.d/60-atlas.conf` with IPv6 forwarding and proxy NDP.
 5. Creates the `inet atlas` nftables table and `forward` chain.
 6. Creates the `/var/lib/atlas/` directory tree.
-7. Writes `FIRECRACKER_VERSION`, `KERNEL_VERSION`, `ARCHITECTURE` to
-   `/var/lib/atlas/bootstrap.json` (the single source of truth) and
-   `cat`s it on stdout.
+7. Writes `FIRECRACKER_VERSION`, `JAILER_VERSION`, `KERNEL_VERSION`,
+   `ARCHITECTURE` to `/var/lib/atlas/bootstrap.json` (the single source of
+   truth) and `cat`s it on stdout. `firecracker_version` and `jailer_version`
+   are always the same (one tarball) but both are recorded on the `Server` row.
 
 The Python side `json.loads` the trailing JSON object and writes the
 fields onto the `Server` document. `jq` is invoked with `-nc` (compact,
@@ -218,7 +222,8 @@ Every action is idempotent:
 
 - `apt-get install -y` is idempotent (and waits out the first-boot apt-lock
   race before running — see step 2).
-- The Firecracker install is gated on `firecracker --version`.
+- The Firecracker + jailer install is gated on `firecracker --version` and
+  `jailer --version` (re-run installs either if absent or wrong-versioned).
 - File writes use `install -m mode -T` (atomic, overwrite).
 - nftables creates are guarded with `nft list ... || nft add ...`.
 - `mkdir -p` and `systemctl daemon-reload` are naturally idempotent.

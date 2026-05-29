@@ -156,5 +156,6 @@ class Server(Document):
 		)
 		parsed = json.loads(last_line)
 		self.firecracker_version = parsed["firecracker_version"]
+		self.jailer_version = parsed["jailer_version"]
 		self.kernel_version = parsed["kernel_version"]
 		self.architecture = parsed["architecture"]

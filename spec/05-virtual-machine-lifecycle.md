@@ -191,15 +191,18 @@ truth, they click `Run Task` with `script=systemctl status ...`.
 The only operations that talk to Firecracker's API socket. Each is one Task
 running a one-line `curl`:
 
-- `pause-vm.sh`: `PATCH /vm {"state":"Paused"}` over
-  `/var/lib/atlas/run/<uuid>.sock`. `Running` → `Paused`.
+- `pause-vm.sh`: `PATCH /vm {"state":"Paused"}` over the in-jail socket
+  `…/<uuid>/jail/firecracker/<uuid>/root/run/firecracker.socket`.
+  `Running` → `Paused`.
 - `resume-vm.sh`: `PATCH /vm {"state":"Resumed"}`. `Paused` → `Running`.
 
 `curl --fail` so a refused state change surfaces as a failed Task rather than
 a silent success. Idempotent: Firecracker accepts a redundant Pause/Resume.
 RAM stays resident across a pause — this is *not* a shutdown. The boot path is
-still `--config-file`; the socket is created by the unit (`ExecStart
---api-sock`) and used only for these post-boot operations.
+still `--config-file` (forwarded through the jailer); the socket is created by
+Firecracker inside its jail and used only for these post-boot operations. It is
+a host-filesystem unix socket, so the VM's network namespace does not affect
+reaching it — `curl --unix-socket` talks to it from the host as before.
 
 ## Snapshot
 
@@ -299,20 +302,38 @@ canonical artifact. Highlights:
 
 - `Restart=always` with `RestartSec=5s` — if Firecracker dies, systemd
   brings it back. "Keep them running."
-- `ExecStartPost=/var/lib/atlas/bin/vm-network-up.sh %i` and the matching
-  `ExecStopPost` for `vm-network-down.sh`. Networking is part of the unit's
-  lifecycle, so a host reboot brings VMs back with networking intact.
+- **`ExecStart` runs the `jailer`, not `firecracker` directly.** The jailer
+  drops the Firecracker process to the VM's per-VM uid/gid, chroots it into
+  `…/<uuid>/jail/firecracker/<uuid>/root`, applies cgroup-v2 memory/CPU caps
+  and fd/file rlimits, and joins the VM's network namespace (`--netns`).
+  Everything after `--` is forwarded to Firecracker, with paths relative to the
+  jail root (`--config-file firecracker.json`, `--api-sock run/firecracker.socket`).
+  The per-VM uid, netns name and the assembled cgroup/rlimit flags come from
+  `EnvironmentFile=…/%i/jail.env`, written by `provision-vm.sh`, so the unit
+  template stays static.
+- `ExecStartPre=/var/lib/atlas/bin/vm-network-up.sh %i` (creates the netns +
+  veth + in-namespace tap, so they exist when the jailer joins the namespace)
+  and the matching `ExecStopPost` for `vm-network-down.sh`. `ExecStartPre` runs
+  to completion before `ExecStart`, so the namespace is ready at jailer exec.
+  Networking is part of the unit's lifecycle, so a host reboot brings VMs back
+  with networking intact.
+- `KillMode=mixed` — the jailer is the unit's main process and Firecracker is
+  its child; mixed sends SIGTERM to the jailer and SIGKILL to the whole cgroup,
+  so the jailed Firecracker dies with the unit rather than being orphaned.
 - `--config-file` is used, not the API socket, during boot. Fewer moving
-  parts. The API socket is still created (`--api-sock`) and is used after boot
-  by `pause-vm.sh` / `resume-vm.sh`. Snapshot/restore/rebuild/resize do **not**
-  touch the socket — they are disk and config operations on a Stopped VM.
+  parts. The API socket is still created (`--api-sock`) inside the jail and used
+  after boot by `pause-vm.sh` / `resume-vm.sh`. Snapshot/restore/rebuild/resize
+  do **not** touch the socket — they are disk and config operations on a
+  Stopped VM.
 
 ## Host reboot recovery
 
 Because every `firecracker-vm@<uuid>.service` is `WantedBy=multi-user.target`,
-a host reboot brings them all back. `vm-network-up.sh` re-creates the tap
-and nft rules from `/var/lib/atlas/virtual-machines/<uuid>/network.env`,
-which was written at provision time. No Atlas-side intervention needed; the
+a host reboot brings them all back. `vm-network-up.sh` re-creates the network
+namespace, veth pair, in-namespace tap and nft rules from
+`/var/lib/atlas/virtual-machines/<uuid>/network.env`; the jailer reads the
+per-VM uid/caps/netns from `jail.env`. Both sidecars were written at provision
+time and survive the reboot on disk. No Atlas-side intervention needed; the
 Frappe DB does not have to be consulted on host reboot.
 
 ## Why resource fields are frozen outside resize

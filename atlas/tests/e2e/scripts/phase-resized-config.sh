@@ -8,9 +8,10 @@ set -euo pipefail
 : "${MEMORY_MB:?}"
 : "${DISK_GB:?}"
 
-vm_directory="/var/lib/atlas/virtual-machines/${VIRTUAL_MACHINE_NAME}"
-config_path="${vm_directory}/firecracker.json"
-rootfs_path="${vm_directory}/rootfs.ext4"
+# Config and rootfs live inside the VM's jail.
+jail_root="/var/lib/atlas/virtual-machines/${VIRTUAL_MACHINE_NAME}/jail/firecracker/${VIRTUAL_MACHINE_NAME}/root"
+config_path="${jail_root}/firecracker.json"
+rootfs_path="${jail_root}/rootfs.ext4"
 
 actual_vcpus="$(sudo jq -r '."machine-config".vcpu_count' "$config_path")"
 actual_mem="$(sudo jq -r '."machine-config".mem_size_mib' "$config_path")"

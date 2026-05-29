@@ -4,10 +4,19 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from atlas.atlas.networking import (
+	MAX_OPEN_FILES,
+	MEMORY_HEADROOM_MIB,
+	UID_BASE,
+	UID_SPAN,
 	allocate_ipv6,
 	carve_virtual_machine_range,
+	cgroup_args,
 	derive_mac,
+	derive_netns,
 	derive_tap,
+	derive_uid,
+	derive_veth_pair,
+	resource_limit_args,
 )
 from atlas.tests.fixtures import make_image, make_provider, make_server
 
@@ -123,3 +132,76 @@ class TestNetworking(IntegrationTestCase):
 		_insert_vm(server, "2001:db8::2", status="Terminated")
 		_insert_vm(server, "2001:db8::3", status="Running")
 		self.assertEqual(allocate_ipv6(server), "2001:db8::2")
+
+	# ----- jailer isolation derivations (pure functions of the UUID) -----
+
+	def test_derive_uid_stable_and_in_range(self) -> None:
+		name = str(uuid.uuid4())
+		self.assertEqual(derive_uid(name), derive_uid(name))
+		uid = derive_uid(name)
+		self.assertGreaterEqual(uid, UID_BASE)
+		self.assertLess(uid, UID_BASE + UID_SPAN)
+
+	def test_derive_uid_spreads_across_uuids(self) -> None:
+		# A degenerate derivation (e.g. a constant) would collapse the space.
+		# 10k distinct UUIDs should produce a wide spread of distinct uids.
+		uids = {derive_uid(str(uuid.uuid4())) for _ in range(10000)}
+		# Birthday-paradox over a 60k space gives many collisions in 10k draws,
+		# but we still expect the vast majority distinct — a broken derivation
+		# would yield a tiny set.
+		self.assertGreater(len(uids), 8000, len(uids))
+
+	def test_derive_uid_matches_first_three_bytes(self) -> None:
+		# Pin the formula so an accidental change to the byte window is caught.
+		name = "d4f7c1a2-7e0a-4f1b-93cc-ad96b9b39b3e"
+		self.assertEqual(derive_uid(name), UID_BASE + 0xD4F7C1 % UID_SPAN)
+
+	def test_derive_netns_stable(self) -> None:
+		name = str(uuid.uuid4())
+		self.assertEqual(derive_netns(name), derive_netns(name))
+		self.assertTrue(derive_netns(name).startswith("atlas-"))
+		self.assertEqual(len(derive_netns(name)), len("atlas-") + 12)
+
+	def test_derive_veth_pair_distinct_and_ifnamsiz_safe(self) -> None:
+		for _ in range(20):
+			name = str(uuid.uuid4())
+			host_veth, ns_veth = derive_veth_pair(name)
+			# Stable.
+			self.assertEqual((host_veth, ns_veth), derive_veth_pair(name))
+			# Distinct from each other and from the tap.
+			self.assertNotEqual(host_veth, ns_veth)
+			self.assertNotIn(derive_tap(name), (host_veth, ns_veth))
+			# IFNAMSIZ-safe (<= 15 chars).
+			self.assertLessEqual(len(host_veth), 15, host_veth)
+			self.assertLessEqual(len(ns_veth), 15, ns_veth)
+			self.assertTrue(host_veth.startswith("atlas-h"))
+			self.assertTrue(ns_veth.startswith("atlas-n"))
+
+	def test_cgroup_args_for_resource_triple(self) -> None:
+		# 2 vCPU, 1024 MiB RAM, 8 GiB disk.
+		args = cgroup_args(vcpus=2, memory_megabytes=1024, disk_gigabytes=8)
+		expected_mem = (1024 + MEMORY_HEADROOM_MIB) * 1024 * 1024
+		self.assertEqual(
+			args,
+			[
+				"--cgroup",
+				f"memory.max={expected_mem}",
+				"--cgroup",
+				"memory.swap.max=0",
+				"--cgroup",
+				"cpu.max=200000 100000",
+			],
+		)
+
+	def test_resource_limit_args_caps_fsize_to_disk_plus_slack(self) -> None:
+		args = resource_limit_args(disk_gigabytes=8)
+		expected_fsize = (8 + 1) * 1024 * 1024 * 1024
+		self.assertEqual(
+			args,
+			[
+				"--resource-limit",
+				f"fsize={expected_fsize}",
+				"--resource-limit",
+				f"no-file={MAX_OPEN_FILES}",
+			],
+		)

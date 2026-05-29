@@ -69,6 +69,31 @@ class TestVirtualMachine(IntegrationTestCase):
 		mocked.assert_called_once()
 		self.assertEqual(mocked.call_args.kwargs["script"], "provision-vm.sh")
 
+	def test_provision_variables_carry_jail_parameters(self) -> None:
+		from atlas.atlas.networking import (
+			cgroup_args,
+			derive_netns,
+			derive_uid,
+			derive_veth_pair,
+			resource_limit_args,
+		)
+
+		vm = _new_vm()
+		variables = vm._provision_variables()
+		host_veth, namespace_veth = derive_veth_pair(vm.name)
+		self.assertEqual(variables["ATLAS_FC_UID"], str(derive_uid(vm.name)))
+		self.assertEqual(variables["ATLAS_NETNS"], derive_netns(vm.name))
+		self.assertEqual(variables["HOST_VETH"], host_veth)
+		self.assertEqual(variables["NAMESPACE_VETH"], namespace_veth)
+		self.assertEqual(
+			variables["ATLAS_CGROUP_ARGS"],
+			" ".join(cgroup_args(vm.vcpus, vm.memory_megabytes, vm.disk_gigabytes)),
+		)
+		self.assertEqual(
+			variables["ATLAS_RESOURCE_ARGS"],
+			" ".join(resource_limit_args(vm.disk_gigabytes)),
+		)
+
 	def test_provision_failure_flips_status_to_failed(self) -> None:
 		"""On failure the Task is saved with `Failure`; the Task controller
 		hook then flips the linked VM's status to `Failed` so the form makes

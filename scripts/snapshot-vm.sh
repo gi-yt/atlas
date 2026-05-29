@@ -15,7 +15,8 @@ set -euo pipefail
 : "${VIRTUAL_MACHINE_NAME:?required}"
 : "${SNAPSHOT_ROOTFS_PATH:?required}"
 
-source_rootfs="/var/lib/atlas/virtual-machines/${VIRTUAL_MACHINE_NAME}/rootfs.ext4"
+# The live rootfs lives inside the VM's jail (built at provision time).
+source_rootfs="/var/lib/atlas/virtual-machines/${VIRTUAL_MACHINE_NAME}/jail/firecracker/${VIRTUAL_MACHINE_NAME}/root/rootfs.ext4"
 snapshot_directory="$(dirname "$SNAPSHOT_ROOTFS_PATH")"
 
 if [ ! -f "$source_rootfs" ]; then

@@ -44,7 +44,7 @@ class TestServerBootstrap(IntegrationTestCase):
 
 		task = fake_task(
 			name="task-x",
-			stdout='{"firecracker_version": "", "kernel_version": "", "architecture": ""}',
+			stdout='{"firecracker_version": "", "jailer_version": "", "kernel_version": "", "architecture": ""}',
 		)
 
 		with patch.object(server_module, "upload_files") as upload:
@@ -65,6 +65,7 @@ class TestServerBootstrap(IntegrationTestCase):
 		stdout = (
 			"+ some bash trace\n"
 			'{"firecracker_version": "1.15.1",'
+			' "jailer_version": "1.15.1",'
 			' "kernel_version": "6.8.0-31-generic",'
 			' "architecture": "x86_64"}\n'
 		)
@@ -80,6 +81,7 @@ class TestServerBootstrap(IntegrationTestCase):
 					self.server.bootstrap()
 		self.server.reload()
 		self.assertEqual(self.server.firecracker_version, "1.15.1")
+		self.assertEqual(self.server.jailer_version, "1.15.1")
 		self.assertEqual(self.server.kernel_version, "6.8.0-31-generic")
 		self.assertEqual(self.server.architecture, "x86_64")
 

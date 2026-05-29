@@ -51,6 +51,7 @@ def run() -> None:
 		server_doc = _wait_for_status(server_name, target={"Active", "Broken"}, timeout=600)
 		assert server_doc.status == "Active", f"expected Active, got {server_doc.status}"
 		assert server_doc.firecracker_version, "firecracker_version not recorded"
+		assert server_doc.jailer_version, "jailer_version not recorded"
 
 		bootstrap_tasks = frappe.get_all(
 			"Task",

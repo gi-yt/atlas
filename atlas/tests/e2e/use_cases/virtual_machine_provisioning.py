@@ -25,6 +25,7 @@ import time
 
 import frappe
 
+from atlas.atlas.networking import derive_netns, derive_uid
 from atlas.atlas.ssh import run_task
 from atlas.tests.e2e._shared import (
 	assert_probe,
@@ -124,6 +125,17 @@ def _check_provision_happy_path(server_name: str, image: str, public_key: str) -
 	assert vm.last_started
 
 	assert_probe(server_name, "phase5-is-active.sh", VIRTUAL_MACHINE_NAME=vm.name)
+
+	# Production contract: Firecracker is jailed — runs as the per-VM uid (not
+	# root), chrooted into the VM's jail, in the VM's network namespace, bounded
+	# by per-VM cgroup caps. A green boot that still ran as root is a failure.
+	assert_probe(
+		server_name,
+		"phase-jailed.sh",
+		VIRTUAL_MACHINE_NAME=vm.name,
+		ATLAS_FC_UID=str(derive_uid(vm.name)),
+		ATLAS_NETNS=derive_netns(vm.name),
+	)
 
 	# Phase 3 contract: the SSH key lives on disk (Atlas Settings
 	# .ssh_private_key_path), not in the DB. Before SSHing into the guest,

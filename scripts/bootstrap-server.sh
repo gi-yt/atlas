@@ -61,10 +61,15 @@ sudo apt-get -o DPkg::Lock::Timeout=300 install -y \
     nftables \
     squashfs-tools
 
-# 3. Install Firecracker binary.
-INSTALLED_VERSION="$(/usr/local/bin/firecracker --version 2>/dev/null | head -n1 | awk '{print $2}' || true)"
+# 3. Install Firecracker + jailer binaries. Both ship in the same release
+#    tarball; production runs every VM under the jailer (de-privileged, chrooted,
+#    cgroup-isolated), so we install both. Gate on EITHER binary being absent or
+#    at the wrong version, so a host bootstrapped before the jailer existed picks
+#    it up on re-run.
+INSTALLED_FIRECRACKER="$(/usr/local/bin/firecracker --version 2>/dev/null | head -n1 | awk '{print $2}' || true)"
+INSTALLED_JAILER="$(/usr/local/bin/jailer --version 2>/dev/null | head -n1 | awk '{print $2}' || true)"
 WANTED_VERSION="${FIRECRACKER_VERSION#v}"
-if [ "$INSTALLED_VERSION" != "$WANTED_VERSION" ]; then
+if [ "$INSTALLED_FIRECRACKER" != "$WANTED_VERSION" ] || [ "$INSTALLED_JAILER" != "$WANTED_VERSION" ]; then
     cd /tmp
     sudo rm -rf firecracker-install
     mkdir firecracker-install
@@ -74,6 +79,8 @@ if [ "$INSTALLED_VERSION" != "$WANTED_VERSION" ]; then
         | tar -xz
     sudo install -m 0755 "release-${FIRECRACKER_VERSION}-${ARCHITECTURE}/firecracker-${FIRECRACKER_VERSION}-${ARCHITECTURE}" \
         /usr/local/bin/firecracker
+    sudo install -m 0755 "release-${FIRECRACKER_VERSION}-${ARCHITECTURE}/jailer-${FIRECRACKER_VERSION}-${ARCHITECTURE}" \
+        /usr/local/bin/jailer
     cd /tmp
     rm -rf firecracker-install
 fi
@@ -112,9 +119,11 @@ sudo systemctl daemon-reload
 sudo install -d -m 0755 /var/lib/atlas
 sudo jq -nc \
     --arg firecracker_version "$(/usr/local/bin/firecracker --version | head -n1 | awk '{print $2}')" \
+    --arg jailer_version "$(/usr/local/bin/jailer --version | head -n1 | awk '{print $2}')" \
     --arg kernel_version "$(uname -r)" \
     --arg architecture "$(uname -m)" \
     '{firecracker_version: $firecracker_version,
+      jailer_version: $jailer_version,
       kernel_version: $kernel_version,
       architecture: $architecture}' \
     | sudo tee /var/lib/atlas/bootstrap.json >/dev/null

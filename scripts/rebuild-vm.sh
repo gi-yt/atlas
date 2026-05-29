@@ -15,6 +15,7 @@
 #   DISK_GB               - target rootfs size (the VM's current disk size)
 #   VIRTUAL_MACHINE_IPV6  - injected into the rootfs network env
 #   SSH_PUBLIC_KEY        - injected into authorized_keys
+#   ATLAS_FC_UID          - per-VM uid; the rebuilt rootfs is chowned back to it
 #   One source, exactly:
 #     SNAPSHOT_ROOTFS_PATH  - absolute path to a snapshot rootfs (Restore), OR
 #     IMAGE_NAME + ROOTFS_FILENAME - a base image under /var/lib/atlas/images (Rebuild)
@@ -28,12 +29,15 @@ set -euo pipefail
 : "${DISK_GB:?required}"
 : "${VIRTUAL_MACHINE_IPV6:?required}"
 : "${SSH_PUBLIC_KEY:?required}"
+: "${ATLAS_FC_UID:?required}"
 
 vm_directory="/var/lib/atlas/virtual-machines/${VIRTUAL_MACHINE_NAME}"
-rootfs_path="${vm_directory}/rootfs.ext4"
+# The rootfs lives inside the jail (built at provision); rebuild swaps that file.
+jail_root="${vm_directory}/jail/firecracker/${VIRTUAL_MACHINE_NAME}/root"
+rootfs_path="${jail_root}/rootfs.ext4"
 
-if [ ! -d "$vm_directory" ]; then
-    echo "VM directory ${vm_directory} missing; provision the VM before rebuilding" >&2
+if [ ! -d "$jail_root" ]; then
+    echo "jail ${jail_root} missing; provision the VM before rebuilding" >&2
     exit 1
 fi
 
@@ -59,5 +63,9 @@ fi
 sudo rm -f "$rootfs_path"
 atlas_copy_rootfs "$source_rootfs" "$rootfs_path" "$DISK_GB"
 atlas_inject_identity "$rootfs_path" "$VIRTUAL_MACHINE_NAME" "$VIRTUAL_MACHINE_IPV6" "$SSH_PUBLIC_KEY"
+
+# The new rootfs was created by root (cp); hand it back to the per-VM uid so the
+# jailed Firecracker can open it RW.
+sudo chown "${ATLAS_FC_UID}:${ATLAS_FC_UID}" "$rootfs_path"
 
 echo "Rebuilt ${VIRTUAL_MACHINE_NAME} from ${source_rootfs}."

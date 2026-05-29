@@ -1,9 +1,34 @@
-"""Networking helpers: IPv6 carve, MAC/tap derivation, IPv6 allocation."""
+"""Networking helpers: IPv6 carve, MAC/tap derivation, IPv6 allocation.
+
+Also holds the jailer-isolation derivations — per-VM uid/gid, network-namespace
+and veth-pair names, and the cgroup/rlimit argument strings. Like `derive_mac`
+and `derive_tap`, these are pure functions of the VM's UUID (and, for the caps,
+its own resource fields), so the on-host jail is fully reconstructible from the
+Frappe row with no allocator and no extra DocType state.
+"""
 
 import ipaddress
 import uuid
 
 import frappe
+
+# Per-VM POSIX uid/gid the jailer drops Firecracker to. Derived from the UUID so
+# every VM gets a distinct, stable id with no allocator and no /etc/passwd row
+# (the jailer takes a numeric --uid/--gid and chowns by number — Linux does not
+# require a passwd entry for a uid to own files or run a process). The window
+# sits well above system (<1000) and normal-login (1000-60000) ranges.
+UID_BASE = 200000
+UID_SPAN = 60000
+
+# Headroom over the guest's RAM for the Firecracker process's own VMM/IO/vCPU
+# threads and page-cache churn, so `memory.max` bounds the whole process without
+# OOM-killing a healthy VM. Too tight surfaces loudly as a failed-to-start unit.
+MEMORY_HEADROOM_MIB = 256
+
+# rlimit on open file descriptors for the jailed process. The jailer defaults to
+# 2048 when unset; 1024 is ample for one Firecracker (a handful of fds: kvm,
+# tap, drives, socket) and bounds a runaway.
+MAX_OPEN_FILES = 1024
 
 
 def carve_virtual_machine_range(host_address: str, prefix_cidr: str) -> str:
@@ -68,3 +93,85 @@ def allocate_ipv6(server_name: str) -> str:
 		if str(candidate) not in used:
 			return str(candidate)
 	raise frappe.ValidationError("No IPv6 capacity on server")
+
+
+def derive_uid(virtual_machine_name: str) -> int:
+	"""Per-VM POSIX uid the jailer runs Firecracker as.
+
+	`UID_BASE + (first 3 bytes of the UUID) % UID_SPAN`, e.g. 247312. Stable
+	across reboots and re-provisions (pure function of the UUID), distinct per VM
+	so a breakout of one jail cannot touch another VM's files. gid == uid (a
+	matching per-VM group). Provision fails loud if a *different* live VM on the
+	same host already owns the derived uid (a mod collision), rather than silently
+	sharing it.
+	"""
+	first_three_bytes = int(uuid.UUID(virtual_machine_name).hex[:6], 16)
+	return UID_BASE + first_three_bytes % UID_SPAN
+
+
+def derive_netns(virtual_machine_name: str) -> str:
+	"""Per-VM network namespace name: `atlas-<first 12 hex of UUID>`.
+
+	Network-namespace names have no IFNAMSIZ limit, so we use 12 hex chars for
+	legibility (the tap inside it keeps the 15-char IFNAMSIZ-safe `derive_tap`
+	name). The jailer joins this namespace via `--netns /var/run/netns/<name>`.
+	"""
+	hex_only = uuid.UUID(virtual_machine_name).hex
+	return f"atlas-{hex_only[:12]}"
+
+
+def derive_veth_pair(virtual_machine_name: str) -> tuple[str, str]:
+	"""(host_side, namespace_side) veth interface names.
+
+	`atlas-h<7 hex>` lives in the host netns and carries the VM's /128 onward to
+	the uplink; `atlas-n<7 hex>` is moved into the VM's namespace as its default
+	route out. Both are 15 chars (`atlas-` + 1 + 7 + the h/n tag — 6+1+1+7=15),
+	IFNAMSIZ-safe like `derive_tap`, and distinct from the tap name.
+	"""
+	hex_only = uuid.UUID(virtual_machine_name).hex
+	short = hex_only[:7]
+	return f"atlas-h{short}", f"atlas-n{short}"
+
+
+def cgroup_args(vcpus: int, memory_megabytes: int, disk_gigabytes: int) -> list[str]:
+	"""Jailer `--cgroup` flags bounding the VM's memory and CPU (cgroup v2).
+
+	- `memory.max` = guest RAM + headroom (whole-process ceiling).
+	- `memory.swap.max` = 0 — never swap guest RAM to host disk (also the
+	  per-VM form of Firecracker's "disable swap / data-remanence" guidance).
+	- `cpu.max` = `<vcpus * period> <period>` — `vcpus` cores' worth of CPU
+	  bandwidth per 100 ms period (bandwidth cap, not cpuset pinning).
+
+	`disk_gigabytes` is unused here (disk is bounded via the `fsize` rlimit, see
+	`resource_limit_args`) but kept in the signature so the one call site passes
+	the VM's full resource triple.
+	"""
+	_ = disk_gigabytes
+	period_us = 100000
+	memory_max_bytes = (memory_megabytes + MEMORY_HEADROOM_MIB) * 1024 * 1024
+	cpu_quota_us = vcpus * period_us
+	return [
+		"--cgroup",
+		f"memory.max={memory_max_bytes}",
+		"--cgroup",
+		"memory.swap.max=0",
+		"--cgroup",
+		f"cpu.max={cpu_quota_us} {period_us}",
+	]
+
+
+def resource_limit_args(disk_gigabytes: int) -> list[str]:
+	"""Jailer `--resource-limit` flags (setrlimit) bounding fds and file size.
+
+	`fsize` caps any single file the jailed process can create at the VM's disk
+	size plus 1 GiB of slack (the rootfs is already that large; the slack covers
+	the API socket, logs, and Firecracker's own scratch without letting a runaway
+	fill the host). `no-file` bounds the descriptor count.
+	"""
+	fsize_bytes = (disk_gigabytes + 1) * 1024 * 1024 * 1024
+	return [
+		"--resource-limit",
+		f"fsize={fsize_bytes}",
+		"--resource-limit",
+		f"no-file={MAX_OPEN_FILES}",
+	]

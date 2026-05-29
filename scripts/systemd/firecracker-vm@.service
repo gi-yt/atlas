@@ -5,17 +5,40 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStartPre=/bin/rm -f /var/lib/atlas/run/%i.sock
+# Per-VM jail parameters, written by provision-vm.sh: ATLAS_FC_UID/GID, the
+# network-namespace name, and the assembled --cgroup / --resource-limit flag
+# strings (whitespace-split into argv below).
+EnvironmentFile=/var/lib/atlas/virtual-machines/%i/jail.env
+# Networking (netns + veth + in-namespace tap) must exist before the jailer
+# joins the namespace; ExecStartPre runs to completion before ExecStart.
+ExecStartPre=/bin/rm -f /var/lib/atlas/virtual-machines/%i/jail/firecracker/%i/root/run/firecracker.socket
 ExecStartPre=/var/lib/atlas/bin/vm-network-up.sh %i
-ExecStart=/usr/local/bin/firecracker \
-    --api-sock /var/lib/atlas/run/%i.sock \
-    --config-file /var/lib/atlas/virtual-machines/%i/firecracker.json
+# Run Firecracker under the jailer: de-privileged to the per-VM uid/gid,
+# chrooted into the per-VM jail, cgroup-v2 memory/cpu caps + fd/file rlimits,
+# and joined to the VM's own network namespace. Everything after `--` is
+# forwarded to Firecracker, with paths relative to the jail root.
+ExecStart=/usr/local/bin/jailer \
+    --id %i \
+    --exec-file /usr/local/bin/firecracker \
+    --uid ${ATLAS_FC_UID} \
+    --gid ${ATLAS_FC_GID} \
+    --cgroup-version 2 \
+    --netns /var/run/netns/${ATLAS_NETNS} \
+    $ATLAS_CGROUP_ARGS \
+    $ATLAS_RESOURCE_ARGS \
+    --chroot-base-dir /var/lib/atlas/virtual-machines/%i/jail \
+    -- \
+    --api-sock run/firecracker.socket \
+    --config-file firecracker.json
 ExecStopPost=/var/lib/atlas/bin/vm-network-down.sh %i
 StandardOutput=append:/var/lib/atlas/virtual-machines/%i/log/firecracker.log
 StandardError=append:/var/lib/atlas/virtual-machines/%i/log/firecracker.log
 Restart=always
 RestartSec=5s
-KillMode=process
+# The jailer is the unit's main process and Firecracker is its child; KillMode
+# mixed sends SIGTERM to the jailer and SIGKILL to the whole control group, so
+# the jailed Firecracker dies with the unit rather than being orphaned.
+KillMode=mixed
 
 [Install]
 WantedBy=multi-user.target

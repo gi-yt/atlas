@@ -6,7 +6,8 @@ set -euo pipefail
 
 : "${VIRTUAL_MACHINE_NAME:?}"
 
-socket="/var/lib/atlas/run/${VIRTUAL_MACHINE_NAME}.sock"
+# The API socket is created by Firecracker inside its jail.
+socket="/var/lib/atlas/virtual-machines/${VIRTUAL_MACHINE_NAME}/jail/firecracker/${VIRTUAL_MACHINE_NAME}/root/run/firecracker.socket"
 state="$(sudo curl --fail --silent --unix-socket "$socket" http://localhost/ \
     | jq -r '.state // empty')"
 if [ "$state" != "Paused" ]; then

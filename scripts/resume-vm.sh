@@ -10,7 +10,9 @@ set -euo pipefail
 
 : "${VIRTUAL_MACHINE_NAME:?required}"
 
-socket="/var/lib/atlas/run/${VIRTUAL_MACHINE_NAME}.sock"
+# The API socket is created by Firecracker inside its jail (a host-filesystem
+# unix socket; the VM's network namespace doesn't affect reaching it).
+socket="/var/lib/atlas/virtual-machines/${VIRTUAL_MACHINE_NAME}/jail/firecracker/${VIRTUAL_MACHINE_NAME}/root/run/firecracker.socket"
 if [ ! -S "$socket" ]; then
     echo "API socket ${socket} not present; is the VM running?" >&2
     exit 1

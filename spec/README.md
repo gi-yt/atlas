@@ -25,7 +25,13 @@ keep it the source of truth.
 - No users, teams, roles, billing, quotas.
 - No CLI. We will build one later on top of the same Frappe APIs.
 - No private networking, no overlay, no IPv4 to the guest.
-- No jailer, no unprivileged user, no SELinux or AppArmor. Root everywhere.
+- No SELinux or AppArmor. Atlas connects to the host as **root** over SSH to
+  run Tasks. But each **Firecracker process is jailed**: started via the
+  `jailer` binary, it runs under a per-VM uid/gid, chrooted into the VM's own
+  jail, with per-VM cgroup-v2 memory/CPU caps and its own network namespace.
+  Still deferred (see [09-roadmap.md](./09-roadmap.md)): dropping the root SSH
+  transport, CPU *pinning* (we cap CPU bandwidth, not affinity), a new PID
+  namespace per VM, custom seccomp filters.
 - No image build pipeline. We download Firecracker CI images and use them.
 - No Firecracker memory-state snapshots, no live migration, no high
   availability. (Disk snapshots — a copy of the VM's rootfs — are supported;

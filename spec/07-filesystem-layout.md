@@ -12,21 +12,24 @@ else.
 │
 ├── virtual-machines/
 │   ├── d4f7c1a2-7e0a-4f1b-93cc-ad96b9b39b3e/
-│   │   ├── firecracker.json          # Firecracker --config-file
-│   │   ├── rootfs.ext4               # per-VM mutable rootfs
-│   │   ├── network.env               # TAP_DEVICE, VIRTUAL_MACHINE_IPV6
+│   │   ├── jail/                     # jailer chroot base for this VM
+│   │   │   └── firecracker/<uuid>/root/   # the jail root (per-VM uid owns it)
+│   │   │       ├── firecracker        # copied in by the jailer
+│   │   │       ├── firecracker.json   # config, jail-relative paths
+│   │   │       ├── rootfs.ext4        # per-VM mutable rootfs
+│   │   │       ├── vmlinux            # hard-link to the image kernel
+│   │   │       └── run/firecracker.socket  # Firecracker API socket
+│   │   ├── network.env               # TAP/IPV6 + netns + veth names
+│   │   ├── jail.env                  # per-VM uid/gid, netns, cgroup/rlimit args
 │   │   ├── snapshots/                # disk snapshots of this VM
 │   │   │   └── <snapshot-uuid>/
-│   │   │       └── rootfs.ext4       # a copy taken while Stopped
+│   │   │       └── rootfs.ext4       # a copy taken while Stopped (host-owned)
 │   │   └── log/
 │   │       └── firecracker.log
 │   ├── 19ae...                       # one directory per VM, named by UUID
 │   └── ...
 │
-├── run/
-│   ├── d4f7c1a2-...-9b3e.sock        # Firecracker API socket per VM
-│   ├── 19ae...-.sock
-│   └── ...
+├── run/                              # (legacy; API socket now lives in the jail)
 │
 └── bin/                              # Helper scripts laid down by bootstrap
     ├── vm-network-up.sh
@@ -40,13 +43,20 @@ else.
   is the inventory.
 - Logs go inside the VM directory, not `/var/log/`. Easier to clean up;
   easier to ship in one tarball.
-- Disk snapshots live under the VM's own `snapshots/<snapshot-uuid>/`, so
-  terminating a VM (`rm -rf` of its directory) takes its snapshots with it.
-  A snapshot is just a copy of `rootfs.ext4` taken while the VM is Stopped.
-- API sockets live under `/var/lib/atlas/run/`, not `/var/run/firecracker/`.
-  We do not share the path with anything else.
+- The VM's working files — rootfs, kernel link, Firecracker config, and the
+  API socket — live inside the per-VM **jail** at
+  `jail/firecracker/<uuid>/root/`, owned by the VM's per-VM uid (the jailer
+  chroots Firecracker there). The jail is nested under the VM directory, so
+  `rm -rf` of the VM directory still takes everything with it.
+- Disk snapshots live under the VM's own `snapshots/<snapshot-uuid>/` (host-
+  owned, outside the jail), so terminating a VM (`rm -rf` of its directory)
+  takes its snapshots with it. A snapshot is just a copy of the jail's
+  `rootfs.ext4` taken while the VM is Stopped.
+- The API socket is created by Firecracker inside its jail
+  (`jail/.../root/run/firecracker.socket`), not under `/var/lib/atlas/run/`.
+  The legacy `run/` directory is still created by bootstrap but is unused.
 - Images are read-only after sync. Provisioning copies the image rootfs into
-  the VM directory.
+  the VM's jail; the kernel is hard-linked in (one copy, shared by inode).
 
 ## Why plain `cp` for per-VM rootfs
 

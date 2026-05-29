@@ -1,6 +1,7 @@
 #!/bin/bash
 # Symmetric teardown for vm-network-up.sh. Invoked by ExecStopPost on the
-# systemd unit. Idempotent: missing rules and devices are not an error.
+# systemd unit. Idempotent: missing rules, devices and namespaces are not an
+# error.
 
 set -euo pipefail
 
@@ -15,13 +16,24 @@ fi
 
 uplink="$(ip -j -6 route show default | jq -r '.[0].dev' 2>/dev/null || true)"
 
+# Proxy-NDP entry on the uplink.
 if [ -n "${VIRTUAL_MACHINE_IPV6:-}" ] && [ -n "$uplink" ]; then
     sudo ip -6 neigh del proxy "$VIRTUAL_MACHINE_IPV6" dev "$uplink" 2>/dev/null || true
 fi
 
-if [ -n "${TAP_DEVICE:-}" ]; then
-    sudo ip -6 route del "${VIRTUAL_MACHINE_IPV6}/128" dev "$TAP_DEVICE" 2>/dev/null || true
-    sudo ip link del "$TAP_DEVICE" 2>/dev/null || true
+# Host-side /128 route into the namespace.
+if [ -n "${VIRTUAL_MACHINE_IPV6:-}" ] && [ -n "${HOST_VETH:-}" ]; then
+    sudo ip -6 route del "${VIRTUAL_MACHINE_IPV6}/128" dev "$HOST_VETH" 2>/dev/null || true
+fi
+
+# The namespace owns the tap and the namespace-side veth; deleting it takes both.
+if [ -n "${ATLAS_NETNS:-}" ]; then
+    sudo ip netns del "$ATLAS_NETNS" 2>/dev/null || true
+fi
+
+# The host-side veth end (its peer went with the namespace, but delete defensively).
+if [ -n "${HOST_VETH:-}" ]; then
+    sudo ip link del "$HOST_VETH" 2>/dev/null || true
 fi
 
 # Delete the two nft rules by handle. Look them up by VM IPv6.

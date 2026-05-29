@@ -135,29 +135,45 @@ scaffold back. Per-VM forward rules are added by the same script.
 
 ## Per-VM, on the host
 
+Each VM gets its **own network namespace**, so a jail breakout cannot see the
+host's interfaces, the uplink, or any other VM's tap. The VM's tap lives inside
+that namespace; a **veth pair** bridges the namespace back to the host. The
+guest contract is unchanged — it still uses `fe80::1` (on the tap, now inside
+its namespace) as its gateway and sees only its own `/128`. The only difference
+from a host-netns tap is one extra link-local hop across the veth, entirely
+inside the host.
+
 [`vm-network-up.sh`](../scripts/vm-network-up.sh), invoked by the systemd
-unit's `ExecStartPre`, reads `network.env` and:
+unit's `ExecStartPre`, reads `network.env` (which carries `TAP_DEVICE`,
+`VIRTUAL_MACHINE_IPV6`, `ATLAS_NETNS`, `HOST_VETH`, `NAMESPACE_VETH`) and:
 
-1. Creates a tap device for the VM with `vnet_hdr` enabled
-   (`ip tuntap add … mode tap vnet_hdr`). Firecracker's virtio-net
-   activation calls `TUNSETOFFLOAD` on the tap fd, which requires
-   `IFF_VNET_HDR` on the device — without it activation fails with
-   `EBADF` and the guest boots with no working NIC.
-2. Assigns `fe80::1/64` to the tap (so the guest can use `fe80::1` as its
-   gateway).
-3. `ip -6 route add VM_IPV6/128 dev TAP_DEVICE`.
-4. `ip -6 neigh add proxy VM_IPV6 dev <uplink>`.
-5. Adds two nftables forward rules: ingress and egress.
+1. Creates the namespace `ATLAS_NETNS` (clean re-create for known state).
+2. Creates the veth pair and moves `NAMESPACE_VETH` into the namespace.
+3. Enables IPv6 forwarding **inside the namespace** — it forwards between the
+   veth (uplink side) and the tap (guest side), and namespaces have independent
+   sysctls that default to off.
+4. Inside the namespace: creates the tap with `vnet_hdr`
+   (`ip tuntap add … mode tap vnet_hdr` — Firecracker's virtio-net activation
+   calls `TUNSETOFFLOAD`, which requires `IFF_VNET_HDR`, or activation fails with
+   `EBADF` and the guest boots with no NIC), assigns `fe80::1/64` to it (the
+   guest's gateway), and routes `VM_IPV6/128` to the tap.
+5. Brings both veth ends up with link-local addresses (`fe80::2` host side,
+   `fe80::3` namespace side) and points the namespace's **default route** at the
+   host end (`via fe80::2`), so guest egress flows out the veth toward the uplink.
+6. On the host: routes `VM_IPV6/128` into the namespace
+   (`via fe80::3 dev HOST_VETH`) and adds the proxy-NDP entry on the uplink.
+7. Adds two nftables forward rules matching `HOST_VETH` (the tap is no longer in
+   the host namespace to match on): ingress and egress.
 
-It runs as `ExecStartPre`, not `ExecStartPost`: firecracker attaches to
-the tap on startup, so the tap must exist with `vnet_hdr` before
-firecracker's `ExecStart` fires. If `vm-network-up.sh` ran after, the
-kernel would auto-create a tap without `vnet_hdr` when firecracker opens
-it, then `vm-network-up.sh`'s idempotent `ip link del` would yank the
-device out from under firecracker mid-boot.
+It runs as `ExecStartPre`, not `ExecStartPost`: the jailer joins the namespace
+via `--netns` and Firecracker attaches to the tap on startup, so the namespace
+and the tap (with `vnet_hdr`) must exist before the jailer's `ExecStart` fires.
+`ExecStartPre` runs to completion first, so this ordering holds.
 
 [`vm-network-down.sh`](../scripts/vm-network-down.sh) is symmetric and
-best-effort.
+best-effort: it removes the proxy-NDP entry, the host route, then `ip netns del`
+(which takes the tap and the namespace-side veth with it), the host-side veth,
+and the nft rules.
 
 ## Inside the guest
 
@@ -188,9 +204,9 @@ End-to-end check from any IPv6-capable client: `ping6
 | --------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------ |
 | Host `…:d001` answers, VM `…:dXXX` does not | VM address is outside the routable /124                       | `Server.ipv6_virtual_machine_range` must *contain* the host address. If it starts at `…:d000` and the host is `…:d001`, good. If it starts at `:::/124` (the /64 start), the carve is wrong — see below. |
 | VM address is in the /124, still silent | proxy-NDP entry missing on the uplink                         | On the host: `ip -6 neigh show proxy` should list the VM address against `eth0` (or whatever `ip -6 route show default` reports as `dev`). |
-| Proxy entry present, still silent       | No host route into the tap                                    | On the host: `ip -6 route` should show `<VM_IPV6>/128 dev atlas-<...>`. |
-| Route present, VM unreachable, guest can't ARP its gateway | Tap created without `vnet_hdr` (firecracker auto-created it before `vm-network-up.sh` ran) | On the host: `ip -d link show <tap>` — should list `tun … vnet_hdr on`. If absent, the VM's virtio-net activation failed silently and the guest came up with no working NIC. Cause: the script ran as `ExecStartPost` instead of `ExecStartPre`. |
-| Tap looks right, ping still drops       | nftables forward rules missing                                | On the host: `nft list table inet atlas` should show one ingress + one egress rule per live VM. |
+| Proxy entry present, still silent       | No host route into the namespace                              | On the host: `ip -6 route` should show `<VM_IPV6>/128 via fe80::3 dev <HOST_VETH>`. Inside the namespace (`ip netns exec <ns> ip -6 route`) the same `/128` should point at the tap, and `default via fe80::2`. |
+| Route present, VM unreachable, guest can't resolve its gateway | Tap created without `vnet_hdr`, or the namespace isn't forwarding | The tap is inside the namespace now: `ip netns exec <ns> ip -d link show <tap>` should list `tun … vnet_hdr on`. Also `ip netns exec <ns> sysctl net.ipv6.conf.all.forwarding` must be `1` (the namespace forwards veth↔tap). |
+| Tap looks right, ping still drops       | nftables forward rules missing                                | On the host: `nft list table inet atlas` should show one ingress + one egress rule per live VM, matching `<HOST_VETH>` (not the tap). |
 | Everything on the host looks right      | Guest didn't apply its address                                | In the guest console (firecracker log): look for `atlas-network.service` failures, or `ip -6 addr show eth0` showing no `<VM_IPV6>/128`. |
 
 ### Historical bug: the carve

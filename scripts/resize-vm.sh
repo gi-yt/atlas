@@ -18,9 +18,10 @@ set -euo pipefail
 : "${MEMORY_MB:?required}"
 : "${DISK_GB:?required}"
 
-vm_directory="/var/lib/atlas/virtual-machines/${VIRTUAL_MACHINE_NAME}"
-config_path="${vm_directory}/firecracker.json"
-rootfs_path="${vm_directory}/rootfs.ext4"
+# Config and rootfs live inside the VM's jail (built at provision time).
+jail_root="/var/lib/atlas/virtual-machines/${VIRTUAL_MACHINE_NAME}/jail/firecracker/${VIRTUAL_MACHINE_NAME}/root"
+config_path="${jail_root}/firecracker.json"
+rootfs_path="${jail_root}/rootfs.ext4"
 
 if [ ! -f "$config_path" ]; then
     echo "firecracker config ${config_path} missing; provision the VM first" >&2
@@ -28,12 +29,15 @@ if [ ! -f "$config_path" ]; then
 fi
 
 # 1. Rewrite machine-config in place. jq edits only the two keys, preserving
-#    boot-source, drives and network-interfaces.
+#    boot-source, drives and network-interfaces. The replacement file is created
+#    by root; copy the original's owner onto it so the jailed Firecracker (the
+#    per-VM uid) can still read its config after chroot.
 sudo jq \
     --argjson vcpus "$VCPUS" \
     --argjson mem "$MEMORY_MB" \
     '."machine-config".vcpu_count = $vcpus | ."machine-config".mem_size_mib = $mem' \
     "$config_path" | sudo install -m 0644 /dev/stdin "${config_path}.new"
+sudo chown --reference="$config_path" "${config_path}.new"
 sudo mv "${config_path}.new" "$config_path"
 
 # 2. Grow the rootfs to DISK_GB. truncate only ever extends here (shrink is

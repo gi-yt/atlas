@@ -96,11 +96,31 @@ behavior; they just keep doors open.
   a benign race that wastes bandwidth; with more operators it stops being
   benign. Additive.
 
-- **Unprivileged user on the server**. Move from `root` to an `atlas`
-  user with `sudo` on a narrow allowlist. Then drop `sudo` for the
-  Firecracker binary in favor of the **jailer**. Touches the wrapper
-  that prepends `sudo` and the SSH connection layer (which user the
-  key authenticates as). Not breaking.
+- **Jailer** — *done*. Every Firecracker process runs under the `jailer`
+  binary: de-privileged to a per-VM uid/gid (derived from the UUID, no
+  allocator, no passwd row), chrooted into the VM's own jail
+  (`virtual-machines/<uuid>/jail/firecracker/<uuid>/root`), with per-VM
+  cgroup-v2 caps (`memory.max` = guest RAM + 256 MiB headroom,
+  `memory.swap.max=0`, `cpu.max` = vCPUs' bandwidth) and fd/file rlimits, and
+  its own network namespace (veth-bridged to the host, IPv6 reachability
+  preserved). See [05-virtual-machine-lifecycle.md](./05-virtual-machine-lifecycle.md),
+  [06-networking.md](./06-networking.md), [07-filesystem-layout.md](./07-filesystem-layout.md).
+  Still deferred here:
+  - **Unprivileged SSH transport.** Atlas still connects to the host as `root`
+    to run Tasks. Moving to an `atlas` user with `sudo` on a narrow allowlist
+    touches the wrapper that prepends `sudo` and the SSH connection layer (which
+    user the key authenticates as). The jailer already removed the need for the
+    *Firecracker* process to run as root; this is the remaining root surface.
+    Not breaking.
+  - **CPU pinning.** We cap CPU *bandwidth* (`cpu.max`), not affinity. Pinning
+    (`cpuset.cpus`/`cpuset.mems`, NUMA) needs host-topology modeling we don't do
+    yet. Additive.
+  - **New PID namespace per VM** (`--new-pid-ns`), **custom seccomp filters**,
+    and **block/net rate limiters** — extra isolation/tuning knobs on top of the
+    jailer + Firecracker defaults. Additive.
+  - **Existing-VM migration.** VMs provisioned before this change keep their old
+    non-jailed unit and flat (non-jail) paths until re-provisioned; they are not
+    retro-jailed. Terminate + reprovision to adopt the jail.
 
 - **Host-key pinning**. See above.
 
@@ -139,6 +159,48 @@ behavior; they just keep doors open.
   - **Cross-server snapshots.** A snapshot lives on its VM's server; clone and
     restore target the same server. Moving a snapshot to another host (for
     rebalancing or as an image-build input) is additive but unbuilt.
+
+    It is **not** blocked by the Firecracker cross-host snapshot matrix
+    (identical CPU model / host-kernel / GIC version — see
+    [snapshot-support.md § "Where can I resume my snapshots?"](../../references/firecracker/docs/snapshotting/snapshot-support.md)).
+    Those constraints bind only the serialized *memory-state* snapshot, which we
+    deliberately do not use; a disk snapshot is a plain `rootfs.ext4` file and is
+    portable. The real blockers are Atlas-side and mundane:
+    - **Structural.** Snapshots are children of one VM's UUID directory and die
+      with it (`on_trash`, terminate `rm -rf`); the DocType hard-binds
+      `virtual_machine` (`set_only_once`) and a read-only denormalized `server`.
+      A transferable snapshot needs a host-independent store and a mutable
+      location — a DocType + on-disk-layout change. Largest piece.
+    - **Kernel pairing.** A disk snapshot carries no kernel; clone/restore take
+      it from `source_image`. The target host must already have the matching
+      `Virtual Machine Image` synced (reuse the `provision-vm.sh` step-0
+      image-present precondition).
+    - **Transfer cost.** We use plain `cp` (no overlayfs/CoW/reflink; ext4 has
+      no CoW), so a transfer is a full N-GB stream. The naive slice (`cp`/rsync
+      over SSH, full copy, fail-loud) is in-grain; the fast slice (incremental /
+      thin-pool send) depends on the **overlayfs-backed rootfs** item above or
+      the **LVM thin-pool** backlog idea.
+    - **Trust boundary.** Firecracker trusts snapshot files and does only a CRC;
+      moving bytes host→host is exactly where it says auth + encryption are
+      required. Atlas has no host↔host trust (each host trusts only Atlas) and no
+      at-rest rootfs encryption today — both are gaps to close before this is a
+      customer-facing transfer, not just operator rebalancing.
+    - **Networking.** `ipv6_address` is allocated per-server from
+      `Server.ipv6_virtual_machine_range`, so a transferred snapshot can only
+      feed a **clone on the target** (fresh identity, new IP) — that path is
+      unblocked today. *VM mobility* (same VM, same IP, new host, e.g. draining a
+      host for maintenance) additionally requires the **floating-IP** backlog
+      idea as a hard predecessor.
+    - **Operations.** A multi-minute transfer is a long mutating Task on two
+      hosts at once; it wants the **Server lock doctype** and **stuck-task
+      reaper** (above) before real load.
+
+    Aside (snapshot security, independent of transfer): the guest's 512 MiB
+    `/swapfile` lives *inside* `rootfs.ext4`, so every disk snapshot captures
+    guest swap contents — a data-remanence concern when a snapshot is cloned
+    across a tenant boundary. The Firecracker prod-host rec to disable swap is
+    about *host* swap; this is the in-guest analogue and belongs in the
+    snapshot-security discussion when tenancy lands.
 
 - **Health checks**: a scheduled job that runs `systemctl is-active …` per
   VM and reconciles `Virtual Machine.status`. Additive.
