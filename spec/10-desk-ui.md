@@ -99,9 +99,14 @@ frappe.atlas.confirm_destructive({title, body_html, match_string,
 
 `confirm_cost` wraps `frappe.warn` with the orange Provision-style
 indicator. Used for actions that are not destructive but spend real
-money or bandwidth: Provision Server (creates a billable droplet).
-There is no Sync-to-All operator action — image sync is automatic on
-image insert; see [Virtual Machine Image](#virtual-machine-image).
+money, disk, or bandwidth: Provision Server (creates a billable
+droplet), Clone a snapshot to a new VM (a new billable workload),
+Rebuild a VM's disk, and Restore a snapshot onto its VM (both overwrite
+the disk in place). Each caller supplies the latency / size hint in the
+dialog body (`~90 s` to bootstrap a server, "up to a few minutes" to
+copy a multi-GB rootfs). There is no Sync-to-All operator action —
+image sync is automatic on image insert; see
+[Virtual Machine Image](#virtual-machine-image).
 
 `confirm_destructive` is a custom dialog with a text-match input. The
 red primary button stays disabled until what the operator types
@@ -403,23 +408,44 @@ the rendered DOM from CSS.
     The operator clicks `Save` and the worker takes it from there.
   - `Failed` → **Provision** primary (manual retry after an
     auto-provision failure).
-  - `Stopped` → **Start** primary, **Restart** secondary.
-  - `Running` → **Stop** primary, **Restart** secondary.
+  - `Stopped` → **Start** primary; **Restart** secondary; **Snapshot**,
+    **Rebuild**, **Resize** under `Actions ▾` (each opens a dialog).
+    These disk/size actions live only on `Stopped` because they require
+    a quiesced filesystem and a pre-boot config — the controllers
+    enforce it, and not painting the buttons while Running is the
+    deterrent (no "click then get refused"). They sit in the Actions
+    group rather than on the top bar because they're rare and deliberate
+    and spend real disk + time; keeping them off the bar leaves
+    Start/Restart as the visible siblings (the same tiering Server uses
+    for Sync Image / Archive).
+  - `Running` → **Stop** primary; **Restart** and **Pause** secondaries.
+  - `Paused` → **Resume** primary; **Stop** secondary.
   - `Terminated` → no lifecycle buttons; instead **Re-provision as
     new** is primary and **Delete record** is danger (under
     `Actions ▾`).
+- The dialog actions use Frappe's stock `frappe.prompt` / `frappe.ui.Dialog`
+  (no custom markup): **Snapshot** takes a title; **Rebuild** toggles between
+  a base-image Link and an Available-snapshot Link; **Resize** prompts for
+  vCPU / memory / disk (disk grow-only). Each dialog carries a muted
+  latency / size hint (Snapshot copies the whole rootfs, Resize grows it
+  — "up to a few minutes"). **Rebuild** additionally interposes a
+  `confirm_cost` step after the source is chosen, because it overwrites
+  the disk in place and can't be undone. Each posts through `frm.call`
+  and routes to the resulting Task via `frappe.atlas.task_started`.
 - **Terminate** is always available (until status = Terminated),
   under `Actions ▾`, danger. The `confirm_destructive` dialog body is
   empty — typing the VM's `title` into the match field is the entire
   deterrent. IPv6/Image/Server details live in the form behind the
   dialog; the dialog doesn't repeat them.
-- Every non-status field paints read-only after first save via the
-  controller's `_validate_immutability` and `set_only_once` on the
-  identity + resource fields (`title`, `server`, `image`,
-  `ssh_public_key`, `size_preset`, `vcpus`, `memory_megabytes`,
-  `disk_gigabytes`). The framework paints them read-only on the form,
-  so the lock is visible to the operator, not just enforced at save
-  time.
+- Identity fields paint read-only after first save via the controller's
+  `validate` immutability check and `set_only_once` (`title`, `server`,
+  `image`, `ssh_public_key`, `size_preset`). The resource fields
+  (`vcpus`, `memory_megabytes`, `disk_gigabytes`) are *not* `set_only_once`
+  any more — they are editable only through the **Resize** action on a
+  Stopped VM, which rewrites the on-host config in the same gesture. On the
+  form they stay effectively fixed (ordinary saves of a changed value are
+  rejected by `validate`); the operator changes them via the Resize dialog,
+  not by typing in the field.
 - **No header indicator chips.** The Networking section auto-expands
   while the VM is `Pending` so the IPv6 is visible before Provision —
   the dedicated chip is gone.
@@ -457,6 +483,30 @@ the rendered DOM from CSS.
   `reqd: 1` on `title` is the framework's native cue. When exactly one
   Active `Server` exists, the new-VM form's `server` field is
   pre-selected via a 2-row `frappe.db.get_list` lookup in `onload`.
+
+### Virtual Machine Snapshot
+
+- Buttons appear only on `Available` snapshots: **Clone to new VM**
+  (primary), **Restore to VM** (secondary), **Delete** (danger).
+- **Clone to new VM** opens a dialog for the new VM's title + SSH key
+  (with a `confirm_cost`-style hint that a new billable workload is
+  created, ready in ~90 s), calls `clone_to_new_vm`, and routes to the
+  new VM form (which is already auto-provisioning).
+- **Restore to VM** is painted only when the linked VM is `Stopped` —
+  the refresh does a `frappe.db.get_value` on the VM's status and, when
+  it isn't Stopped, replaces the live button with a disabled-feel
+  `Actions ▾` row that names the current status and explains the VM must
+  be stopped first (the same "don't paint a button you'll refuse" rule
+  the VM disk actions follow, rather than confirming then hitting the
+  `rebuild` Stopped-guard throw). When eligible it routes through
+  `confirm_cost` (disk overwritten in place), then calls the snapshot's
+  `restore_to_vm` wrapper — no cross-doc JS gymnastics — and the toast
+  routes to the resulting Task.
+- **Delete** uses `confirm_destructive` (type the snapshot title); deleting
+  the row cascades the on-host file delete via `on_trash`.
+- Snapshots are reached from the VM form's **Connections** dashboard
+  ("Disk" group) and from the Snapshot list. The list paints status
+  indicators (`Pending` orange, `Available` green, `Failed` red).
 
 ### Virtual Machine Image
 
