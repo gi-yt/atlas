@@ -165,7 +165,7 @@ asserts on every run:
   `/etc/fstab` installed at image-sync time.
 
 This list is short for a reason: it is the operator-visible delta
-between a Firecracker CI test artifact and a VM that looks like the
+between a stock Ubuntu cloud image and a VM that looks like the
 operator's own. When the upstream image changes, every bullet either
 stays a no-op (good) or needs a new strip (a regression to fix in
 `sync-image.sh`).

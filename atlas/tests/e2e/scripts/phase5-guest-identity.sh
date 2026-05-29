@@ -128,5 +128,26 @@ pwauth="$(sshd -T 2>/dev/null \
 swapon --show=NAME --noheadings | grep -qx /swapfile \
     || fail "swap on /swapfile not active"
 
+# 11. This is the Ubuntu cloud image (the source we cut over to).
+grep -q 'VERSION_ID="24.04"' /etc/os-release \
+    || fail "/etc/os-release is not Ubuntu 24.04"
+
+# 12. cloud-init is neutralized (sync-image.sh masks it). If it were live it
+#     would race Atlas's mount-time identity injection. A masked unit reports
+#     as 'masked'; reaching this prompt at all already proves the boot-blocking
+#     waits (networkd-wait-online, snapd.seeded) are not hanging.
+ci_state="$(systemctl is-enabled cloud-init.service 2>/dev/null || true)"
+case "$ci_state" in
+    masked|disabled|"") : ;;
+    *) fail "cloud-init.service is '${ci_state}', want masked/disabled" ;;
+esac
+
+# 13. systemd-networkd-wait-online masked (Phase 0 caught it hanging boot).
+wait_state="$(systemctl is-enabled systemd-networkd-wait-online.service 2>/dev/null || true)"
+case "$wait_state" in
+    masked|disabled|"") : ;;
+    *) fail "systemd-networkd-wait-online is '${wait_state}', want masked" ;;
+esac
+
 echo "OK ${expected_hostname}"
 REMOTE

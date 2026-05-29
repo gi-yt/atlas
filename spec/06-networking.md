@@ -161,7 +161,7 @@ best-effort.
 
 ## Inside the guest
 
-The Firecracker CI Ubuntu image is patched **at image sync time** (not at
+The Ubuntu cloud image is patched **at image sync time** (not at
 VM provision time) with a single systemd unit,
 [`scripts/guest/atlas-network.service`](../scripts/guest/atlas-network.service).
 It reads `/etc/atlas-network.env` (which `provision-vm.sh` writes

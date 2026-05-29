@@ -26,7 +26,7 @@ keep it the source of truth.
 - No CLI. We will build one later on top of the same Frappe APIs.
 - No private networking, no overlay, no IPv4 to the guest.
 - No jailer, no unprivileged user, no SELinux or AppArmor. Root everywhere.
-- No image build pipeline. We download Firecracker CI images and use them.
+- No image build pipeline. We download Ubuntu cloud images and use them.
 - No Firecracker memory-state snapshots, no live migration, no high
   availability. (Disk snapshots — a copy of the VM's rootfs — are supported;
   see [05-virtual-machine-lifecycle.md](./05-virtual-machine-lifecycle.md).)

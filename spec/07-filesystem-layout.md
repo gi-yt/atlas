@@ -7,8 +7,8 @@ else.
 /var/lib/atlas/
 ├── images/
 │   └── ubuntu-24.04/
-│       ├── vmlinux-6.1.141           # kernel binary, immutable per image
-│       └── ubuntu-24.04.ext4         # pristine rootfs, immutable per image
+│       ├── vmlinux-noble-server      # kernel binary, immutable per image
+│       └── ubuntu-24.04-server.ext4  # pristine rootfs, immutable per image
 │
 ├── virtual-machines/
 │   ├── d4f7c1a2-7e0a-4f1b-93cc-ad96b9b39b3e/

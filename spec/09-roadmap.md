@@ -108,8 +108,20 @@ behavior; they just keep doors open.
   methods we expose for buttons become the CLI's commands. Pure additive.
 
 - **Multi-arch**. Drop the `ARCHITECTURE` hard-coding; allow `aarch64`. The
-  Firecracker CI publishes aarch64 artifacts. Additive on
-  `Server` and the image record.
+  Ubuntu cloud archive publishes arm64 squashfs + `unpacked/` kernels per
+  release. Additive on `Server` and the image record.
+
+- **Ubuntu image discovery**. A "Refresh Ubuntu Images" action that scrapes
+  `cloud-images.ubuntu.com` (release dirs + `SHA256SUMS`) and upserts a
+  catalog, so operators pick a release × variant instead of hand-copying
+  `DEFAULT_IMAGE`/`MINIMAL_IMAGE` constants. Mirrors `provider.discover()` /
+  the Provider **Refresh Catalog** button. Today the images are pinned
+  constants (server + minimal noble); this is the additive follow-up.
+
+- **Newer guest release**. Bump the supported guest to Ubuntu 26.04 once it's
+  validated as a guest (it boots; the normalization checklist in
+  [08-images.md](./08-images.md) is the regression gate). Additive — a new
+  image row, same code path.
 
 ## Things on the longer-term list
 

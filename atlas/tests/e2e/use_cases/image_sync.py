@@ -19,6 +19,8 @@ This module exercises:
 import frappe
 
 from atlas.atlas.ssh import run_task
+from atlas.tests.e2e._config import MINIMAL_IMAGE
+from atlas.tests.e2e._image import ensure_image_row
 from atlas.tests.e2e._shared import (
 	ensure_default_image_row,
 	expect_validation_error,
@@ -37,6 +39,17 @@ def run(reuse: bool = True, keep: bool = True) -> None:
 		_check_execute_task_sync(server.name, image)
 		_check_image_url_validation()
 		_check_sync_to_all_servers()
+		_check_minimal_variant(server.name)
+
+
+def _check_minimal_variant(server_name: str) -> None:
+	"""The minimal cloud image syncs and probes exactly like server: same
+	sync-image.sh path (zstd kernel extract + normalize), different rootfs.
+	Clearing first turns this into a real download+build, not a short-circuit.
+	"""
+	image = ensure_image_row(MINIMAL_IMAGE)
+	_clear_cached_rootfs(server_name, image)
+	_check_sync_to_server(server_name, image)
 
 
 def _clear_cached_rootfs(server_name: str, image) -> None:
