@@ -80,7 +80,7 @@ The hardening is **not** a separate operation, button, or Task: it is part of
 | --- | --- | --- |
 | Network sysctls | reject ICMP redirects, no source routing, no redirect-send, log martians, bogus/broadcast ICMP ignored, SYN cookies, IPv6 `accept_ra=0` — all in `/etc/sysctl.d/60-atlas.conf` alongside the forwarding lines | CIS 3.3.2–3.3.11 |
 | sshd drop-in | `/etc/ssh/sshd_config.d/60-atlas.conf`: key-only root, no password/empty-password/keyboard-interactive auth, `MaxAuthTries 4`, `LoginGraceTime 60`, `ClientAlive 300×3`, modern Ciphers/MACs/KexAlgorithms. Validated with `sshd -t` **before** reload so a bad drop-in can never brick SSH | CIS 5.1 |
-| Module blocklist | `/etc/modprobe.d/60-atlas-blocklist.conf`: unused filesystem modules (`cramfs`, `freevxfs`, `hfs`, `hfsplus`, `jffs2`, `udf`, `usb-storage`) and unused network protocols (`dccp`, `tipc`, `rds`, `sctp`) | CIS 1.1.1, 3.2 |
+| Module blocklist | `/etc/modprobe.d/60-atlas-blocklist.conf`: unused filesystem modules (`cramfs`, `freevxfs`, `hfs`, `hfsplus`, `jffs2`, `udf`, `usb-storage`) and unused network protocols (`dccp`, `tipc`, `rds`, `sctp`). It must **never** list a load-bearing module — `tun`/`tap` (VM taps), `kvm`/`kvm_intel`/`kvm_amd` (Firecracker), `vhost`/`vhost_net` (virtio), `nf_tables`/`nft_*` (firewall); CIS only blocklists *unused* modules, so none of these appear, but the e2e probe asserts it. | CIS 1.1.1, 3.2 |
 | Security updates | install `unattended-upgrades`, scoped to the **security** pocket only, **no** automatic reboot (a reboot would kill running VMs) | CIS 1.2.2.1 |
 | KSM / swap off | disable Kernel Samepage Merging (cross-VM memory side channel) and swap (guest RAM remanence on disk) | Firecracker prod-host |
 
@@ -113,6 +113,20 @@ an unprivileged `atlas` user, the Firecracker **jailer**, and the Firecracker
 **AppArmor** profile — is a larger, breaking change and remains on the
 [roadmap](./09-roadmap.md), along with `/tmp` `/dev/shm` mount hardening,
 `auditd`, and surfacing "reboot pending" after an unattended security update.
+
+#### What we deliberately skip (and won't re-litigate)
+
+The selection axis is *does this protect a Firecracker host without breaking it,
+in a way we can explain in one line and maintain* — not "what a CIS scan scores".
+So we **do not** run the full `usg`/CIS profile (it sets the three deviations
+wrong and drags in a long tail of PAM/password-policy, AIDE, auditd, and banner
+controls that are pure box-ticking on a headless, key-only-root, machine-driven
+host); `usg` is at most an audit *reporter*, never the apply mechanism. We also
+skip the Firecracker doc's hardware/boot-cmdline items — `nosmt` (halves a
+2-vCPU droplet; a multi-tenant-with-hostile-neighbors concern), ECC/TRR memory
+and early microcode (provider procurement), and cgroup/`quiet loglevel` GRUB
+tuning (don't fit an idempotent re-runnable bootstrap). These are provider- or
+tenancy-level concerns that sit above Atlas; revisit only with a concrete need.
 
 ### Files that must already be on the server
 

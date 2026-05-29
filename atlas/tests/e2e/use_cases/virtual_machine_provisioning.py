@@ -162,10 +162,11 @@ def _check_provision_happy_path(server_name: str, image: str, public_key: str) -
 		SSH_PRIVATE_KEY=ephemeral_private_key(),
 	)
 
-	# NAT44 IPv4 egress (spec/06-networking.md): the guest has a derived
-	# 100.64.x.x/30, a v4 default route, and can reach a v4-only destination
-	# (curl to an IPv4 literal) through the host masquerade. v6 stays primary;
-	# we still hop in over the guest's IPv6.
+	# Internet egress both families (spec/06-networking.md): IPv4 via NAT44
+	# (derived 100.64.x.x/30 + v4 default route + curl to an IPv4 literal
+	# through the host masquerade) and IPv6 via the routed tap (curl to an
+	# IPv6 literal). Both use literals so no DNS is involved. We hop in over
+	# the guest's IPv6 either way.
 	assert_probe(
 		server_name,
 		"phase5-ipv4-egress.sh",

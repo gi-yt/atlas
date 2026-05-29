@@ -1,13 +1,19 @@
 #!/bin/bash
 # Phase 5 e2e: SSH into a provisioned VM over its public IPv6 and prove the
-# NAT44 IPv4 egress path (spec/06-networking.md "IPv4 egress (NAT44)") works:
+# guest reaches the internet over BOTH families (spec/06-networking.md):
 #
+#   IPv4 egress (NAT44):
 #   - eth0 has the derived private v4 (100.64.x.x/30)
 #   - a v4 default route exists (via the tap's host side)
 #   - the guest can reach a v4-ONLY destination (curl to an IPv4 literal,
 #     which forces the v4 path and needs no DNS) — proves masquerade end to end
 #
-# We hop in over IPv6 (the guest's only inbound path) and run the v4 checks
+#   IPv6 egress (routed, public per-VM /128):
+#   - the guest can reach a v6-ONLY destination (curl to an IPv6 literal,
+#     which forces the v6 path and needs no DNS) — proves the routed-tap
+#     egress and host forwarding end to end
+#
+# We hop in over IPv6 (the guest's only inbound path) and run both checks
 # from inside the guest.
 #
 # Inputs:
@@ -75,5 +81,12 @@ ip -4 route show default | grep -q 'default via 100\.64\.' \
 curl -4 --max-time 15 -sS -o /dev/null https://1.1.1.1/ \
     || fail "curl -4 to 1.1.1.1 failed (NAT44 egress not working)"
 
+# 4. Reach a v6-ONLY destination. 2606:4700:4700::1111 is an IPv6 literal
+#    (the v6 analog of 1.1.1.1), forcing the v6 egress path with no DNS —
+#    proving the routed-tap path and host IPv6 forwarding end to end.
+curl -6 --max-time 15 -sS -o /dev/null 'https://[2606:4700:4700::1111]/' \
+    || fail "curl -6 to 2606:4700:4700::1111 failed (IPv6 egress not working)"
+
 echo "OK ipv4-egress"
+echo "OK ipv6-egress"
 REMOTE

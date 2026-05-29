@@ -147,7 +147,11 @@ guest's public address) and for IPv4 (`net.ipv4.ip_forward`, so the host can
 route the guests' private v4 out its uplink for NAT44 egress). This is the
 reason the host-hardening step keeps forwarding enabled **in deliberate
 violation of CIS 3.3.1** ("disable IP forwarding"), for both families —
-turning it off makes every VM dark. The same `60-atlas.conf` file also
+turning it off makes every VM dark. There is no "scope it to the uplink"
+half-measure: IPv6 has no clean global-off/per-interface-on split (toggling
+per-interface `forwarding` also changes RA/autoconf), so `conf.all.forwarding`
+is the operative switch and it stays on. Blast radius is contained at the
+`inet atlas` nftables chains instead. The same `60-atlas.conf` file also
 carries the CIS 3.3 network-hardening sysctls; see
 [03-bootstrapping.md § Host hardening](./03-bootstrapping.md).
 
@@ -239,6 +243,13 @@ an RA / DHCP daemon on the host. DNS is the Cloudflare IPv6 resolver — v4-only
 *destinations* are reached through the NAT, but DNS itself stays on v6, so no
 DNS64 is involved.
 
+Both egress families are proven end-to-end by the e2e suite from *inside* a
+booted guest, using literal addresses so no DNS is involved: `curl -6` to an
+IPv6 literal (`2606:4700:4700::1111`) exercises the routed-tap path + host IPv6
+forwarding, and `curl -4` to an IPv4 literal (`1.1.1.1`) exercises the NAT44
+masquerade. See the `phase5-ipv4-egress.sh` probe driven by
+`virtual_machine_provisioning`.
+
 ## Verifying connectivity
 
 End-to-end check from any IPv6-capable client: `ping6
@@ -254,6 +265,7 @@ End-to-end check from any IPv6-capable client: `ping6
 | Tap looks right, ping still drops       | nftables forward rules missing                                | On the host: `nft list table inet atlas` should show one ingress + one egress rule per live VM. |
 | Everything on the host looks right      | Guest didn't apply its address                                | In the guest console (firecracker log): look for `atlas-network.service` failures, or `ip -6 addr show eth0` showing no `<VM_IPV6>/128`. |
 | IPv6 works, but IPv4 destinations time out (`curl -4 1.1.1.1` hangs) | NAT44 egress broken | On the host: `nft list chain inet atlas postrouting` should show the `100.64.0.0/16 … masquerade` rule, and `sysctl net.ipv4.ip_forward` should be `1`. In the guest: `ip -4 addr show eth0` should show a `100.64.x.x/30` and `ip -4 route show default` a route via the host side. |
+| Guest reaches the host but not the IPv6 internet (`curl -6 2606:4700:4700::1111` hangs) | IPv6 egress broken | On the host: `sysctl net.ipv6.conf.all.forwarding` should be `1` and the per-VM forward rules present (`nft list table inet atlas`). In the guest: `ip -6 route show default` should be `via fe80::1 dev eth0`. |
 
 ### Historical bug: the carve
 
