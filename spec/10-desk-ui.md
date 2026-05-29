@@ -197,8 +197,11 @@ sections, top-to-bottom:
 
 The workspace deliberately drops the "Your Shortcuts" row and the
 "Reports & Masters" card section that earlier duplicated the sidebar.
-The sidebar still carries Home and the five doctype links — that *is*
-the right primitive for navigation, so the workspace doesn't repeat it.
+The sidebar carries Home plus three collapsible groups — **Virtual**
+(Virtual Machine, Virtual Machine Image), **Server** (Server, Task),
+and **Settings** (Provider, DigitalOcean Settings, Self-Managed
+Settings, Atlas Settings) — that *is* the right primitive for
+navigation, so the workspace doesn't repeat it.
 
 The multi-app launcher (`/desk`, `/app/home`) is *not* hidden: Frappe
 short-circuits `/desk` rendering before `website_redirects` can fire
