@@ -199,7 +199,8 @@ inside the host.
 
 [`vm-network-up.sh`](../scripts/vm-network-up.sh), invoked by the systemd
 unit's `ExecStartPre`, reads `network.env` (which carries `TAP_DEVICE`,
-`VIRTUAL_MACHINE_IPV6`, `ATLAS_NETNS`, `HOST_VETH`, `NAMESPACE_VETH`) and:
+`VIRTUAL_MACHINE_IPV6`, `ATLAS_NETNS`, `HOST_VETH`, `NAMESPACE_VETH`,
+`IPV4_HOST_CIDR`, `IPV4_GUEST_CIDR`) and:
 
 1. Creates the namespace `ATLAS_NETNS` (clean re-create for known state).
 2. Creates the veth pair and moves `NAMESPACE_VETH` into the namespace.
@@ -216,8 +217,12 @@ unit's `ExecStartPre`, reads `network.env` (which carries `TAP_DEVICE`,
    a `169.254.0.0/30` link-local pair for v4) and points the namespace's
    **default routes** (both families) at the host end, so guest egress flows out
    the veth toward the uplink.
-6. On the host: routes `VM_IPV6/128` (v6) and the per-VM `/30` (v4) into the
+6. On the host: routes `VM_IPV6/128` (v6) and the guest's v4 as a `/32` into the
    namespace via the veth, and adds the proxy-NDP entry for the VM on the uplink.
+   The v4 route targets the guest address (`IPV4_GUEST_CIDR` without its mask),
+   **not** `IPV4_HOST_CIDR` — that is a host address carried with a `/30` prefix,
+   and `ip route` rejects a prefix whose host bits are set ("Invalid prefix for
+   given prefix length"). The guest `/32` is the v4 analog of the v6 `/128`.
 7. Adds two nftables forward rules matching `HOST_VETH` for IPv6 (the tap is no
    longer in the host namespace to match on). IPv4 egress needs no per-VM rule:
    the host-wide `100.64.0.0/16` masquerade rule (postrouting, created in the

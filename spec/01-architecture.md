@@ -181,9 +181,9 @@ ssh root@server "VAR=val ... bash /tmp/atlas/provision-vm.sh"
       |     - cp rootfs from image dir to VM dir
       |     - truncate + resize2fs
       |     - mount, write SSH key + env, umount
-      |     - write firecracker.json and network.env
+      |     - write firecracker.json, network.env, jailer-launch.sh
       |     - systemctl enable --now firecracker-vm@<name>.service
-      |  (systemd's ExecStartPost runs vm-network-up.sh)
+      |  (systemd's ExecStartPre runs vm-network-up.sh; ExecStart the launcher)
       |
       v
 Task is created with status = Running, then updated to Success
