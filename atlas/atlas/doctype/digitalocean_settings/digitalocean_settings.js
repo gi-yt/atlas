@@ -1,9 +1,11 @@
-// DigitalOcean Settings — Single. Paints an auto-refreshing credential
-// indicator and exposes a Test Connection action under Actions ▾.
+// DigitalOcean Settings — Single. Exposes a Test Connection action under
+// Actions ▾ and filters the size/image link queries to DigitalOcean rows.
+// Per spec (10-desk-ui.md § DigitalOcean Settings) the form carries no
+// auto-painted credential chip — the operator verifies via Test Connection,
+// which surfaces its result as a toast.
 
 frappe.ui.form.on("DigitalOcean Settings", {
 	refresh(frm) {
-		paint_credential_indicator(frm);
 		frappe.atlas.add_action(frm, "Test Connection", () => run_test_connection(frm));
 		// Filter size/image link queries to DigitalOcean rows only.
 		frm.set_query("default_size", () => ({
@@ -14,27 +16,6 @@ frappe.ui.form.on("DigitalOcean Settings", {
 		}));
 	},
 });
-
-
-function paint_credential_indicator(frm) {
-	frm.dashboard.clear_headline();
-	frm.call("credential_check").then(({message}) => {
-		if (message && message.ok) {
-			const label = message.account_label || __("DigitalOcean");
-			const detail = message.rate_remaining != null
-				? __("{0} · {1}/{2} requests remaining", [label, message.rate_remaining, message.rate_limit])
-				: label;
-			frm.dashboard.set_headline_alert(
-				`<div class="indicator green">${frappe.utils.escape_html(detail)}</div>`,
-			);
-		} else {
-			const error = message ? message.error || __("Authentication failed") : __("Authentication failed");
-			frm.dashboard.set_headline_alert(
-				`<div class="indicator red">${frappe.utils.escape_html(error)}</div>`,
-			);
-		}
-	});
-}
 
 
 function run_test_connection(frm) {

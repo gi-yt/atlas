@@ -457,8 +457,11 @@ the rendered DOM from CSS.
   title pre-filled.
 - The list view shows `<title> · <short id>` in the subject
   column, an IPv6 copy chip, and status-coloured indicators
-  (`Pending` orange, `Running` green, `Stopped`/`Terminated` grey,
-  `Failed` red).
+  (`Pending` orange, `Running` green, `Paused` yellow,
+  `Stopped`/`Terminated` grey, `Failed` red). The pills come from the
+  DocType `states` array — the same mechanism Task uses — not a client
+  `get_indicator`; `virtual_machine_list.js` keeps only the subject /
+  IPv6 formatters and the copy-chip `onload`.
 - When the linked provision Task ends in `Failure`, the
   Task.on_update hook flips the VM's `status` from `Pending`/`Running`
   to `Failed` via `frappe.db.set_value` and publishes a
@@ -500,7 +503,8 @@ the rendered DOM from CSS.
   the row cascades the on-host file delete via `on_trash`.
 - Snapshots are reached from the VM form's **Connections** dashboard
   ("Disk" group) and from the Snapshot list. The list paints status
-  indicators (`Pending` orange, `Available` green, `Failed` red).
+  indicators (`Pending` orange, `Available` green, `Failed` red) from
+  the DocType `states` array, not a client `get_indicator`.
 
 ### Virtual Machine Image
 
@@ -584,8 +588,9 @@ checklist is Frappe's `Module Onboarding` doctype; the workspace
 operator dialogs (Sync Image on Server) are `frappe.ui.Dialog` with
 typed fields; the VM size presets are a `Select` field; the VM SSH
 command is a virtual `Code` field whose value comes from a
-`@property` on the controller; Task list-view status pills come from
-the DocType's `states` JSON. The pattern: if Desk has a primitive
+`@property` on the controller; the Server / Virtual Machine / Snapshot /
+Task list-view status pills all come from each DocType's `states` JSON
+(no client `get_indicator`). The pattern: if Desk has a primitive
 for it, we pass parameters to that primitive — we don't hand-roll
 markup.
 

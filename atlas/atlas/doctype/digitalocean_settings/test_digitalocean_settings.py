@@ -43,30 +43,3 @@ class TestDigitalOceanSettings(IntegrationTestCase):
 				frappe.db.set_single_value(
 					"Atlas Settings", "provider", previous, update_modified=False
 				)
-
-	def test_credential_check_ok(self) -> None:
-		fake_impl = MagicMock()
-		fake_impl.authenticate.return_value = AuthResult(ok=True, account_label="x@y.com")
-		settings = frappe.get_single("DigitalOcean Settings")
-		with patch(
-			"atlas.atlas.providers.for_provider",
-			return_value=fake_impl,
-		):
-			result = settings.credential_check()
-		self.assertTrue(result["ok"])
-
-	def test_credential_check_returns_error_dict_without_provider(self) -> None:
-		previous = frappe.db.get_single_value("Atlas Settings", "provider")
-		try:
-			frappe.db.set_single_value(
-				"Atlas Settings", "provider", "", update_modified=False
-			)
-			settings = frappe.get_single("DigitalOcean Settings")
-			result = settings.credential_check()
-			self.assertFalse(result["ok"])
-			self.assertIn("provider", result["error"])
-		finally:
-			if previous:
-				frappe.db.set_single_value(
-					"Atlas Settings", "provider", previous, update_modified=False
-				)

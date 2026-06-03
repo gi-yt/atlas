@@ -256,7 +256,32 @@
  "search_fields": "title,status,server",
  "sort_field": "creation",
  "sort_order": "DESC",
- "states": [],
+ "states": [
+  {
+   "title": "Pending",
+   "color": "Orange"
+  },
+  {
+   "title": "Running",
+   "color": "Green"
+  },
+  {
+   "title": "Paused",
+   "color": "Yellow"
+  },
+  {
+   "title": "Stopped",
+   "color": "Gray"
+  },
+  {
+   "title": "Failed",
+   "color": "Red"
+  },
+  {
+   "title": "Terminated",
+   "color": "Gray"
+  }
+ ],
  "title_field": "title",
  "track_changes": 1
 }

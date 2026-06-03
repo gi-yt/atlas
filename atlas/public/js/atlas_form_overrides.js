@@ -172,13 +172,6 @@ frappe.atlas.strip_desk_chrome = function (frm) {
 	}
 };
 
-frappe.atlas.set_window_title = function (frm) {
-	const label = frm.doc.title || frm.doc.name;
-	if (label) {
-		document.title = `${label} — Atlas`;
-	}
-};
-
 for (const doctype of [
 	"Server",
 	"Provider",
@@ -198,7 +191,6 @@ for (const doctype of [
 		},
 		refresh(frm) {
 			frappe.atlas.strip_desk_chrome(frm);
-			frappe.atlas.set_window_title(frm);
 		},
 	});
 }

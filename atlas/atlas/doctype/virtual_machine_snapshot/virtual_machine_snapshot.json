@@ -144,7 +144,20 @@
  "search_fields": "title,virtual_machine,status",
  "sort_field": "creation",
  "sort_order": "DESC",
- "states": [],
+ "states": [
+  {
+   "title": "Pending",
+   "color": "Orange"
+  },
+  {
+   "title": "Available",
+   "color": "Green"
+  },
+  {
+   "title": "Failed",
+   "color": "Red"
+  }
+ ],
  "title_field": "title",
  "track_changes": 1
 }

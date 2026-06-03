@@ -23,17 +23,9 @@ frappe.listview_settings["Virtual Machine"] = {
 		},
 	},
 
-	get_indicator(doc) {
-		const config = {
-			Pending: ["Pending", "orange", "status,=,Pending"],
-			Running: ["Running", "green", "status,=,Running"],
-			Paused: ["Paused", "yellow", "status,=,Paused"],
-			Stopped: ["Stopped", "grey", "status,=,Stopped"],
-			Failed: ["Failed", "red", "status,=,Failed"],
-			Terminated: ["Terminated", "darkgrey", "status,=,Terminated"],
-		}[doc.status];
-		return config ? [__(config[0]), config[1], config[2]] : null;
-	},
+	// Status pills (Pending orange, Running green, Paused yellow,
+	// Stopped/Terminated grey, Failed red) come from the DocType `states`
+	// array — no client `get_indicator` needed.
 
 	onload(listview) {
 		// Click handler for IPv6 copy chip. Bound on the list wrapper so it
