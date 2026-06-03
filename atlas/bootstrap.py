@@ -18,8 +18,9 @@ Site config keys (set with `bench --site <site> set-config -p <key> <value>`):
     atlas_provider_type           "DigitalOcean" or "Self-Managed"
     atlas_ssh_private_key_path    absolute path to the SSH private key on disk
                                   (0600, readable by the Frappe user)
-    atlas_ssh_fingerprint         vendor-side fingerprint of the SSH key
-                                  (DigitalOcean only; required for DO)
+    atlas_ssh_key_id              vendor's handle for the uploaded SSH key
+                                  (DigitalOcean only; required for DO — accepts
+                                  DO's numeric key id or its SHA-256 fingerprint).
     atlas_ssh_public_key          optional OpenSSH public key body for vendors
                                   that upload at provision time
 
@@ -129,8 +130,8 @@ def ensure_provider() -> "frappe.model.document.Document":
 	)
 	if provider_type == "DigitalOcean":
 		frappe.db.set_single_value(
-			"Atlas Settings", "ssh_fingerprint",
-			require_config("atlas_ssh_fingerprint"), update_modified=False,
+			"Atlas Settings", "ssh_key_id",
+			require_config("atlas_ssh_key_id"), update_modified=False,
 		)
 	public_key = frappe.conf.get("atlas_ssh_public_key")
 	if public_key:

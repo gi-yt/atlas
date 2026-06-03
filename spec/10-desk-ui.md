@@ -150,16 +150,6 @@ Connections dashboards (the count tiles for Workloads, Tasks, …) stay
 visible — those *are* useful and Frappe renders them on the form
 itself, not in the right rail.
 
-### Page title
-
-`frappe.atlas.set_window_title(frm)` overrides Frappe's default
-`<title> — <name>` (which duplicates the operator-facing label and the
-autoname on DocTypes that carry a separate `title` field — Server, VM,
-Image). The override sets `document.title` to
-`${frm.doc.title || frm.doc.name} — Atlas`. On DocTypes where the
-user-defined name *is* the autoname (Provider, Task) the override
-falls through cleanly to `name`.
-
 ## The workspace
 
 The Atlas workspace is the operator's home. It is restructured around three
@@ -305,8 +295,8 @@ the rendered DOM from CSS.
   points at a `0600` PEM on the Atlas host; rotating the key is a
   file-replace operation per
   [07-filesystem-layout.md § SSH keys](./07-filesystem-layout.md), not
-  a form edit. The `ssh_fingerprint` and `ssh_public_key` fields are
-  read by providers that need them (DigitalOcean reads the fingerprint;
+  a form edit. The `ssh_key_id` and `ssh_public_key` fields are
+  read by providers that need them (DigitalOcean reads the key id;
   future vendors that upload keys read the body).
 
 ### Provider

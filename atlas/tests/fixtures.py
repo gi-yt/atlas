@@ -57,15 +57,15 @@ def make_provider_row(
 
 def set_atlas_settings(
 	provider: str | Document,
-	ssh_fingerprint: str | None = "fp:fingerprint",
+	ssh_key_id: str | None = "key-id-123",
 	ssh_private_key_path: str | None = None,
 	ssh_public_key: str | None = None,
 ) -> None:
 	"""Write Atlas Settings Single via set_single_value (bypasses reqd)."""
 	provider_name = provider.name if isinstance(provider, Document) else provider
 	frappe.db.set_single_value("Atlas Settings", "provider", provider_name, update_modified=False)
-	if ssh_fingerprint is not None:
-		frappe.db.set_single_value("Atlas Settings", "ssh_fingerprint", ssh_fingerprint, update_modified=False)
+	if ssh_key_id is not None:
+		frappe.db.set_single_value("Atlas Settings", "ssh_key_id", ssh_key_id, update_modified=False)
 	if ssh_public_key is not None:
 		frappe.db.set_single_value("Atlas Settings", "ssh_public_key", ssh_public_key, update_modified=False)
 	frappe.db.set_single_value(

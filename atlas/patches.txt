@@ -10,6 +10,7 @@ atlas.patches.v1_0.migrate_to_provider_abstraction
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated
 atlas.patches.v1_0.rename_archived_to_terminated
+atlas.patches.v1_0.rename_ssh_fingerprint_to_key_id
 atlas.patches.v1_0.install_atlas_sidebar
 atlas.patches.v1_0.rebuild_task_subjects
 atlas.patches.v1_0.migrate_workspace_to_onboarding

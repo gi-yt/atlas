@@ -183,9 +183,9 @@ path the operator chose). `Atlas Settings.ssh_private_key_path` stores
 the path; the key body is *not* in the DB. The matching public-key body
 *is* in the DB at `Atlas Settings.ssh_public_key` — providers that
 upload keys at provision time (future Scaleway, AWS) read it from
-there, and `Atlas Settings.ssh_fingerprint` carries the vendor-side
-reference for providers that need a pre-registered fingerprint
-(DigitalOcean).
+there, and `Atlas Settings.ssh_key_id` carries the vendor's handle for
+providers that need a pre-registered key (DigitalOcean — its key id or
+fingerprint).
 
 One Atlas instance, one SSH key. Multi-account ("prod + staging on the
 same vendor") is foreclosed by the per-vendor Single Settings model:

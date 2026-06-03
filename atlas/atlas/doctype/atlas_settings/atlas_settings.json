@@ -10,7 +10,7 @@
   "section_break_user_dashboard",
   "default_user_image",
   "section_break_ssh",
-  "ssh_fingerprint",
+  "ssh_key_id",
   "ssh_public_key",
   "ssh_private_key_path"
  ],
@@ -46,10 +46,10 @@
    "label": "SSH key"
   },
   {
-   "fieldname": "ssh_fingerprint",
+   "fieldname": "ssh_key_id",
    "fieldtype": "Data",
-   "label": "SSH Fingerprint",
-   "description": "Vendor-side fingerprint of the SSH key (DO uses SHA-256 hex)."
+   "label": "SSH Key ID",
+   "description": "Vendor's handle for the uploaded SSH key, passed to the provider when creating a host. DigitalOcean accepts either the key's numeric id or its SHA-256 fingerprint here."
   },
   {
    "fieldname": "ssh_public_key",

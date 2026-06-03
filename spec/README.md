@@ -131,7 +131,7 @@ bench --site <site> execute atlas.bootstrap.run
 ```
 
 It reads everything from site config (`atlas_provider_type`,
-`atlas_do_token`, `atlas_ssh_fingerprint`, …), populates Atlas Settings
+`atlas_do_token`, `atlas_ssh_key_id`, …), populates Atlas Settings
 and the matching per-vendor Single, seeds the `Provider Size` /
 `Provider Image` catalogs, and uses only the same whitelisted methods
 the desk buttons call. Requires a `bench worker` running because

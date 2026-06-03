@@ -5,7 +5,7 @@ After this patch, the data shape is:
 - `Provider` (renamed from `Server Provider`) — thin link table:
   provider_name, provider_type, is_active.
 - `Atlas Settings` (Single) — picks the active Provider and holds the
-  SSH triplet (fingerprint, public key, private-key path).
+  SSH triplet (vendor key id, public key, private-key path).
 - `DigitalOcean Settings` (Single) — api_token, region, default_size,
   default_image.
 - `Self-Managed Settings` (Single) — stub.
@@ -85,7 +85,7 @@ def _read_legacy_state() -> dict | None:
 		)
 		state["active_provider"] = active_do["name"]
 		state["ssh"] = {
-			"ssh_fingerprint": active_do["ssh_key_id"],
+			"ssh_key_id": active_do["ssh_key_id"],
 			"ssh_private_key_path": active_do["ssh_private_key_path"],
 		}
 		state["digitalocean"] = {
@@ -97,7 +97,7 @@ def _read_legacy_state() -> dict | None:
 	elif fallback:
 		state["active_provider"] = fallback["name"]
 		state["ssh"] = {
-			"ssh_fingerprint": fallback["ssh_key_id"],
+			"ssh_key_id": fallback["ssh_key_id"],
 			"ssh_private_key_path": fallback["ssh_private_key_path"],
 		}
 

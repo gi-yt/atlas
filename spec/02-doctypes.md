@@ -50,7 +50,7 @@ indirection layer.
 | Field                  | Type             | Reqd | Notes                                                              |
 | ---------------------- | ---------------- | ---- | ------------------------------------------------------------------ |
 | `provider`             | Link → Provider  | Y    | The currently-active Provider row. `atlas.get_provider()` reads this. |
-| `ssh_fingerprint`      | Data             |      | Vendor-side fingerprint of the SSH key, when the vendor needs one (DigitalOcean). Format is vendor-specific (DO uses SHA-256 hex). |
+| `ssh_key_id`           | Data             |      | Vendor's handle for the uploaded SSH key, when the vendor needs one (DigitalOcean). Passed through to the provider as `SshKey.vendor_id`; format is vendor-specific (DO accepts the key's numeric id or its SHA-256 fingerprint). |
 | `ssh_public_key`       | Long Text        |      | OpenSSH public key body. Crosses the provider interface for vendors that upload at provision time. Not required for DO. |
 | `ssh_private_key_path` | Data             | Y    | Absolute path on the Atlas host where the matching private key lives. Atlas reads the PEM at SSH-connect time via `secrets.get_ssh_key_from_disk(path)`. `0600`, owned by the Frappe user. |
 
@@ -66,7 +66,7 @@ without touching callers.
 ── Active provider ──
 provider
 ── SSH key ──
-ssh_fingerprint
+ssh_key_id
 ssh_public_key
 | ssh_private_key_path
 ```
@@ -413,7 +413,7 @@ methods (Provision/Start/Stop/Restart/Terminate); see
 `ssh_public_key` is the key injected into the *guest's*
 `/root/.ssh/authorized_keys` — it is how the operator SSHes into the
 VM, not into the host. The host key lives on `Atlas Settings`
-(`ssh_fingerprint`, `ssh_public_key`, `ssh_private_key_path`).
+(`ssh_key_id`, `ssh_public_key`, `ssh_private_key_path`).
 
 ### Auto-provision contract
 

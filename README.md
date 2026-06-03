@@ -25,7 +25,7 @@ credentials and run the shared-droplet end-to-end suite:
 
 ```bash
 bench --site atlas.tests.local set-config -p atlas_do_token <DO_TOKEN>
-bench --site atlas.tests.local set-config -p atlas_ssh_key_id <FINGERPRINT>
+bench --site atlas.tests.local set-config -p atlas_ssh_key_id <DO_SSH_KEY_ID>
 bench --site atlas.tests.local set-config -p atlas_ssh_private_key "$(cat ~/.ssh/atlas-test)"
 bench --site atlas.tests.local execute atlas.tests.e2e.run_all
 ```

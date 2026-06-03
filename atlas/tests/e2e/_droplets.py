@@ -199,7 +199,7 @@ def ensure_e2e_provider() -> "frappe.model.document.Document":
 
 	frappe.db.set_single_value("Atlas Settings", "provider", name, update_modified=False)
 	frappe.db.set_single_value(
-		"Atlas Settings", "ssh_fingerprint", get_ssh_key_id(), update_modified=False
+		"Atlas Settings", "ssh_key_id", get_ssh_key_id(), update_modified=False
 	)
 	frappe.db.set_single_value(
 		"Atlas Settings", "ssh_private_key_path", get_ssh_private_key_path(),

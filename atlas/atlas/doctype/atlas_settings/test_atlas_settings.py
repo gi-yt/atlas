@@ -19,13 +19,13 @@ class TestAtlasSettingsAccessors(IntegrationTestCase):
 		provider = make_provider_row(name="test-ssh-prov")
 		set_atlas_settings(
 			provider,
-			ssh_fingerprint="fp:test",
+			ssh_key_id="key-id-test",
 			ssh_public_key="ssh-ed25519 AAAA",
 			ssh_private_key_path=_ensure_fake_ssh_key_path(),
 		)
 		key = atlas_settings.get_ssh_key()
 		self.assertIsInstance(key, SshKey)
-		self.assertEqual(key.vendor_id, "fp:test")
+		self.assertEqual(key.vendor_id, "key-id-test")
 		self.assertEqual(key.public_key, "ssh-ed25519 AAAA")
 
 	def test_get_ssh_private_key_path_returns_path(self) -> None:

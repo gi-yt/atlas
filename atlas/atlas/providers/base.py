@@ -21,7 +21,9 @@ class Networking(Enum):
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class SshKey:
-	# Vendor's handle for the key (DO fingerprint, AWS KeyPair name).
+	# Vendor's handle for the key — whatever the provider's create-host call
+	# expects to reference a pre-registered key (DigitalOcean: the key's id or
+	# fingerprint; AWS: the KeyPair name).
 	vendor_id: str | None = None
 	# Body, for vendors that upload at provision-time.
 	public_key: str | None = None

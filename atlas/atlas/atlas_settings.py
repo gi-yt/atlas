@@ -26,7 +26,7 @@ def get_provider() -> Provider:
 def get_ssh_key() -> SshKey:
 	settings = frappe.get_single("Atlas Settings")
 	return SshKey(
-		vendor_id=settings.ssh_fingerprint or None,
+		vendor_id=settings.ssh_key_id or None,
 		public_key=settings.ssh_public_key or None,
 	)
 

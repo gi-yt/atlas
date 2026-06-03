@@ -76,12 +76,12 @@ def get_client() -> DigitalOceanClient:
 
 
 def get_ssh_key_id() -> str:
-	"""Read the SSH fingerprint for e2e from site config.
+	"""Read the vendor SSH-key id for e2e from site config.
 
 	Site config is the source of truth for the e2e harness — Atlas Settings
 	gets written *to* during `ensure_e2e_provider`, so reading from it would
 	pick up stale values left by prior runs (e.g. unit-test fixtures'
-	`fp:fingerprint`)."""
+	`key-id-123`)."""
 	key_id = frappe.conf.get("atlas_ssh_key_id")
 	if not key_id:
 		raise MissingConfig("e2e needs atlas_ssh_key_id in site config")
