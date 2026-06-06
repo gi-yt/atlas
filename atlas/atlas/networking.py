@@ -59,7 +59,7 @@ def derive_mac(virtual_machine_name: str) -> str:
 	unicast OUI per IEEE 802.
 	"""
 	hex_only = uuid.UUID(virtual_machine_name).hex
-	octets = [hex_only[i:i + 2] for i in range(0, 8, 2)]
+	octets = [hex_only[i : i + 2] for i in range(0, 8, 2)]
 	return "06:00:" + ":".join(octets)
 
 

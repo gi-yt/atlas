@@ -104,12 +104,18 @@ def allocate(server: str) -> str:
 	droplet and the host 1:1-NAT happen on `attach()` (a follow-up Task), not
 	here — an allocated-but-unattached IP is the resting state of a pool entry."""
 	reserved = _provider_for_server(server).allocate_reserved_ip()
-	return frappe.get_doc({
-		"doctype": "Reserved IP",
-		"ip_address": reserved.ip_address,
-		"server": server,
-		"provider_resource_id": reserved.provider_resource_id,
-	}).insert().name
+	return (
+		frappe.get_doc(
+			{
+				"doctype": "Reserved IP",
+				"ip_address": reserved.ip_address,
+				"server": server,
+				"provider_resource_id": reserved.provider_resource_id,
+			}
+		)
+		.insert()
+		.name
+	)
 
 
 @frappe.whitelist()
@@ -131,11 +137,13 @@ def discover(server: str) -> list[str]:
 			continue
 		if frappe.db.exists("Reserved IP", {"ip_address": reserved.ip_address}):
 			continue
-		row = frappe.get_doc({
-			"doctype": "Reserved IP",
-			"ip_address": reserved.ip_address,
-			"server": server,
-			"provider_resource_id": reserved.provider_resource_id,
-		}).insert()
+		row = frappe.get_doc(
+			{
+				"doctype": "Reserved IP",
+				"ip_address": reserved.ip_address,
+				"server": server,
+				"provider_resource_id": reserved.provider_resource_id,
+			}
+		).insert()
 		created.append(row.name)
 	return created

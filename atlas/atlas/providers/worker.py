@@ -14,7 +14,6 @@ import frappe
 
 from atlas.atlas.providers.base import Provider, ProvisionResult
 
-
 POLL_INTERVAL_SECONDS = 5
 DEFAULT_READY_TIMEOUT = 600
 
@@ -31,9 +30,7 @@ def wait_until_ready(
 		if result.ready:
 			return result
 		if time.monotonic() >= deadline:
-			frappe.throw(
-				f"provider resource {identifier!r} not ready after {timeout_seconds}s"
-			)
+			frappe.throw(f"provider resource {identifier!r} not ready after {timeout_seconds}s")
 		time.sleep(POLL_INTERVAL_SECONDS)
 
 
@@ -49,9 +46,7 @@ def finish_provisioning(server_name: str) -> None:
 	# Self-Managed has no vendor-side resource id; the worker hands it the
 	# Server's UUID so describe() can look the row up.
 	identifier = server.provider_resource_id or server.name
-	frappe.logger("atlas").info(
-		f"finish_provisioning: waiting for provider resource {identifier!r}"
-	)
+	frappe.logger("atlas").info(f"finish_provisioning: waiting for provider resource {identifier!r}")
 	result = wait_until_ready(provider, identifier)
 	frappe.logger("atlas").info(
 		f"finish_provisioning: ready ipv4={result.networking.ipv4_address if result.networking else None}"

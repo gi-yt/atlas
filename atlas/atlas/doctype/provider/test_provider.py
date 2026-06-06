@@ -93,21 +93,22 @@ class TestProviderRefreshCatalog(IntegrationTestCase):
 	def setUp(self) -> None:
 		self.provider = make_provider(name="test-refresh-prov")
 		import json
+
 		if not frappe.db.exists("Provider Size", "DigitalOcean/legacy-slug"):
-			frappe.get_doc({
-				"doctype": "Provider Size",
-				"provider_type": "DigitalOcean",
-				"slug": "legacy-slug",
-				"enabled": 1,
-				"provider_metadata": json.dumps({}),
-			}).insert(ignore_permissions=True)
+			frappe.get_doc(
+				{
+					"doctype": "Provider Size",
+					"provider_type": "DigitalOcean",
+					"slug": "legacy-slug",
+					"enabled": 1,
+					"provider_metadata": json.dumps({}),
+				}
+			).insert(ignore_permissions=True)
 
 	def tearDown(self) -> None:
 		for name in ("DigitalOcean/legacy-slug", "DigitalOcean/brand-new-slug"):
 			if frappe.db.exists("Provider Size", name):
-				frappe.delete_doc(
-					"Provider Size", name, force=True, ignore_permissions=True
-				)
+				frappe.delete_doc("Provider Size", name, force=True, ignore_permissions=True)
 
 	def test_discover_and_upsert_counts_inserts_updates_disables(self) -> None:
 		fake_impl = MagicMock()
@@ -149,10 +150,13 @@ class TestProviderProvisionServer(IntegrationTestCase):
 			networking=None,
 			provider_metadata={"id": 999},
 		)
-		with patch(
-			"atlas.atlas.doctype.provider.provider.providers.for_provider",
-			return_value=fake_impl,
-		), patch.object(provider_module.frappe, "enqueue") as enqueue:
+		with (
+			patch(
+				"atlas.atlas.doctype.provider.provider.providers.for_provider",
+				return_value=fake_impl,
+			),
+			patch.object(provider_module.frappe, "enqueue") as enqueue,
+		):
 			returned = self.provider.provision_server(title)
 
 		server = frappe.get_doc("Server", returned)
@@ -169,13 +173,15 @@ class TestProviderProvisionServer(IntegrationTestCase):
 	def test_provision_server_rejects_duplicate(self) -> None:
 		title = "dup-server"
 		frappe.db.delete("Server", {"title": title})
-		frappe.get_doc({
-			"doctype": "Server",
-			"title": title,
-			"provider": self.provider.name,
-			"provider_resource_id": "1",
-			"status": "Pending",
-		}).insert(ignore_permissions=True)
+		frappe.get_doc(
+			{
+				"doctype": "Server",
+				"title": title,
+				"provider": self.provider.name,
+				"provider_resource_id": "1",
+				"status": "Pending",
+			}
+		).insert(ignore_permissions=True)
 
 		with self.assertRaises(frappe.ValidationError) as raised:
 			self.provider.provision_server(title)
@@ -186,10 +192,9 @@ class TestProviderProvisionServer(IntegrationTestCase):
 class TestProviderProvisionServerSelfManaged(IntegrationTestCase):
 	def setUp(self) -> None:
 		frappe.db.delete("Provider", {"provider_name": "test-self-managed-row"})
-		self.provider = make_provider_row(
-			name="test-self-managed-row", provider_type="Self-Managed"
-		)
+		self.provider = make_provider_row(name="test-self-managed-row", provider_type="Self-Managed")
 		from atlas.tests.fixtures import set_atlas_settings
+
 		set_atlas_settings(self.provider)
 
 	def test_provision_server_self_managed_inserts(self) -> None:

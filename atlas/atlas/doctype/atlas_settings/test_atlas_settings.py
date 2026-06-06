@@ -38,14 +38,10 @@ class TestAtlasSettingsAccessors(IntegrationTestCase):
 		# Save the current value, clear, restore in tearDown via a context.
 		previous = frappe.db.get_single_value("Atlas Settings", "provider")
 		try:
-			frappe.db.set_single_value(
-				"Atlas Settings", "provider", "", update_modified=False
-			)
+			frappe.db.set_single_value("Atlas Settings", "provider", "", update_modified=False)
 			with self.assertRaises(frappe.ValidationError) as raised:
 				atlas_settings.get_provider()
 			self.assertIn("no active provider", str(raised.exception))
 		finally:
 			if previous:
-				frappe.db.set_single_value(
-					"Atlas Settings", "provider", previous, update_modified=False
-				)
+				frappe.db.set_single_value("Atlas Settings", "provider", previous, update_modified=False)

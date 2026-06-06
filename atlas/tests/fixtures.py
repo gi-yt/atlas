@@ -19,7 +19,6 @@ from frappe.model.document import Document
 
 from atlas.tests.e2e._shared import DEFAULT_IMAGE
 
-
 _FAKE_KEY_PEM = "-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----\n"
 
 DEFAULT_DIGITALOCEAN_SIZE = "DigitalOcean/s-2vcpu-4gb-intel"
@@ -104,25 +103,29 @@ def seed_catalogs() -> None:
 		name = f"DigitalOcean/{slug}"
 		if frappe.db.exists("Provider Size", name):
 			continue
-		frappe.get_doc({
-			"doctype": "Provider Size",
-			"provider_type": "DigitalOcean",
-			"slug": slug,
-			"enabled": 1,
-			"monthly_cost_usd": DIGITALOCEAN_MONTHLY_COST_USD.get(slug),
-			"provider_metadata": json.dumps({}),
-		}).insert(ignore_permissions=True)
+		frappe.get_doc(
+			{
+				"doctype": "Provider Size",
+				"provider_type": "DigitalOcean",
+				"slug": slug,
+				"enabled": 1,
+				"monthly_cost_usd": DIGITALOCEAN_MONTHLY_COST_USD.get(slug),
+				"provider_metadata": json.dumps({}),
+			}
+		).insert(ignore_permissions=True)
 	for slug in KNOWN_DIGITALOCEAN_IMAGES:
 		name = f"DigitalOcean/{slug}"
 		if frappe.db.exists("Provider Image", name):
 			continue
-		frappe.get_doc({
-			"doctype": "Provider Image",
-			"provider_type": "DigitalOcean",
-			"slug": slug,
-			"enabled": 1,
-			"provider_metadata": json.dumps({}),
-		}).insert(ignore_permissions=True)
+		frappe.get_doc(
+			{
+				"doctype": "Provider Image",
+				"provider_type": "DigitalOcean",
+				"slug": slug,
+				"enabled": 1,
+				"provider_metadata": json.dumps({}),
+			}
+		).insert(ignore_permissions=True)
 
 
 def make_provider(name: str = "test-provider", **overrides: Any) -> Document:
@@ -137,8 +140,14 @@ def make_provider(name: str = "test-provider", **overrides: Any) -> Document:
 	"""
 	provider_type = overrides.pop("provider_type", "DigitalOcean")
 	# Strip legacy kwargs from the old Server Provider shape.
-	for legacy in ("api_token", "ssh_key_id", "ssh_private_key_path",
-		"default_region", "default_size", "default_image"):
+	for legacy in (
+		"api_token",
+		"ssh_key_id",
+		"ssh_private_key_path",
+		"default_region",
+		"default_size",
+		"default_image",
+	):
 		overrides.pop(legacy, None)
 
 	seed_catalogs()

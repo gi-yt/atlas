@@ -56,6 +56,7 @@ class ProvisionRequest:
 @dataclasses.dataclass(frozen=True, slots=True)
 class ProvisionResult:
 	"""Returned by provision() and describe(). Often a partial."""
+
 	provider_resource_id: str
 	size: str
 	image: str
@@ -93,6 +94,7 @@ class ReservedIp:
 	differ). `droplet_resource_id` is the provider_resource_id of the *Server*
 	(droplet) the IP is currently assigned to, or None if it's floating —
 	enough for `discover()` to map a vendor reserved IP back to a Server row."""
+
 	ip_address: str
 	provider_resource_id: str
 	droplet_resource_id: str | None = None
@@ -113,8 +115,7 @@ class Provider(ABC):
 	provider_type: ClassVar[str]
 
 	@abstractmethod
-	def authenticate(self) -> AuthResult:
-		...
+	def authenticate(self) -> AuthResult: ...
 
 	@abstractmethod
 	def discover(self) -> Capabilities:

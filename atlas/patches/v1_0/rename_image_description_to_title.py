@@ -13,9 +13,7 @@ def execute():
 	if has_title and not has_description:
 		return
 	if has_description and not has_title:
-		frappe.db.sql_ddl(
-			"ALTER TABLE `tabVirtual Machine Image` CHANGE `description` `title` VARCHAR(140)"
-		)
+		frappe.db.sql_ddl("ALTER TABLE `tabVirtual Machine Image` CHANGE `description` `title` VARCHAR(140)")
 		return
 	if has_description and has_title:
 		frappe.db.sql(

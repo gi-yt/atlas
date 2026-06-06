@@ -19,18 +19,20 @@ class TestVirtualMachineImage(IntegrationTestCase):
 		self.image = make_image()
 
 	def test_validate_urls_https(self) -> None:
-		bad = frappe.get_doc({
-			"doctype": "Virtual Machine Image",
-			"image_name": "bad-image",
-			"kernel_url": "http://example.com/vmlinux",
-			"kernel_filename": "vmlinux-1.0",
-			"kernel_sha256": "a" * 64,
-			"rootfs_url": "https://example.com/rootfs.squashfs",
-			"rootfs_filename": "rootfs.ext4",
-			"rootfs_sha256": "b" * 64,
-			"default_disk_gigabytes": 4,
-			"is_active": 1,
-		})
+		bad = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine Image",
+				"image_name": "bad-image",
+				"kernel_url": "http://example.com/vmlinux",
+				"kernel_filename": "vmlinux-1.0",
+				"kernel_sha256": "a" * 64,
+				"rootfs_url": "https://example.com/rootfs.squashfs",
+				"rootfs_filename": "rootfs.ext4",
+				"rootfs_sha256": "b" * 64,
+				"default_disk_gigabytes": 4,
+				"is_active": 1,
+			}
+		)
 		with self.assertRaises(frappe.ValidationError):
 			bad.insert(ignore_permissions=True)
 
@@ -52,10 +54,7 @@ class TestVirtualMachineImage(IntegrationTestCase):
 			tasks = self.image.sync_to_all_servers()
 		# Active servers are: srv-active-1 plus any previous Active servers
 		# from other tests; we filter to the ones we just created.
-		our_tasks = [
-			t for t in tasks
-			if frappe.db.get_value("Task", t, "server") == active_name
-		]
+		our_tasks = [t for t in tasks if frappe.db.get_value("Task", t, "server") == active_name]
 		self.assertEqual(len(our_tasks), 1)
 		# enqueue called once per Active server in the system (>=1 from ours).
 		self.assertGreaterEqual(enqueue.call_count, 1)
@@ -76,19 +75,21 @@ class TestVirtualMachineImageAutoSync(IntegrationTestCase):
 		# Reset image name to ensure a fresh insert.
 		frappe.db.delete("Virtual Machine Image", {"image_name": "auto-sync-image"})
 		with patch("frappe.enqueue") as enqueue:
-			image = frappe.get_doc({
-				"doctype": "Virtual Machine Image",
-				"image_name": "auto-sync-image",
-				"title": "auto sync image",
-				"kernel_url": "https://example.com/k",
-				"kernel_filename": "k",
-				"kernel_sha256": "a" * 64,
-				"rootfs_url": "https://example.com/r",
-				"rootfs_filename": "r",
-				"rootfs_sha256": "b" * 64,
-				"default_disk_gigabytes": 4,
-				"is_active": 1,
-			}).insert(ignore_permissions=True)
+			frappe.get_doc(
+				{
+					"doctype": "Virtual Machine Image",
+					"image_name": "auto-sync-image",
+					"title": "auto sync image",
+					"kernel_url": "https://example.com/k",
+					"kernel_filename": "k",
+					"kernel_sha256": "a" * 64,
+					"rootfs_url": "https://example.com/r",
+					"rootfs_filename": "r",
+					"rootfs_sha256": "b" * 64,
+					"default_disk_gigabytes": 4,
+					"is_active": 1,
+				}
+			).insert(ignore_permissions=True)
 
 		# Inserts a sync Task per Active server we just created.
 		our_tasks = frappe.get_all(
@@ -107,19 +108,21 @@ class TestVirtualMachineImageAutoSync(IntegrationTestCase):
 		_provider_and_server("inactive-srv-1", "Active")
 		frappe.db.delete("Virtual Machine Image", {"image_name": "inactive-image"})
 		with patch("frappe.enqueue") as enqueue:
-			frappe.get_doc({
-				"doctype": "Virtual Machine Image",
-				"image_name": "inactive-image",
-				"title": "inactive image",
-				"kernel_url": "https://example.com/k",
-				"kernel_filename": "k",
-				"kernel_sha256": "a" * 64,
-				"rootfs_url": "https://example.com/r",
-				"rootfs_filename": "r",
-				"rootfs_sha256": "b" * 64,
-				"default_disk_gigabytes": 4,
-				"is_active": 0,
-			}).insert(ignore_permissions=True)
+			frappe.get_doc(
+				{
+					"doctype": "Virtual Machine Image",
+					"image_name": "inactive-image",
+					"title": "inactive image",
+					"kernel_url": "https://example.com/k",
+					"kernel_filename": "k",
+					"kernel_sha256": "a" * 64,
+					"rootfs_url": "https://example.com/r",
+					"rootfs_filename": "r",
+					"rootfs_sha256": "b" * 64,
+					"default_disk_gigabytes": 4,
+					"is_active": 0,
+				}
+			).insert(ignore_permissions=True)
 		# No syncs enqueued when is_active=0.
 		self.assertEqual(enqueue.call_count, 0)
 
@@ -132,9 +135,7 @@ class TestShippedImageConstants(IntegrationTestCase):
 
 	def _assert_shaped(self, image: dict) -> None:
 		for url_field in ("kernel_url", "rootfs_url"):
-			self.assertTrue(
-				image[url_field].startswith("https://"), image[url_field]
-			)
+			self.assertTrue(image[url_field].startswith("https://"), image[url_field])
 		for sha_field in ("kernel_sha256", "rootfs_sha256"):
 			value = image[sha_field]
 			self.assertEqual(len(value), 64, sha_field)
@@ -146,13 +147,9 @@ class TestShippedImageConstants(IntegrationTestCase):
 		self._assert_shaped(DEFAULT_IMAGE)
 		self._assert_shaped(MINIMAL_IMAGE)
 		# Two distinct image rows.
-		self.assertNotEqual(
-			DEFAULT_IMAGE["image_name"], MINIMAL_IMAGE["image_name"]
-		)
+		self.assertNotEqual(DEFAULT_IMAGE["image_name"], MINIMAL_IMAGE["image_name"])
 		# Distinct rootfs filenames so they don't clobber each other on a server.
-		self.assertNotEqual(
-			DEFAULT_IMAGE["rootfs_filename"], MINIMAL_IMAGE["rootfs_filename"]
-		)
+		self.assertNotEqual(DEFAULT_IMAGE["rootfs_filename"], MINIMAL_IMAGE["rootfs_filename"])
 
 	def test_bootstrap_and_config_constants_match(self) -> None:
 		"""bootstrap.py and tests/e2e/_config.py pin the same bytes — drift
@@ -170,9 +167,13 @@ class TestShippedImageConstants(IntegrationTestCase):
 		from atlas.bootstrap import DEFAULT_IMAGE
 
 		frappe.db.delete("Virtual Machine Image", {"image_name": DEFAULT_IMAGE["image_name"]})
-		image = frappe.get_doc({
-			"doctype": "Virtual Machine Image", **DEFAULT_IMAGE, "is_active": 0,
-		}).insert(ignore_permissions=True)
+		image = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine Image",
+				**DEFAULT_IMAGE,
+				"is_active": 0,
+			}
+		).insert(ignore_permissions=True)
 		self.assertEqual(image.name, DEFAULT_IMAGE["image_name"])
 
 

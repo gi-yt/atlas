@@ -104,40 +104,40 @@ def run() -> None:
 def ensure_provider() -> "frappe.model.document.Document":
 	provider_type = require_config("atlas_provider_type")
 	if provider_type not in ("DigitalOcean", "Self-Managed"):
-		frappe.throw(
-			f"atlas_provider_type must be DigitalOcean or Self-Managed, got {provider_type!r}"
-		)
+		frappe.throw(f"atlas_provider_type must be DigitalOcean or Self-Managed, got {provider_type!r}")
 
 	# Ensure the Provider row exists, then write the Singles.
 	if not frappe.db.exists("Provider", PROVIDER_NAME):
-		frappe.get_doc({
-			"doctype": "Provider",
-			"provider_name": PROVIDER_NAME,
-			"provider_type": provider_type,
-			"is_active": 1,
-		}).insert(ignore_permissions=True)
+		frappe.get_doc(
+			{
+				"doctype": "Provider",
+				"provider_name": PROVIDER_NAME,
+				"provider_type": provider_type,
+				"is_active": 1,
+			}
+		).insert(ignore_permissions=True)
 		print(f"[bootstrap] created Provider {PROVIDER_NAME!r} ({provider_type})")
 	else:
 		print(f"[bootstrap] reusing Provider {PROVIDER_NAME!r}")
 
 	# Atlas Settings — provider link + SSH triplet.
+	frappe.db.set_single_value("Atlas Settings", "provider", PROVIDER_NAME, update_modified=False)
 	frappe.db.set_single_value(
-		"Atlas Settings", "provider", PROVIDER_NAME, update_modified=False
-	)
-	frappe.db.set_single_value(
-		"Atlas Settings", "ssh_private_key_path",
-		require_config("atlas_ssh_private_key_path"), update_modified=False,
+		"Atlas Settings",
+		"ssh_private_key_path",
+		require_config("atlas_ssh_private_key_path"),
+		update_modified=False,
 	)
 	if provider_type == "DigitalOcean":
 		frappe.db.set_single_value(
-			"Atlas Settings", "ssh_key_id",
-			require_config("atlas_ssh_key_id"), update_modified=False,
+			"Atlas Settings",
+			"ssh_key_id",
+			require_config("atlas_ssh_key_id"),
+			update_modified=False,
 		)
 	public_key = frappe.conf.get("atlas_ssh_public_key")
 	if public_key:
-		frappe.db.set_single_value(
-			"Atlas Settings", "ssh_public_key", public_key, update_modified=False
-		)
+		frappe.db.set_single_value("Atlas Settings", "ssh_public_key", public_key, update_modified=False)
 
 	if provider_type == "DigitalOcean":
 		region = require_config("atlas_do_region")
@@ -150,16 +150,22 @@ def ensure_provider() -> "frappe.model.document.Document":
 
 		frappe.db.set_single_value("DigitalOcean Settings", "region", region, update_modified=False)
 		frappe.db.set_single_value(
-			"DigitalOcean Settings", "default_size",
-			f"DigitalOcean/{size_slug}", update_modified=False,
+			"DigitalOcean Settings",
+			"default_size",
+			f"DigitalOcean/{size_slug}",
+			update_modified=False,
 		)
 		frappe.db.set_single_value(
-			"DigitalOcean Settings", "default_image",
-			f"DigitalOcean/{image_slug}", update_modified=False,
+			"DigitalOcean Settings",
+			"default_image",
+			f"DigitalOcean/{image_slug}",
+			update_modified=False,
 		)
 		frappe.utils.password.set_encrypted_password(
-			"DigitalOcean Settings", "DigitalOcean Settings",
-			require_config("atlas_do_token"), "api_token",
+			"DigitalOcean Settings",
+			"DigitalOcean Settings",
+			require_config("atlas_do_token"),
+			"api_token",
 		)
 
 		# Seed the wider catalog so the Refresh Catalog button is exercising
@@ -182,13 +188,16 @@ def _ensure_provider_size(provider_type: str, slug: str) -> None:
 	if frappe.db.exists("Provider Size", name):
 		return
 	import json
-	frappe.get_doc({
-		"doctype": "Provider Size",
-		"provider_type": provider_type,
-		"slug": slug,
-		"enabled": 1,
-		"provider_metadata": json.dumps({}),
-	}).insert(ignore_permissions=True)
+
+	frappe.get_doc(
+		{
+			"doctype": "Provider Size",
+			"provider_type": provider_type,
+			"slug": slug,
+			"enabled": 1,
+			"provider_metadata": json.dumps({}),
+		}
+	).insert(ignore_permissions=True)
 
 
 def _ensure_provider_image(provider_type: str, slug: str) -> None:
@@ -196,13 +205,16 @@ def _ensure_provider_image(provider_type: str, slug: str) -> None:
 	if frappe.db.exists("Provider Image", name):
 		return
 	import json
-	frappe.get_doc({
-		"doctype": "Provider Image",
-		"provider_type": provider_type,
-		"slug": slug,
-		"enabled": 1,
-		"provider_metadata": json.dumps({}),
-	}).insert(ignore_permissions=True)
+
+	frappe.get_doc(
+		{
+			"doctype": "Provider Image",
+			"provider_type": provider_type,
+			"slug": slug,
+			"enabled": 1,
+			"provider_metadata": json.dumps({}),
+		}
+	).insert(ignore_permissions=True)
 
 
 def provision_server(provider: "frappe.model.document.Document") -> str:
@@ -256,16 +268,18 @@ def sync_image(server_name: str, timeout_seconds: int = 900) -> None:
 
 
 def provision_virtual_machine(server_name: str) -> str:
-	virtual_machine = frappe.get_doc({
-		"doctype": "Virtual Machine",
-		"title": "bootstrap test vm",
-		"server": server_name,
-		"image": IMAGE_NAME,
-		"vcpus": 1,
-		"memory_megabytes": 512,
-		"disk_gigabytes": 4,
-		"ssh_public_key": load_vm_ssh_public_key(),
-	}).insert(ignore_permissions=True)
+	virtual_machine = frappe.get_doc(
+		{
+			"doctype": "Virtual Machine",
+			"title": "bootstrap test vm",
+			"server": server_name,
+			"image": IMAGE_NAME,
+			"vcpus": 1,
+			"memory_megabytes": 512,
+			"disk_gigabytes": 4,
+			"ssh_public_key": load_vm_ssh_public_key(),
+		}
+	).insert(ignore_permissions=True)
 	frappe.db.commit()
 	print(f"[bootstrap] created Virtual Machine {virtual_machine.name!r}")
 	task_name = _wait_for_provision_task(virtual_machine.name)

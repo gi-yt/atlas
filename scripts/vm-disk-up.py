@@ -25,30 +25,30 @@ import sys
 # The durable package lives next to this script under /var/lib/atlas/bin.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from atlas.network_env import read_network_env
 from atlas.lvm import ThinPool
+from atlas.network_env import read_network_env
 from atlas.paths import VirtualMachinePaths
 
 
 def main() -> None:
-    if len(sys.argv) != 2:
-        sys.exit("usage: vm-disk-up.py <virtual-machine-uuid>")
-    uuid = sys.argv[1]
+	if len(sys.argv) != 2:
+		sys.exit("usage: vm-disk-up.py <virtual-machine-uuid>")
+	uuid = sys.argv[1]
 
-    paths = VirtualMachinePaths(uuid)
-    env = read_network_env(paths.network_env)
-    uid = env.require_int("ATLAS_FC_UID")
+	paths = VirtualMachinePaths(uuid)
+	env = read_network_env(paths.network_env)
+	uid = env.require_int("ATLAS_FC_UID")
 
-    pool = ThinPool()
-    disk = pool.vm_disk(uuid)
+	pool = ThinPool()
+	disk = pool.vm_disk(uuid)
 
-    # Activate the disk LV (-K, so the activation-skip snapshot comes up) and
-    # refresh the in-jail block node to the LV's current major:minor. Both are
-    # idempotent: a no-reboot restart re-activates an already-active LV (no-op)
-    # and re-mknods the same dev_t.
-    disk.activate()
-    disk.expose_in_jail(paths.rootfs_node, uid)
+	# Activate the disk LV (-K, so the activation-skip snapshot comes up) and
+	# refresh the in-jail block node to the LV's current major:minor. Both are
+	# idempotent: a no-reboot restart re-activates an already-active LV (no-op)
+	# and re-mknods the same dev_t.
+	disk.activate()
+	disk.expose_in_jail(paths.rootfs_node, uid)
 
 
 if __name__ == "__main__":
-    main()
+	main()

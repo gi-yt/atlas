@@ -26,35 +26,35 @@ from atlas.lvm import ThinPool
 
 @dataclass(frozen=True)
 class SnapshotInputs(TaskInputs):
-    """Snapshot a Stopped VM's disk via an LVM thin CoW snapshot."""
+	"""Snapshot a Stopped VM's disk via an LVM thin CoW snapshot."""
 
-    command: typing.ClassVar[str] = "snapshot-vm"
-    virtual_machine_name: str  # UUID; identifies the source disk LV
-    snapshot_rootfs_path: str  # the snapshot's /dev/atlas/<name> device path
+	command: typing.ClassVar[str] = "snapshot-vm"
+	virtual_machine_name: str  # UUID; identifies the source disk LV
+	snapshot_rootfs_path: str  # the snapshot's /dev/atlas/<name> device path
 
 
 @dataclass(frozen=True)
 class SnapshotResult(TaskResult):
-    size_bytes: int
+	size_bytes: int
 
 
 def main() -> None:
-    inputs = SnapshotInputs.from_args()
-    pool = ThinPool()
+	inputs = SnapshotInputs.from_args()
+	pool = ThinPool()
 
-    disk = pool.vm_disk(inputs.virtual_machine_name)
-    snapshot = pool.from_device(inputs.snapshot_rootfs_path)
+	disk = pool.vm_disk(inputs.virtual_machine_name)
+	snapshot = pool.from_device(inputs.snapshot_rootfs_path)
 
-    if not disk.exists:
-        sys.exit(f"disk LV not found for {inputs.virtual_machine_name} ({disk.name}); provision the VM first")
-    if pool.usage.too_full_to_snapshot:
-        sys.exit(f"thin pool {pool.pool_name} too full for a safe snapshot ({pool.usage})")
+	if not disk.exists:
+		sys.exit(f"disk LV not found for {inputs.virtual_machine_name} ({disk.name}); provision the VM first")
+	if pool.usage.too_full_to_snapshot:
+		sys.exit(f"thin pool {pool.pool_name} too full for a safe snapshot ({pool.usage})")
 
-    disk.snapshot_into(snapshot)
+	disk.snapshot_into(snapshot)
 
-    SnapshotResult(size_bytes=snapshot.size_bytes).emit()
-    print(f"Snapshotted {inputs.virtual_machine_name} to {snapshot.name}.")
+	SnapshotResult(size_bytes=snapshot.size_bytes).emit()
+	print(f"Snapshotted {inputs.virtual_machine_name} to {snapshot.name}.")
 
 
 if __name__ == "__main__":
-    main()
+	main()

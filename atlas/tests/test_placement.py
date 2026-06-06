@@ -18,22 +18,26 @@ USER_EMAIL = "atlas-placement-user@example.com"
 
 def _atlas_user() -> str:
 	if not frappe.db.exists("Role", "Atlas User"):
-		frappe.get_doc({
-			"doctype": "Role",
-			"role_name": "Atlas User",
-			"desk_access": 0,
-		}).insert(ignore_permissions=True)
+		frappe.get_doc(
+			{
+				"doctype": "Role",
+				"role_name": "Atlas User",
+				"desk_access": 0,
+			}
+		).insert(ignore_permissions=True)
 	if frappe.db.exists("User", USER_EMAIL):
 		user = frappe.get_doc("User", USER_EMAIL)
 	else:
-		user = frappe.get_doc({
-			"doctype": "User",
-			"email": USER_EMAIL,
-			"first_name": "Place",
-			"last_name": "Ment",
-			"send_welcome_email": 0,
-			"enabled": 1,
-		}).insert(ignore_permissions=True)
+		user = frappe.get_doc(
+			{
+				"doctype": "User",
+				"email": USER_EMAIL,
+				"first_name": "Place",
+				"last_name": "Ment",
+				"send_welcome_email": 0,
+				"enabled": 1,
+			}
+		).insert(ignore_permissions=True)
 	for role_row in list(user.get("roles") or []):
 		user.remove(role_row)
 	user.append("roles", {"role": "Atlas User"})
@@ -151,12 +155,12 @@ class TestPlacement(IntegrationTestCase):
 			self._new_machine()
 
 	def test_overprovision_factor_opens_room_on_full_server(self) -> None:
-		# A 16× factor lifts the budget to 64 effective vCPUs, so the same
+		# A 16x factor lifts the budget to 64 effective vCPUs, so the same
 		# fully-booked server now accepts the VM.
 		frappe.db.set_single_value("Atlas Settings", "overprovision_factor", 16)
 		server = self._full_4vcpu_server()
 		vm = self._new_machine()
-		self.assertEqual(vm.server, server.name, "16× factor leaves room")
+		self.assertEqual(vm.server, server.name, "16x factor leaves room")
 
 	def test_ambiguous_image_throws(self) -> None:
 		server = make_server(

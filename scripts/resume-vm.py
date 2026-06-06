@@ -22,34 +22,34 @@ from atlas.paths import VirtualMachinePaths
 
 @dataclass(frozen=True)
 class ResumeInputs(TaskInputs):
-    """Resume a Paused VM by unfreezing its vCPUs via the Firecracker API socket."""
+	"""Resume a Paused VM by unfreezing its vCPUs via the Firecracker API socket."""
 
-    command: typing.ClassVar[str] = "resume-vm"
-    virtual_machine_name: str  # UUID; selects the API socket
+	command: typing.ClassVar[str] = "resume-vm"
+	virtual_machine_name: str  # UUID; selects the API socket
 
 
 def main() -> None:
-    inputs = ResumeInputs.from_args()
-    paths = VirtualMachinePaths(inputs.virtual_machine_name)
+	inputs = ResumeInputs.from_args()
+	paths = VirtualMachinePaths(inputs.virtual_machine_name)
 
-    # The API socket is created by Firecracker inside its jail (a host-filesystem
-    # unix socket; the VM's network namespace doesn't affect reaching it). The
-    # jail path nests the UUID twice, exceeding the 108-byte sun_path limit, so we
-    # connect via a SHORT relative name: the existence test uses the absolute path
-    # (stat() has no length limit), while the PATCH cd-s into the socket directory
-    # and addresses it as just firecracker.socket. See pause-vm.py / paths.py for
-    # the full rationale.
-    if not os.path.exists(paths.api_socket):
-        sys.exit(f"API socket {paths.api_socket} not present; is the VM running?")
+	# The API socket is created by Firecracker inside its jail (a host-filesystem
+	# unix socket; the VM's network namespace doesn't affect reaching it). The
+	# jail path nests the UUID twice, exceeding the 108-byte sun_path limit, so we
+	# connect via a SHORT relative name: the existence test uses the absolute path
+	# (stat() has no length limit), while the PATCH cd-s into the socket directory
+	# and addresses it as just firecracker.socket. See pause-vm.py / paths.py for
+	# the full rationale.
+	if not os.path.exists(paths.api_socket):
+		sys.exit(f"API socket {paths.api_socket} not present; is the VM running?")
 
-    firecracker_api_patch(
-        paths.api_socket_directory,
-        paths.api_socket_name,
-        '{"state": "Resumed"}',
-    )
+	firecracker_api_patch(
+		paths.api_socket_directory,
+		paths.api_socket_name,
+		'{"state": "Resumed"}',
+	)
 
-    print(f"Resumed {inputs.virtual_machine_name}.")
+	print(f"Resumed {inputs.virtual_machine_name}.")
 
 
 if __name__ == "__main__":
-    main()
+	main()

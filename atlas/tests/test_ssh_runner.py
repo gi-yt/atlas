@@ -72,14 +72,16 @@ class TestExecuteTask(IntegrationTestCase):
 		)
 
 	def test_runs_pending_task(self) -> None:
-		task = frappe.get_doc({
-			"doctype": "Task",
-			"server": self.server.name,
-			"script": "phase1-probe.sh",
-			"variables": json.dumps({"NAME": "hi"}),
-			"status": "Pending",
-			"triggered_by": "Administrator",
-		}).insert(ignore_permissions=True)
+		task = frappe.get_doc(
+			{
+				"doctype": "Task",
+				"server": self.server.name,
+				"script": "phase1-probe.sh",
+				"variables": json.dumps({"NAME": "hi"}),
+				"status": "Pending",
+				"triggered_by": "Administrator",
+			}
+		).insert(ignore_permissions=True)
 
 		with patch(
 			"atlas.atlas._ssh.runner._run_remote_script",
@@ -93,14 +95,16 @@ class TestExecuteTask(IntegrationTestCase):
 		self.assertIn("hello", task.stdout)
 
 	def test_raises_when_task_has_no_server(self) -> None:
-		task = frappe.get_doc({
-			"doctype": "Task",
-			"server": None,
-			"script": "phase1-probe.sh",
-			"variables": json.dumps({}),
-			"status": "Pending",
-			"triggered_by": "Administrator",
-		}).insert(ignore_permissions=True)
+		task = frappe.get_doc(
+			{
+				"doctype": "Task",
+				"server": None,
+				"script": "phase1-probe.sh",
+				"variables": json.dumps({}),
+				"status": "Pending",
+				"triggered_by": "Administrator",
+			}
+		).insert(ignore_permissions=True)
 
 		with self.assertRaises(frappe.ValidationError) as raised:
 			execute_task(task.name)
@@ -133,9 +137,7 @@ class TestConnectionForServer(IntegrationTestCase):
 		)
 		previous = frappe.db.get_single_value("Atlas Settings", "ssh_private_key_path")
 		try:
-			frappe.db.set_single_value(
-				"Atlas Settings", "ssh_private_key_path", "", update_modified=False
-			)
+			frappe.db.set_single_value("Atlas Settings", "ssh_private_key_path", "", update_modified=False)
 			with self.assertRaises(frappe.ValidationError) as raised:
 				connection_for_server(server)
 			self.assertIn("ssh_private_key_path", str(raised.exception))
@@ -204,11 +206,13 @@ class TestSidecarUploads(IntegrationTestCase):
 		)
 		# Script always last, after sidecars (which now include the atlas package).
 		script_index = next(
-			index for index, destination in enumerate(scp_destinations)
+			index
+			for index, destination in enumerate(scp_destinations)
 			if destination.endswith("sync-image.py")
 		)
 		sidecar_index = next(
-			index for index, destination in enumerate(scp_destinations)
+			index
+			for index, destination in enumerate(scp_destinations)
 			if "atlas-network.service" in destination
 		)
 		self.assertLess(sidecar_index, script_index)
@@ -243,7 +247,8 @@ class TestRemoteCommand(IntegrationTestCase):
 
 	def test_python_task_drops_empty_optional(self) -> None:
 		command = runner._remote_command(
-			"provision-vm.py", "/tmp/atlas/provision-vm.py",
+			"provision-vm.py",
+			"/tmp/atlas/provision-vm.py",
 			{"VIRTUAL_MACHINE_NAME": "uuid-1", "SNAPSHOT_ROOTFS_PATH": ""},
 		)
 		self.assertIn("--virtual-machine-name uuid-1", command)
@@ -251,7 +256,9 @@ class TestRemoteCommand(IntegrationTestCase):
 
 	def test_shell_task_keeps_bash_env_form(self) -> None:
 		command = runner._remote_command(
-			"reboot-server.sh", "/tmp/atlas/reboot-server.sh", {},
+			"reboot-server.sh",
+			"/tmp/atlas/reboot-server.sh",
+			{},
 		)
 		self.assertIn("bash -x /tmp/atlas/reboot-server.sh", command)
 		self.assertNotIn("python3", command)

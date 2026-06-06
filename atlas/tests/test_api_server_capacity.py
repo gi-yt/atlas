@@ -46,7 +46,7 @@ class TestServerCapacity(IntegrationTestCase):
 		frappe.db.set_single_value("Atlas Settings", "overprovision_factor", 16)
 		result = server_capacity.capacity_for_server(self.server.name)
 		self.assertEqual(result["total_vcpus"], 2, "physical total is unchanged")
-		self.assertEqual(result["effective_vcpus"], 32, "budget is total × factor")
+		self.assertEqual(result["effective_vcpus"], 32, "budget is total x factor")
 
 	def test_used_vcpus_sums_non_terminated_vms(self) -> None:
 		make_virtual_machine(self.server, self.image, vcpus=1)

@@ -78,16 +78,18 @@ def _check_provision_image_missing(server_name: str, image: str) -> None:
 
 	_move_image(server_name, image_doc, "aside")
 	try:
-		vm = frappe.get_doc({
-			"doctype": "Virtual Machine",
-			"title": "image-missing negative path",
-			"server": server_name,
-			"image": image,
-			"vcpus": 1,
-			"memory_megabytes": 512,
-			"disk_gigabytes": 4,
-			"ssh_public_key": public_key,
-		}).insert(ignore_permissions=True)
+		vm = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine",
+				"title": "image-missing negative path",
+				"server": server_name,
+				"image": image,
+				"vcpus": 1,
+				"memory_megabytes": 512,
+				"disk_gigabytes": 4,
+				"ssh_public_key": public_key,
+			}
+		).insert(ignore_permissions=True)
 		frappe.db.commit()
 
 		# Auto-provision worker fires, hits the "rootfs missing" throw, and
@@ -121,16 +123,18 @@ def _check_provision_image_missing(server_name: str, image: str) -> None:
 
 
 def _check_provision_happy_path(server_name: str, image: str, public_key: str) -> None:
-	vm = frappe.get_doc({
-		"doctype": "Virtual Machine",
-		"title": "vm-provisioning happy path",
-		"server": server_name,
-		"image": image,
-		"vcpus": 1,
-		"memory_megabytes": 512,
-		"disk_gigabytes": 4,
-		"ssh_public_key": public_key,
-	}).insert(ignore_permissions=True)
+	vm = frappe.get_doc(
+		{
+			"doctype": "Virtual Machine",
+			"title": "vm-provisioning happy path",
+			"server": server_name,
+			"image": image,
+			"vcpus": 1,
+			"memory_megabytes": 512,
+			"disk_gigabytes": 4,
+			"ssh_public_key": public_key,
+		}
+	).insert(ignore_permissions=True)
 	frappe.db.commit()
 
 	# Phase 4 auto-provision contract: `after_insert` enqueues `provision()`
@@ -215,19 +219,21 @@ def _check_derived_fields_and_immutability(server_name: str, image: str, public_
 	"""Pre-supplied mac/tap/ipv6 are honored; resource fields are immutable."""
 	# Pre-derived values pass through (covers `if not self.x:` false branch
 	# in before_validate).
-	pre_derived = frappe.get_doc({
-		"doctype": "Virtual Machine",
-		"title": "pre-derived fields",
-		"server": server_name,
-		"image": image,
-		"vcpus": 1,
-		"memory_megabytes": 512,
-		"disk_gigabytes": 4,
-		"ssh_public_key": public_key,
-		"mac_address": "06:00:de:ad:be:ef",
-		"tap_device": "atlas-deadbeef",
-		"ipv6_address": "fd00::dead",
-	}).insert(ignore_permissions=True)
+	pre_derived = frappe.get_doc(
+		{
+			"doctype": "Virtual Machine",
+			"title": "pre-derived fields",
+			"server": server_name,
+			"image": image,
+			"vcpus": 1,
+			"memory_megabytes": 512,
+			"disk_gigabytes": 4,
+			"ssh_public_key": public_key,
+			"mac_address": "06:00:de:ad:be:ef",
+			"tap_device": "atlas-deadbeef",
+			"ipv6_address": "fd00::dead",
+		}
+	).insert(ignore_permissions=True)
 	assert pre_derived.mac_address == "06:00:de:ad:be:ef"
 	assert pre_derived.tap_device == "atlas-deadbeef"
 	assert pre_derived.ipv6_address == "fd00::dead"
@@ -253,16 +259,18 @@ def _check_derived_fields_and_immutability(server_name: str, image: str, public_
 	# set_status_default helper: the JSON schema sets the default before
 	# before_insert runs, so the assignment in set_status_default is dead in
 	# the insert() flow. Call the helper directly with a cleared field.
-	transient = frappe.get_doc({
-		"doctype": "Virtual Machine",
-		"title": "set_status_default",
-		"server": server_name,
-		"image": image,
-		"vcpus": 1,
-		"memory_megabytes": 512,
-		"disk_gigabytes": 4,
-		"ssh_public_key": public_key,
-	})
+	transient = frappe.get_doc(
+		{
+			"doctype": "Virtual Machine",
+			"title": "set_status_default",
+			"server": server_name,
+			"image": image,
+			"vcpus": 1,
+			"memory_megabytes": 512,
+			"disk_gigabytes": 4,
+			"ssh_public_key": public_key,
+		}
+	)
 	transient.status = None
 	transient.set_status_default()
 	assert transient.status == "Pending"
@@ -283,9 +291,7 @@ def _check_networking_helpers() -> None:
 		derive_tap,
 	)
 
-	cidr = carve_virtual_machine_range(
-		"2604:a880:cad:d0:0:1:4ae1:d001", "2604:a880:cad:d0::/64"
-	)
+	cidr = carve_virtual_machine_range("2604:a880:cad:d0:0:1:4ae1:d001", "2604:a880:cad:d0::/64")
 	assert cidr.endswith("/124"), cidr
 
 	sample_uuid = "550e8400-e29b-41d4-a716-446655440000"
@@ -322,46 +328,46 @@ def _check_ipv6_exhaustion(server) -> None:
 	fake_title = "usecase-ipv6-exhaust"
 	existing_name = frappe.db.get_value("Server", {"title": fake_title}, "name")
 	if existing_name:
-		for vm in frappe.get_all(
-			"Virtual Machine", filters={"server": existing_name}, pluck="name"
-		):
+		for vm in frappe.get_all("Virtual Machine", filters={"server": existing_name}, pluck="name"):
 			frappe.delete_doc("Virtual Machine", vm, force=True, ignore_permissions=True)
 		frappe.delete_doc("Server", existing_name, force=True, ignore_permissions=True)
 
-	fake_server = frappe.get_doc({
-		"doctype": "Server",
-		"title": fake_title,
-		"provider": server.provider,
-		"status": "Pending",
-		"ipv4_address": "192.0.2.99",
-		"ipv6_address": "2001:db8::1",
-		"ipv6_prefix": "2001:db8::/64",
-		"ipv6_virtual_machine_range": "2001:db8::/124",
-	}).insert(ignore_permissions=True)
+	fake_server = frappe.get_doc(
+		{
+			"doctype": "Server",
+			"title": fake_title,
+			"provider": server.provider,
+			"status": "Pending",
+			"ipv4_address": "192.0.2.99",
+			"ipv6_address": "2001:db8::1",
+			"ipv6_prefix": "2001:db8::/64",
+			"ipv6_virtual_machine_range": "2001:db8::/124",
+		}
+	).insert(ignore_permissions=True)
 	frappe.db.commit()
 	fake_name = fake_server.name
 
 	try:
 		for i in range(14):
 			address = allocate_ipv6(fake_name)
-			frappe.get_doc({
-				"doctype": "Virtual Machine",
-				"title": f"ipv6-exhaust-{i}",
-				"server": fake_name,
-				"image": DEFAULT_IMAGE["image_name"],
-				"vcpus": 1,
-				"memory_megabytes": 256,
-				"disk_gigabytes": 1,
-				"ssh_public_key": "ssh-rsa AAA",
-				"ipv6_address": address,
-				"status": "Running",
-			}).insert(ignore_permissions=True)
+			frappe.get_doc(
+				{
+					"doctype": "Virtual Machine",
+					"title": f"ipv6-exhaust-{i}",
+					"server": fake_name,
+					"image": DEFAULT_IMAGE["image_name"],
+					"vcpus": 1,
+					"memory_megabytes": 256,
+					"disk_gigabytes": 1,
+					"ssh_public_key": "ssh-rsa AAA",
+					"ipv6_address": address,
+					"status": "Running",
+				}
+			).insert(ignore_permissions=True)
 		with expect_validation_error("no ipv6 capacity"):
 			allocate_ipv6(fake_name)
 	finally:
-		for vm in frappe.get_all(
-			"Virtual Machine", filters={"server": fake_name}, pluck="name"
-		):
+		for vm in frappe.get_all("Virtual Machine", filters={"server": fake_name}, pluck="name"):
 			frappe.delete_doc("Virtual Machine", vm, force=True, ignore_permissions=True)
 		frappe.delete_doc("Server", fake_name, force=True, ignore_permissions=True)
 		frappe.db.commit()
@@ -383,9 +389,7 @@ def _assert_provider_ssh_key_path(server_name: str) -> None:
 	mode = stat.S_IMODE(os.stat(resolved).st_mode)
 	# 0600 is the strict expectation; some test envs land at 0400 (read-only)
 	# which is equally safe.
-	assert mode in (0o600, 0o400), (
-		f"ssh_private_key_path {path!r} mode is {oct(mode)}, want 0600 or 0400"
-	)
+	assert mode in (0o600, 0o400), f"ssh_private_key_path {path!r} mode is {oct(mode)}, want 0600 or 0400"
 
 
 def _move_image(server_name: str, image_doc, direction: str) -> None:

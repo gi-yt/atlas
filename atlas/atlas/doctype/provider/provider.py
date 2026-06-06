@@ -23,7 +23,6 @@ from atlas.atlas.providers.base import (
 	ServerNetworking,
 )
 
-
 IMMUTABLE_AFTER_INSERT = ("provider_name", "provider_type")
 
 
@@ -101,16 +100,20 @@ def _provision_server(provider_row: Provider, title: str, dialog_fields: dict[st
 			prebuilt_networking=prebuilt,
 		)
 		result = provider_impl.provision(request)
-		server = frappe.get_doc({
-			"doctype": "Server",
-			"title": title,
-			"provider": provider_row.name,
-			"status": "Pending",
-			"ipv4_address": result.networking.ipv4_address if result.networking else None,
-			"ipv6_address": result.networking.ipv6_address if result.networking else None,
-			"ipv6_prefix": result.networking.ipv6_prefix if result.networking else None,
-			"ipv6_virtual_machine_range": result.networking.ipv6_virtual_machine_range if result.networking else None,
-		}).insert(ignore_permissions=True)
+		server = frappe.get_doc(
+			{
+				"doctype": "Server",
+				"title": title,
+				"provider": provider_row.name,
+				"status": "Pending",
+				"ipv4_address": result.networking.ipv4_address if result.networking else None,
+				"ipv6_address": result.networking.ipv6_address if result.networking else None,
+				"ipv6_prefix": result.networking.ipv6_prefix if result.networking else None,
+				"ipv6_virtual_machine_range": result.networking.ipv6_virtual_machine_range
+				if result.networking
+				else None,
+			}
+		).insert(ignore_permissions=True)
 	else:
 		settings = frappe.get_single(f"{provider_row.provider_type} Settings")
 		size = dialog_fields.get("size") or settings.default_size
@@ -173,14 +176,16 @@ def upsert_catalog(provider_type: str, capabilities) -> dict:
 			)
 			updated += 1
 		else:
-			frappe.get_doc({
-				"doctype": "Provider Size",
-				"provider_type": provider_type,
-				"slug": size.slug,
-				"enabled": 1,
-				"monthly_cost_usd": size.monthly_cost_usd,
-				"provider_metadata": metadata_json,
-			}).insert(ignore_permissions=True)
+			frappe.get_doc(
+				{
+					"doctype": "Provider Size",
+					"provider_type": provider_type,
+					"slug": size.slug,
+					"enabled": 1,
+					"monthly_cost_usd": size.monthly_cost_usd,
+					"provider_metadata": metadata_json,
+				}
+			).insert(ignore_permissions=True)
 			inserted += 1
 
 	for image in capabilities.images:
@@ -195,13 +200,15 @@ def upsert_catalog(provider_type: str, capabilities) -> dict:
 			)
 			updated += 1
 		else:
-			frappe.get_doc({
-				"doctype": "Provider Image",
-				"provider_type": provider_type,
-				"slug": image.slug,
-				"enabled": 1,
-				"provider_metadata": metadata_json,
-			}).insert(ignore_permissions=True)
+			frappe.get_doc(
+				{
+					"doctype": "Provider Image",
+					"provider_type": provider_type,
+					"slug": image.slug,
+					"enabled": 1,
+					"provider_metadata": metadata_json,
+				}
+			).insert(ignore_permissions=True)
 			inserted += 1
 
 	existing_sizes = frappe.get_all(

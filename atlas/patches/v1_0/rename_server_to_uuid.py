@@ -21,7 +21,6 @@ import uuid
 
 import frappe
 
-
 # `tabDocType.column_name` pairs that hold an FK reference to a Server
 # row. Update in raw SQL so rename_doc's autoname machinery doesn't fire.
 FK_TARGETS = (
@@ -40,9 +39,7 @@ def execute() -> None:
 
 	if has_server_name and not has_title:
 		# Column rename: server_name → title. SQL preserves the value.
-		frappe.db.sql_ddl(
-			"ALTER TABLE `tabServer` CHANGE `server_name` `title` VARCHAR(140)"
-		)
+		frappe.db.sql_ddl("ALTER TABLE `tabServer` CHANGE `server_name` `title` VARCHAR(140)")
 	elif has_server_name and has_title:
 		# Both columns exist after an earlier partial migration. Backfill
 		# `title` from `server_name` where empty; leave both columns until
@@ -82,15 +79,14 @@ def _is_uuid(value: str) -> bool:
 	try:
 		uuid.UUID(value)
 		return True
-	except (ValueError, AttributeError, TypeError):
+	except ValueError, AttributeError, TypeError:
 		return False
 
 
 def _table_exists(table: str) -> bool:
 	return bool(
 		frappe.db.sql(
-			"SELECT 1 FROM information_schema.tables "
-			"WHERE table_schema = DATABASE() AND table_name = %s",
+			"SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = %s",
 			(table,),
 		)
 	)

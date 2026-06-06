@@ -100,59 +100,69 @@ def _check_run_task_dialog_argument_shapes(server) -> None:
 def _check_task_doctype_validation(server) -> None:
 	"""Task is read-only after insert; variables must be a JSON object."""
 	# variables empty -> throw.
-	doc = frappe.get_doc({
-		"doctype": "Task",
-		"server": server.name,
-		"script": "noop.sh",
-		"status": "Pending",
-		"triggered_by": "Administrator",
-	})
+	doc = frappe.get_doc(
+		{
+			"doctype": "Task",
+			"server": server.name,
+			"script": "noop.sh",
+			"status": "Pending",
+			"triggered_by": "Administrator",
+		}
+	)
 	with expect_validation_error("variables is required"):
 		doc.insert(ignore_permissions=True)
 
 	# variables not JSON -> throw.
-	doc = frappe.get_doc({
-		"doctype": "Task",
-		"server": server.name,
-		"script": "noop.sh",
-		"status": "Pending",
-		"triggered_by": "Administrator",
-		"variables": "not json",
-	})
+	doc = frappe.get_doc(
+		{
+			"doctype": "Task",
+			"server": server.name,
+			"script": "noop.sh",
+			"status": "Pending",
+			"triggered_by": "Administrator",
+			"variables": "not json",
+		}
+	)
 	with expect_validation_error("must be valid json"):
 		doc.insert(ignore_permissions=True)
 
 	# variables not an object -> throw.
-	doc = frappe.get_doc({
-		"doctype": "Task",
-		"server": server.name,
-		"script": "noop.sh",
-		"status": "Pending",
-		"triggered_by": "Administrator",
-		"variables": "[1, 2]",
-	})
+	doc = frappe.get_doc(
+		{
+			"doctype": "Task",
+			"server": server.name,
+			"script": "noop.sh",
+			"status": "Pending",
+			"triggered_by": "Administrator",
+			"variables": "[1, 2]",
+		}
+	)
 	with expect_validation_error("json object"):
 		doc.insert(ignore_permissions=True)
 
 	# variables_dict setter rejects non-dict.
-	doc = frappe.get_doc({
-		"doctype": "Task",
-		"server": server.name,
-		"script": "noop.sh",
-		"status": "Pending",
-		"triggered_by": "Administrator",
-	})
+	doc = frappe.get_doc(
+		{
+			"doctype": "Task",
+			"server": server.name,
+			"script": "noop.sh",
+			"status": "Pending",
+			"triggered_by": "Administrator",
+		}
+	)
 	with expect_validation_error("must be a dict"):
 		doc.variables_dict = [1, 2]
 
 	# Immutability: mutate `script` after insert.
-	doc = frappe.get_doc({
-		"doctype": "Task",
-		"server": server.name,
-		"script": "phase1-probe.sh",
-		"status": "Pending",
-		"triggered_by": "Administrator",
-	})
+	doc = frappe.get_doc(
+		{
+			"doctype": "Task",
+			"server": server.name,
+			"script": "phase1-probe.sh",
+			"status": "Pending",
+			"triggered_by": "Administrator",
+		}
+	)
 	doc.variables_dict = {"NAME": "x"}
 	doc.insert(ignore_permissions=True)
 	doc.reload()

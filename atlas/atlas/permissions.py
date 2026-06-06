@@ -56,10 +56,7 @@ def task_by_owned_vm(user: str | None = None, doctype: str | None = None) -> str
 	if _is_operator(user):
 		return ""
 	owned = frappe.db.escape(user)
-	return (
-		"`tabTask`.`virtual_machine` in ("
-		f"select `name` from `tabVirtual Machine` where `owner` = {owned})"
-	)
+	return f"`tabTask`.`virtual_machine` in (select `name` from `tabVirtual Machine` where `owner` = {owned})"
 
 
 def task_has_permission(doc, ptype=None, user=None, **kwargs) -> bool:

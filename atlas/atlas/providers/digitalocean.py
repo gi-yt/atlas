@@ -37,7 +37,6 @@ from atlas.atlas.providers.base import (
 )
 from atlas.atlas.secrets import get_secret
 
-
 # Monthly USD price per size. Hand-maintained — DO does not expose a
 # stable per-size cost endpoint. Renders as "—" when blank.
 DIGITALOCEAN_MONTHLY_COST_USD: dict[str, int] = {
@@ -188,5 +187,5 @@ def _reserved_ip_from_payload(reserved: dict) -> ReservedIp:
 def _strip_prefix(value: str, provider_type: str) -> str:
 	prefix = f"{provider_type}/"
 	if value and value.startswith(prefix):
-		return value[len(prefix):]
+		return value[len(prefix) :]
 	return value

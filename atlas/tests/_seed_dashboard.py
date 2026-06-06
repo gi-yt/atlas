@@ -24,6 +24,7 @@ def _pick_server():
 	any_server = frappe.get_all("Server", pluck="name", limit=1)
 	return any_server[0] if any_server else "seed-server-1"
 
+
 VMS = [
 	# title, status, ipv6, vcpus, mem, disk, preset
 	("web-01", "Running", "2606:4700:4700::a1f3", 2, 2048, 10, "Medium (2 vCPU / 2048 MB / 10 GB)"),

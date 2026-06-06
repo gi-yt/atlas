@@ -137,23 +137,27 @@ def _check_connection_for_server_validation() -> None:
 	"""connection_for_server requires ipv4_address. The SSH key path now lives
 	on Atlas Settings (not Server.provider), so the legacy "no provider" guard
 	is gone."""
-	transient = frappe.get_doc({
-		"doctype": "Server",
-		"title": "usecase-no-ip",
-		"status": "Pending",
-	})
+	transient = frappe.get_doc(
+		{
+			"doctype": "Server",
+			"title": "usecase-no-ip",
+			"status": "Pending",
+		}
+	)
 	with expect_validation_error("no ipv4_address"):
 		connection_for_server(transient)
 
 
 def _check_execute_task_no_server() -> None:
 	"""execute_task on a Task with no server attribute throws."""
-	task = frappe.get_doc({
-		"doctype": "Task",
-		"script": "noop.sh",
-		"status": "Pending",
-		"triggered_by": "Administrator",
-	})
+	task = frappe.get_doc(
+		{
+			"doctype": "Task",
+			"script": "noop.sh",
+			"status": "Pending",
+			"triggered_by": "Administrator",
+		}
+	)
 	task.variables_dict = {}
 	task.insert(ignore_permissions=True)
 	frappe.db.commit()

@@ -31,9 +31,11 @@ def _build_provider(monthly_cost=None):
 		default_size="DigitalOcean/s-2vcpu-4gb-intel",
 		default_image="DigitalOcean/ubuntu-24-04-x64",
 	)
-	with patch.object(frappe, "get_single", return_value=settings), \
-			patch.object(do_module, "get_secret", return_value="dop_v1_fake"), \
-			patch.object(do_module, "DigitalOceanClient") as client_cls:
+	with (
+		patch.object(frappe, "get_single", return_value=settings),
+		patch.object(do_module, "get_secret", return_value="dop_v1_fake"),
+		patch.object(do_module, "DigitalOceanClient") as client_cls,
+	):
 		provider = do_module.DigitalOceanProvider()
 		provider.client = MagicMock()
 		client_cls.return_value = provider.client

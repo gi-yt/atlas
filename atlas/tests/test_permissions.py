@@ -37,15 +37,17 @@ def _ensure_system_manager_user() -> str:
 	if frappe.db.exists("User", SYSMGR_USER_EMAIL):
 		user = frappe.get_doc("User", SYSMGR_USER_EMAIL)
 	else:
-		user = frappe.get_doc({
-			"doctype": "User",
-			"email": SYSMGR_USER_EMAIL,
-			"first_name": "Sys",
-			"last_name": "Mgr",
-			"send_welcome_email": 0,
-			"enabled": 1,
-			"roles": [{"role": "System Manager"}],
-		}).insert(ignore_permissions=True)
+		user = frappe.get_doc(
+			{
+				"doctype": "User",
+				"email": SYSMGR_USER_EMAIL,
+				"first_name": "Sys",
+				"last_name": "Mgr",
+				"send_welcome_email": 0,
+				"enabled": 1,
+				"roles": [{"role": "System Manager"}],
+			}
+		).insert(ignore_permissions=True)
 	role_names = {row.role for row in (user.get("roles") or [])}
 	if "System Manager" not in role_names:
 		user.append("roles", {"role": "System Manager"})
@@ -57,14 +59,16 @@ def _make_basic_user() -> str:
 	if frappe.db.exists("User", BASIC_USER_EMAIL):
 		user = frappe.get_doc("User", BASIC_USER_EMAIL)
 	else:
-		user = frappe.get_doc({
-			"doctype": "User",
-			"email": BASIC_USER_EMAIL,
-			"first_name": "Perm",
-			"last_name": "Test",
-			"send_welcome_email": 0,
-			"enabled": 1,
-		}).insert(ignore_permissions=True)
+		user = frappe.get_doc(
+			{
+				"doctype": "User",
+				"email": BASIC_USER_EMAIL,
+				"first_name": "Perm",
+				"last_name": "Test",
+				"send_welcome_email": 0,
+				"enabled": 1,
+			}
+		).insert(ignore_permissions=True)
 	# Strip everything: no System Manager, no nothing.
 	for role_row in list(user.get("roles") or []):
 		user.remove(role_row)
@@ -77,14 +81,16 @@ def _make_atlas_user(email: str) -> str:
 	if frappe.db.exists("User", email):
 		user = frappe.get_doc("User", email)
 	else:
-		user = frappe.get_doc({
-			"doctype": "User",
-			"email": email,
-			"first_name": "Atlas",
-			"last_name": "User",
-			"send_welcome_email": 0,
-			"enabled": 1,
-		}).insert(ignore_permissions=True)
+		user = frappe.get_doc(
+			{
+				"doctype": "User",
+				"email": email,
+				"first_name": "Atlas",
+				"last_name": "User",
+				"send_welcome_email": 0,
+				"enabled": 1,
+			}
+		).insert(ignore_permissions=True)
 	for role_row in list(user.get("roles") or []):
 		user.remove(role_row)
 	user.append("roles", {"role": "Atlas User"})
@@ -94,11 +100,13 @@ def _make_atlas_user(email: str) -> str:
 
 def _ensure_atlas_user_role() -> None:
 	if not frappe.db.exists("Role", "Atlas User"):
-		frappe.get_doc({
-			"doctype": "Role",
-			"role_name": "Atlas User",
-			"desk_access": 0,
-		}).insert(ignore_permissions=True)
+		frappe.get_doc(
+			{
+				"doctype": "Role",
+				"role_name": "Atlas User",
+				"desk_access": 0,
+			}
+		).insert(ignore_permissions=True)
 
 
 class TestPermissions(IntegrationTestCase):
@@ -119,9 +127,12 @@ class TestPermissions(IntegrationTestCase):
 
 	def test_api_token_not_in_get_doc_response(self) -> None:
 		import frappe.utils.password
+
 		frappe.utils.password.set_encrypted_password(
-			"DigitalOcean Settings", "DigitalOcean Settings",
-			"dop_v1_perm_test", "api_token",
+			"DigitalOcean Settings",
+			"DigitalOcean Settings",
+			"dop_v1_perm_test",
+			"api_token",
 		)
 		doc = frappe.get_single("DigitalOcean Settings")
 		serialized = doc.as_dict()
@@ -129,13 +140,15 @@ class TestPermissions(IntegrationTestCase):
 		self.assertNotEqual(serialized.get("api_token"), "dop_v1_perm_test")
 
 	def test_task_delete_blocked_by_perms(self) -> None:
-		task = frappe.get_doc({
-			"doctype": "Task",
-			"script": "noop.sh",
-			"variables": json.dumps({}),
-			"status": "Pending",
-			"triggered_by": "Administrator",
-		}).insert(ignore_permissions=True)
+		task = frappe.get_doc(
+			{
+				"doctype": "Task",
+				"script": "noop.sh",
+				"variables": json.dumps({}),
+				"status": "Pending",
+				"triggered_by": "Administrator",
+			}
+		).insert(ignore_permissions=True)
 
 		sysmgr = _ensure_system_manager_user()
 		frappe.set_user(sysmgr)
@@ -164,16 +177,18 @@ class TestPermissions(IntegrationTestCase):
 		previous = frappe.session.user
 		frappe.set_user(owner_email)
 		try:
-			vm = frappe.get_doc({
-				"doctype": "Virtual Machine",
-				"title": title,
-				"server": server.name,
-				"image": image.name,
-				"vcpus": 1,
-				"memory_megabytes": 512,
-				"disk_gigabytes": 2,
-				"ssh_public_key": "ssh-ed25519 AAAA",
-			}).insert()
+			vm = frappe.get_doc(
+				{
+					"doctype": "Virtual Machine",
+					"title": title,
+					"server": server.name,
+					"image": image.name,
+					"vcpus": 1,
+					"memory_megabytes": 512,
+					"disk_gigabytes": 2,
+					"ssh_public_key": "ssh-ed25519 AAAA",
+				}
+			).insert()
 		finally:
 			frappe.set_user(previous)
 		return vm
@@ -244,15 +259,17 @@ class TestPermissions(IntegrationTestCase):
 		user_b = _make_atlas_user(USER_B_EMAIL)
 		vm_a = self._seed_vm(user_a, "a-with-task")
 
-		task_a = frappe.get_doc({
-			"doctype": "Task",
-			"script": "start-vm.sh",
-			"variables": json.dumps({}),
-			"status": "Success",
-			"virtual_machine": vm_a.name,
-			"server": vm_a.server,
-			"triggered_by": "Administrator",
-		}).insert(ignore_permissions=True)
+		task_a = frappe.get_doc(
+			{
+				"doctype": "Task",
+				"script": "start-vm.sh",
+				"variables": json.dumps({}),
+				"status": "Success",
+				"virtual_machine": vm_a.name,
+				"server": vm_a.server,
+				"triggered_by": "Administrator",
+			}
+		).insert(ignore_permissions=True)
 
 		frappe.set_user(user_a)
 		self.assertTrue(
@@ -269,15 +286,17 @@ class TestPermissions(IntegrationTestCase):
 		user_a = _make_atlas_user(USER_A_EMAIL)
 		user_b = _make_atlas_user(USER_B_EMAIL)
 		vm_a = self._seed_vm(user_a, "a-task-list")
-		task_a = frappe.get_doc({
-			"doctype": "Task",
-			"script": "start-vm.sh",
-			"variables": json.dumps({}),
-			"status": "Success",
-			"virtual_machine": vm_a.name,
-			"server": vm_a.server,
-			"triggered_by": "Administrator",
-		}).insert(ignore_permissions=True)
+		task_a = frappe.get_doc(
+			{
+				"doctype": "Task",
+				"script": "start-vm.sh",
+				"variables": json.dumps({}),
+				"status": "Success",
+				"virtual_machine": vm_a.name,
+				"server": vm_a.server,
+				"triggered_by": "Administrator",
+			}
+		).insert(ignore_permissions=True)
 
 		# A user hand-calling get_list('Task') with no filter must see only
 		# their owned VMs' tasks — never the fleet's task log.

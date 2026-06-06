@@ -15,13 +15,15 @@ from pathlib import Path
 
 import frappe
 
-OPERATOR_VISIBLE: frozenset[str] = frozenset({
-	# Bootstrap and Reboot have dedicated buttons with confirmation guards on
-	# the Server form; exposing the raw scripts in the Run Task picker
-	# duplicates those flows without the guards. `sync-image.py` is the only
-	# ad-hoc script the operator should reach for from here.
-	"sync-image.py",
-})
+OPERATOR_VISIBLE: frozenset[str] = frozenset(
+	{
+		# Bootstrap and Reboot have dedicated buttons with confirmation guards on
+		# the Server form; exposing the raw scripts in the Run Task picker
+		# duplicates those flows without the guards. `sync-image.py` is the only
+		# ad-hoc script the operator should reach for from here.
+		"sync-image.py",
+	}
+)
 
 
 # Per-script Run Task dialog metadata. The client renders the dialog purely
@@ -100,11 +102,13 @@ def _search_paths() -> list[Path]:
 # positional VM uuid (passed by the unit's ExecStartPre/ExecStopPost as `%i`),
 # not the --flag CLI contract a Task uses, and they import the durable package.
 # Excluded from the catalog so the runner never executes them as a Task.
-SYSTEMD_HOOKS: frozenset[str] = frozenset({
-	"vm-disk-up.py",
-	"vm-network-up.py",
-	"vm-network-down.py",
-})
+SYSTEMD_HOOKS: frozenset[str] = frozenset(
+	{
+		"vm-disk-up.py",
+		"vm-network-up.py",
+		"vm-network-down.py",
+	}
+)
 
 
 def allowed_scripts() -> list[str]:
@@ -119,9 +123,7 @@ def allowed_scripts() -> list[str]:
 	return sorted(
 		entry.name
 		for entry in directory.iterdir()
-		if entry.is_file()
-		and entry.suffix in (".py", ".sh")
-		and entry.name not in SYSTEMD_HOOKS
+		if entry.is_file() and entry.suffix in (".py", ".sh") and entry.name not in SYSTEMD_HOOKS
 	)
 
 
@@ -137,6 +139,4 @@ def resolve(script: str) -> Path:
 		candidate = directory / script
 		if candidate.is_file():
 			return candidate
-	raise FileNotFoundError(
-		f"Script not found in {[str(p) for p in _search_paths()]}: {script}"
-	)
+	raise FileNotFoundError(f"Script not found in {[str(p) for p in _search_paths()]}: {script}")

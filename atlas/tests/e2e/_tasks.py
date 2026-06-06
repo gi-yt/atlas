@@ -19,9 +19,7 @@ def expect_validation_error(*needles: str):
 				f"ValidationError did not contain any of {needles}: {message}"
 			) from exception
 		return
-	raise AssertionError(
-		f"expected frappe.ValidationError containing {needles}, no exception raised"
-	)
+	raise AssertionError(f"expected frappe.ValidationError containing {needles}, no exception raised")
 
 
 def wait_for_task(
@@ -71,9 +69,7 @@ def wait_for_vm_running(
 		if vm.status == "Running":
 			return vm
 		if vm.status == "Failed":
-			raise AssertionError(
-				f"VM {virtual_machine_name} reached Failed during auto-provision"
-			)
+			raise AssertionError(f"VM {virtual_machine_name} reached Failed during auto-provision")
 		time.sleep(poll_seconds)
 	raise AssertionError(
 		f"VM {virtual_machine_name} did not reach Running within {timeout_seconds}s "
@@ -95,8 +91,7 @@ def mark_orphan_tasks_failure(older_than_minutes: int = 10) -> int:
 		doc = frappe.get_doc("Task", name)
 		doc.status = "Failure"
 		doc.stderr = (doc.stderr or "") + (
-			f"\n[atlas e2e] marked Failure: Running for >{older_than_minutes} min "
-			"(worker presumed dead)\n"
+			f"\n[atlas e2e] marked Failure: Running for >{older_than_minutes} min (worker presumed dead)\n"
 		)
 		doc.ended = frappe.utils.now_datetime()
 		doc.save(ignore_permissions=True)

@@ -103,9 +103,7 @@ def get_ssh_private_key_path() -> str:
 		return expanded
 	pem = frappe.conf.get("atlas_ssh_private_key")
 	if not pem:
-		raise MissingConfig(
-			"e2e needs atlas_ssh_private_key_path or atlas_ssh_private_key in site config."
-		)
+		raise MissingConfig("e2e needs atlas_ssh_private_key_path or atlas_ssh_private_key in site config.")
 	cache_dir = os.path.expanduser("~/.cache/atlas-e2e")
 	os.makedirs(cache_dir, exist_ok=True)
 	spilled = os.path.join(cache_dir, "provider-key.pem")

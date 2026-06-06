@@ -169,7 +169,9 @@ class TestDigitalOceanClient(IntegrationTestCase):
 	# --- Reserved IPs ----------------------------------------------------
 
 	def test_create_reserved_ip_posts_region(self) -> None:
-		fake = _FakeResponse(202, {"reserved_ip": {"ip": "203.0.113.5", "region": {"slug": "blr1"}, "droplet": None}})
+		fake = _FakeResponse(
+			202, {"reserved_ip": {"ip": "203.0.113.5", "region": {"slug": "blr1"}, "droplet": None}}
+		)
 		with patch("atlas.atlas.digitalocean.requests.request", return_value=fake) as request:
 			reserved = self.client.create_reserved_ip("blr1")
 		self.assertEqual(reserved["ip"], "203.0.113.5")

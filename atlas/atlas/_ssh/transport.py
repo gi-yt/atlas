@@ -20,10 +20,14 @@ KNOWN_HOSTS_PATH = Path("~/.atlas/known_hosts").expanduser()
 REMOTE_STAGING_DIRECTORY = "/tmp/atlas"
 
 SSH_OPTIONS = [
-	"-o", "StrictHostKeyChecking=accept-new",
-	"-o", f"UserKnownHostsFile={KNOWN_HOSTS_PATH}",
-	"-o", "BatchMode=yes",
-	"-o", "ConnectTimeout=30",
+	"-o",
+	"StrictHostKeyChecking=accept-new",
+	"-o",
+	f"UserKnownHostsFile={KNOWN_HOSTS_PATH}",
+	"-o",
+	"BatchMode=yes",
+	"-o",
+	"ConnectTimeout=30",
 ]
 
 
@@ -44,9 +48,7 @@ def wait_for_ssh(connection: Connection, timeout_seconds: int = 300, poll_second
 			if exit_code == 0:
 				return
 			if time.monotonic() >= deadline:
-				raise frappe.ValidationError(
-					f"SSH to {connection.host} not ready after {timeout_seconds}s"
-				)
+				raise frappe.ValidationError(f"SSH to {connection.host} not ready after {timeout_seconds}s")
 			time.sleep(poll_seconds)
 
 
@@ -78,7 +80,8 @@ def run_ssh(
 ) -> tuple[str, str, int]:
 	args = [
 		"ssh",
-		"-i", key_path,
+		"-i",
+		key_path,
 		*SSH_OPTIONS,
 		f"{connection.user}@{connection.host}",
 		remote_command,
@@ -102,7 +105,8 @@ def run_scp(
 ) -> None:
 	args = [
 		"scp",
-		"-i", key_path,
+		"-i",
+		key_path,
 		*SSH_OPTIONS,
 		local_path,
 		f"{connection.user}@{connection.host}:{remote_path}",
@@ -115,17 +119,13 @@ def run_scp(
 		check=False,
 	)
 	if result.returncode != 0:
-		raise frappe.ValidationError(
-			f"scp {local_path} -> {remote_path} failed: {result.stderr}"
-		)
+		raise frappe.ValidationError(f"scp {local_path} -> {remote_path} failed: {result.stderr}")
 
 
 @contextmanager
 def ssh_key_file(private_key: str):
 	"""Write the SSH private key to a 0600 tempfile; delete it on exit."""
-	handle = tempfile.NamedTemporaryFile(
-		mode="w", delete=False, prefix="atlas-ssh-", suffix=".key"
-	)
+	handle = tempfile.NamedTemporaryFile(mode="w", delete=False, prefix="atlas-ssh-", suffix=".key")
 	try:
 		os.chmod(handle.name, 0o600)
 		key = private_key if private_key.endswith("\n") else private_key + "\n"

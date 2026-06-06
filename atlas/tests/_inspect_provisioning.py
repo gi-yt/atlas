@@ -9,10 +9,7 @@ def run():
 	s = frappe.get_single("DigitalOcean Settings")
 	token = s.get_password("api_token", raise_exception=False)
 	print(f"SITE={frappe.local.site}")
-	print(
-		f"DO region={s.region!r} size={s.default_size!r} "
-		f"image={s.default_image!r} token_set={bool(token)}"
-	)
+	print(f"DO region={s.region!r} size={s.default_size!r} image={s.default_image!r} token_set={bool(token)}")
 	for p in frappe.get_all("Provider", fields=["name", "provider_type"]):
 		print(f"PROVIDER name={p.name!r} type={p.provider_type!r}")
 	servers = frappe.get_all(

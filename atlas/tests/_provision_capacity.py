@@ -24,7 +24,8 @@ from atlas.tests.e2e._shared import ensure_e2e_provider, get_client
 
 
 def run():
-	client = get_client()
+	# Fail fast on missing site config before anything billable.
+	get_client()
 
 	# Round-trip the token first so a dead/expired credential fails fast and
 	# free, before we create anything billable.
@@ -35,7 +36,9 @@ def run():
 		frappe.throw(f"DO token did not authenticate: {auth.get('error')!r}")
 
 	title = f"atlas-ui-capacity-{int(time.time())}"
-	print(f"[capacity] provisioning {title!r} via Provider {provider.name!r} (region/size/image from DO Settings)")
+	print(
+		f"[capacity] provisioning {title!r} via Provider {provider.name!r} (region/size/image from DO Settings)"
+	)
 
 	start = time.monotonic()
 	server_name = provider.provision_server(title)

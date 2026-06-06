@@ -23,9 +23,13 @@ def ensure_image_row(image_spec: dict) -> "frappe.model.document.Document":
 			return current
 		# Differs (e.g. constants bumped) — drop the immutable row and re-insert.
 		_delete_image_and_vms(name)
-	image = frappe.get_doc({
-		"doctype": "Virtual Machine Image", **image_spec, "is_active": 1,
-	}).insert(ignore_permissions=True)
+	image = frappe.get_doc(
+		{
+			"doctype": "Virtual Machine Image",
+			**image_spec,
+			"is_active": 1,
+		}
+	).insert(ignore_permissions=True)
 	frappe.db.commit()
 	return image
 
@@ -34,13 +38,9 @@ def _delete_image_and_vms(image_name: str) -> None:
 	"""Force-delete an image row and any VM rows that Link to it (the Link
 	would otherwise block deletion). Test-only — operators archive, never
 	delete."""
-	for vm in frappe.get_all(
-		"Virtual Machine", filters={"image": image_name}, pluck="name"
-	):
+	for vm in frappe.get_all("Virtual Machine", filters={"image": image_name}, pluck="name"):
 		frappe.delete_doc("Virtual Machine", vm, force=True, ignore_permissions=True)
-	frappe.delete_doc(
-		"Virtual Machine Image", image_name, force=True, ignore_permissions=True
-	)
+	frappe.delete_doc("Virtual Machine Image", image_name, force=True, ignore_permissions=True)
 	frappe.db.commit()
 
 

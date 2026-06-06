@@ -95,7 +95,9 @@ class TestProviderRegistry(IntegrationTestCase):
 				return ProvisionResult(provider_resource_id="", size="", image="", ready=True)
 
 			def describe(self, provider_resource_id):
-				return ProvisionResult(provider_resource_id=provider_resource_id, size="", image="", ready=True)
+				return ProvisionResult(
+					provider_resource_id=provider_resource_id, size="", image="", ready=True
+				)
 
 			def destroy(self, provider_resource_id):
 				return None
@@ -107,23 +109,29 @@ class TestProviderRegistry(IntegrationTestCase):
 
 	def test_for_provider_instantiates_active_class(self) -> None:
 		row = SimpleNamespace(is_active=1, provider_type="Stub", name="stub-provider")
-		with patch.object(providers, "_load_implementations", lambda: None), \
-				patch.object(frappe, "get_doc", return_value=row):
+		with (
+			patch.object(providers, "_load_implementations", lambda: None),
+			patch.object(frappe, "get_doc", return_value=row),
+		):
 			instance = providers.for_provider("stub-provider")
 		self.assertIsInstance(instance, _StubProvider)
 
 	def test_for_provider_throws_on_archived(self) -> None:
 		row = SimpleNamespace(is_active=0, provider_type="Stub", name="stub-provider")
-		with patch.object(providers, "_load_implementations", lambda: None), \
-				patch.object(frappe, "get_doc", return_value=row):
+		with (
+			patch.object(providers, "_load_implementations", lambda: None),
+			patch.object(frappe, "get_doc", return_value=row),
+		):
 			with self.assertRaises(frappe.ValidationError) as raised:
 				providers.for_provider("stub-provider")
 		self.assertIn("archived", str(raised.exception))
 
 	def test_for_provider_throws_on_unknown_type(self) -> None:
 		row = SimpleNamespace(is_active=1, provider_type="Unregistered", name="x")
-		with patch.object(providers, "_load_implementations", lambda: None), \
-				patch.object(frappe, "get_doc", return_value=row):
+		with (
+			patch.object(providers, "_load_implementations", lambda: None),
+			patch.object(frappe, "get_doc", return_value=row),
+		):
 			with self.assertRaises(frappe.ValidationError) as raised:
 				providers.for_provider("x")
 		self.assertIn("No implementation", str(raised.exception))

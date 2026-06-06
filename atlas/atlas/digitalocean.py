@@ -46,16 +46,16 @@ class DigitalOceanClient:
 		"""
 		response = self._raw_request("GET", "/account")
 		if response.status_code >= 400:
-			raise DigitalOceanError(
-				f"GET /account -> {response.status_code}: {response.text}"
-			)
+			raise DigitalOceanError(f"GET /account -> {response.status_code}: {response.text}")
 		body = response.json()
 		return {
 			"email": body.get("account", {}).get("email"),
 			"rate_limit": int(response.headers["RateLimit-Limit"])
-				if "RateLimit-Limit" in response.headers else None,
+			if "RateLimit-Limit" in response.headers
+			else None,
 			"rate_remaining": int(response.headers["RateLimit-Remaining"])
-				if "RateLimit-Remaining" in response.headers else None,
+			if "RateLimit-Remaining" in response.headers
+			else None,
 		}
 
 	def create_droplet(
@@ -109,7 +109,8 @@ class DigitalOceanClient:
 		"""Bind the reserved IP to a droplet. The droplet gets the address as an
 		anchor IP; the host then 1:1-NATs it to the guest (a later Task)."""
 		return self._request(
-			"POST", f"/reserved_ips/{ip}/actions",
+			"POST",
+			f"/reserved_ips/{ip}/actions",
 			json={"type": "assign", "droplet_id": droplet_id},
 		)["action"]
 
@@ -117,7 +118,8 @@ class DigitalOceanClient:
 		"""Release the reserved IP from whatever droplet holds it, leaving it
 		allocated to the account/region for re-assignment."""
 		return self._request(
-			"POST", f"/reserved_ips/{ip}/actions",
+			"POST",
+			f"/reserved_ips/{ip}/actions",
 			json={"type": "unassign"},
 		)["action"]
 
@@ -131,9 +133,7 @@ class DigitalOceanClient:
 		if response.status_code == 404 and allow_404:
 			return {}
 		if response.status_code >= 400:
-			raise DigitalOceanError(
-				f"{method} {path} -> {response.status_code}: {response.text}"
-			)
+			raise DigitalOceanError(f"{method} {path} -> {response.status_code}: {response.text}")
 		if not response.content:
 			return {}
 		return response.json()

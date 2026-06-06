@@ -32,9 +32,7 @@ def default_image() -> str:
 	if not active:
 		frappe.throw("No image is available — contact your operator.")
 	if len(active) > 1:
-		frappe.throw(
-			"Several images are active — ask your operator to set a default image."
-		)
+		frappe.throw("Several images are active — ask your operator to set a default image.")
 	return active[0]
 
 

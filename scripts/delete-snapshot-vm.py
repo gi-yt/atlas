@@ -20,25 +20,25 @@ from atlas.lvm import ThinPool
 
 @dataclass(frozen=True)
 class DeleteSnapshotInputs(TaskInputs):
-    """Delete a VM disk snapshot LV by its device path."""
+	"""Delete a VM disk snapshot LV by its device path."""
 
-    command: typing.ClassVar[str] = "delete-snapshot-vm"
-    snapshot_rootfs_path: str  # the snapshot's /dev/atlas/<name> device path
+	command: typing.ClassVar[str] = "delete-snapshot-vm"
+	snapshot_rootfs_path: str  # the snapshot's /dev/atlas/<name> device path
 
 
 def main() -> None:
-    inputs = DeleteSnapshotInputs.from_args()
-    pool = ThinPool()
+	inputs = DeleteSnapshotInputs.from_args()
+	pool = ThinPool()
 
-    snapshot = pool.from_device(inputs.snapshot_rootfs_path)
-    # remove() is guarded (refuses pool/image LVs) and a no-op if absent. A
-    # snapshot LV is an independent thin volume — removing it never affects the VM
-    # disk it was taken from, nor any clone made from it (clones are independent
-    # thin LVs once created).
-    snapshot.remove()
+	snapshot = pool.from_device(inputs.snapshot_rootfs_path)
+	# remove() is guarded (refuses pool/image LVs) and a no-op if absent. A
+	# snapshot LV is an independent thin volume — removing it never affects the VM
+	# disk it was taken from, nor any clone made from it (clones are independent
+	# thin LVs once created).
+	snapshot.remove()
 
-    print(f"Deleted snapshot {snapshot.name}.")
+	print(f"Deleted snapshot {snapshot.name}.")
 
 
 if __name__ == "__main__":
-    main()
+	main()

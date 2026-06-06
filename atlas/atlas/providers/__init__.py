@@ -47,5 +47,5 @@ def _load_implementations() -> None:
 	tests that stub the registry can avoid pulling DO/Self-Managed in.
 	"""
 	# Avoid circular imports at module-import time.
-	import atlas.atlas.providers.digitalocean  # noqa: F401
-	import atlas.atlas.providers.self_managed  # noqa: F401
+	import atlas.atlas.providers.digitalocean
+	import atlas.atlas.providers.self_managed

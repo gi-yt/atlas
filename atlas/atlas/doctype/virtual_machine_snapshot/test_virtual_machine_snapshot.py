@@ -51,9 +51,7 @@ class TestVirtualMachineSnapshot(IntegrationTestCase):
 			frappe.delete_doc("Virtual Machine Snapshot", snapshot.name, ignore_permissions=True)
 		mocked.assert_called_once()
 		self.assertEqual(mocked.call_args.kwargs["script"], "delete-snapshot-vm.py")
-		self.assertEqual(
-			mocked.call_args.kwargs["variables"]["SNAPSHOT_ROOTFS_PATH"], snapshot.rootfs_path
-		)
+		self.assertEqual(mocked.call_args.kwargs["variables"]["SNAPSHOT_ROOTFS_PATH"], snapshot.rootfs_path)
 
 	def test_on_trash_runs_delete_script_for_terminated_vm(self) -> None:
 		from atlas.atlas.doctype.virtual_machine_snapshot import virtual_machine_snapshot as module
@@ -78,9 +76,7 @@ class TestVirtualMachineSnapshot(IntegrationTestCase):
 
 		# Don't let the enqueued auto_provision run in-process.
 		with patch.object(vm_module.frappe, "enqueue"):
-			clone_name = snapshot.clone_to_new_vm(
-				title="cloned vm", ssh_public_key="ssh-ed25519 CLONE"
-			)
+			clone_name = snapshot.clone_to_new_vm(title="cloned vm", ssh_public_key="ssh-ed25519 CLONE")
 
 		clone = frappe.get_doc("Virtual Machine", clone_name)
 		self.assertNotEqual(clone.name, source.name)
@@ -98,9 +94,7 @@ class TestVirtualMachineSnapshot(IntegrationTestCase):
 		source = _stopped_vm()
 		snapshot = _make_snapshot(source)
 		with patch.object(vm_module.frappe, "enqueue"):
-			clone_name = snapshot.clone_to_new_vm(
-				title="cloned vm 2", ssh_public_key="ssh-ed25519 CLONE2"
-			)
+			clone_name = snapshot.clone_to_new_vm(title="cloned vm 2", ssh_public_key="ssh-ed25519 CLONE2")
 		clone = frappe.get_doc("Virtual Machine", clone_name)
 		variables = clone._provision_variables()
 		self.assertEqual(variables["SNAPSHOT_ROOTFS_PATH"], snapshot.rootfs_path)
@@ -112,20 +106,20 @@ class TestVirtualMachineSnapshot(IntegrationTestCase):
 		snapshot = _make_snapshot(source)
 		# Snapshot captured disk_gigabytes from the source VM (2 in fixtures).
 		with self.assertRaises(frappe.ValidationError) as raised:
-			snapshot.clone_to_new_vm(
-				title="too small", ssh_public_key="ssh-ed25519 X", disk_gigabytes=1
-			)
+			snapshot.clone_to_new_vm(title="too small", ssh_public_key="ssh-ed25519 X", disk_gigabytes=1)
 		self.assertIn("cannot be smaller", str(raised.exception))
 
 	def test_clone_rejects_unavailable_snapshot(self) -> None:
 		source = _stopped_vm()
-		snapshot = frappe.get_doc({
-			"doctype": "Virtual Machine Snapshot",
-			"title": "pending",
-			"virtual_machine": source.name,
-			"server": source.server,
-			"status": "Pending",
-		}).insert(ignore_permissions=True)
+		snapshot = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine Snapshot",
+				"title": "pending",
+				"virtual_machine": source.name,
+				"server": source.server,
+				"status": "Pending",
+			}
+		).insert(ignore_permissions=True)
 		with self.assertRaises(frappe.ValidationError) as raised:
 			snapshot.clone_to_new_vm(title="x", ssh_public_key="ssh-ed25519 X")
 		self.assertIn("not Available", str(raised.exception))
@@ -134,13 +128,15 @@ class TestVirtualMachineSnapshot(IntegrationTestCase):
 		from atlas.atlas.doctype.virtual_machine_snapshot import virtual_machine_snapshot as module
 
 		vm = _stopped_vm()
-		snapshot = frappe.get_doc({
-			"doctype": "Virtual Machine Snapshot",
-			"title": "incomplete",
-			"virtual_machine": vm.name,
-			"server": vm.server,
-			"status": "Pending",
-		}).insert(ignore_permissions=True)
+		snapshot = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine Snapshot",
+				"title": "incomplete",
+				"virtual_machine": vm.name,
+				"server": vm.server,
+				"status": "Pending",
+			}
+		).insert(ignore_permissions=True)
 		with patch.object(module, "run_task") as mocked:
 			frappe.delete_doc("Virtual Machine Snapshot", snapshot.name, ignore_permissions=True)
 		mocked.assert_not_called()

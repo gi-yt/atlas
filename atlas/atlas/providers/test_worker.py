@@ -52,8 +52,10 @@ class TestWaitUntilReady(IntegrationTestCase):
 	def test_times_out(self) -> None:
 		provider = MagicMock()
 		provider.describe.return_value = _result(ready=False)
-		with patch.object(worker.time, "sleep"), \
-				patch.object(worker.time, "monotonic", side_effect=[0, 1, 9999]):
+		with (
+			patch.object(worker.time, "sleep"),
+			patch.object(worker.time, "monotonic", side_effect=[0, 1, 9999]),
+		):
 			with self.assertRaises(frappe.ValidationError):
 				worker.wait_until_ready(provider, "1234", timeout_seconds=60)
 
@@ -61,8 +63,12 @@ class TestWaitUntilReady(IntegrationTestCase):
 class TestApplyDescribeResult(IntegrationTestCase):
 	def test_writes_networking_fields(self) -> None:
 		server = SimpleNamespace(
-			ipv4_address=None, ipv6_address=None, ipv6_prefix=None,
-			ipv6_virtual_machine_range=None, size=None, image=None,
+			ipv4_address=None,
+			ipv6_address=None,
+			ipv6_prefix=None,
+			ipv6_virtual_machine_range=None,
+			size=None,
+			image=None,
 			provider_metadata=None,
 		)
 		worker._apply_describe_result(server, _result(ready=True, with_networking=True))
@@ -71,8 +77,12 @@ class TestApplyDescribeResult(IntegrationTestCase):
 
 	def test_writes_provider_metadata_as_json_string(self) -> None:
 		server = SimpleNamespace(
-			ipv4_address=None, ipv6_address=None, ipv6_prefix=None,
-			ipv6_virtual_machine_range=None, size=None, image=None,
+			ipv4_address=None,
+			ipv6_address=None,
+			ipv6_prefix=None,
+			ipv6_virtual_machine_range=None,
+			size=None,
+			image=None,
 			provider_metadata=None,
 		)
 		worker._apply_describe_result(server, _result(ready=True, with_metadata=True))
@@ -83,13 +93,20 @@ class TestApplyDescribeResult(IntegrationTestCase):
 		# should not overwrite the Server's existing (likely empty) values
 		# with an empty string just to keep them empty.
 		server = SimpleNamespace(
-			ipv4_address=None, ipv6_address=None, ipv6_prefix=None,
+			ipv4_address=None,
+			ipv6_address=None,
+			ipv6_prefix=None,
 			ipv6_virtual_machine_range=None,
-			size="prev-size", image="prev-image",
+			size="prev-size",
+			image="prev-image",
 			provider_metadata=None,
 		)
 		empty_result = ProvisionResult(
-			provider_resource_id="", size="", image="", ready=True, networking=None,
+			provider_resource_id="",
+			size="",
+			image="",
+			ready=True,
+			networking=None,
 		)
 		worker._apply_describe_result(server, empty_result)
 		self.assertEqual(server.size, "prev-size")

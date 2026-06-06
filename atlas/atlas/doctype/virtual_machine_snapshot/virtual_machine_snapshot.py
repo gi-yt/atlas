@@ -30,17 +30,19 @@ class VirtualMachineSnapshot(Document):
 			frappe.throw(
 				f"Clone disk ({disk} GB) cannot be smaller than the snapshot ({self.disk_gigabytes} GB)"
 			)
-		clone = frappe.get_doc({
-			"doctype": "Virtual Machine",
-			"title": title,
-			"server": source_vm.server,
-			"image": self.source_image,
-			"vcpus": int(vcpus) if vcpus else source_vm.vcpus,
-			"memory_megabytes": int(memory_megabytes) if memory_megabytes else source_vm.memory_megabytes,
-			"disk_gigabytes": disk,
-			"ssh_public_key": ssh_public_key,
-			"clone_source_rootfs": self.rootfs_path,
-		}).insert(ignore_permissions=True)
+		clone = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine",
+				"title": title,
+				"server": source_vm.server,
+				"image": self.source_image,
+				"vcpus": int(vcpus) if vcpus else source_vm.vcpus,
+				"memory_megabytes": int(memory_megabytes) if memory_megabytes else source_vm.memory_megabytes,
+				"disk_gigabytes": disk,
+				"ssh_public_key": ssh_public_key,
+				"clone_source_rootfs": self.rootfs_path,
+			}
+		).insert(ignore_permissions=True)
 		return clone.name
 
 	@frappe.whitelist()

@@ -71,11 +71,7 @@ def _bogus_key_path() -> str:
 	path = os.path.join(tempfile.gettempdir(), "atlas-e2e-bogus-key.pem")
 	if not os.path.isfile(path):
 		with open(path, "w") as handle:
-			handle.write(
-				"-----BEGIN OPENSSH PRIVATE KEY-----\n"
-				"bogus\n"
-				"-----END OPENSSH PRIVATE KEY-----\n"
-			)
+			handle.write("-----BEGIN OPENSSH PRIVATE KEY-----\nbogus\n-----END OPENSSH PRIVATE KEY-----\n")
 		os.chmod(path, 0o600)
 	return path
 
@@ -211,10 +207,18 @@ def _check_server_buttons(server) -> None:
 	names = {entry["name"] for entry in scripts}
 	assert "sync-image.py" in names, names
 	for hidden in (
-		"bootstrap-server.py", "reboot-server.sh", "provision-vm.py",
-		"start-vm.py", "stop-vm.py", "terminate-vm.py",
-		"snapshot-vm.py", "rebuild-vm.py", "resize-vm.py",
-		"pause-vm.py", "resume-vm.py", "delete-snapshot-vm.py",
+		"bootstrap-server.py",
+		"reboot-server.sh",
+		"provision-vm.py",
+		"start-vm.py",
+		"stop-vm.py",
+		"terminate-vm.py",
+		"snapshot-vm.py",
+		"rebuild-vm.py",
+		"resize-vm.py",
+		"pause-vm.py",
+		"resume-vm.py",
+		"delete-snapshot-vm.py",
 	):
 		assert hidden not in names, f"{hidden} leaked into operator-visible scripts: {names}"
 
@@ -225,10 +229,12 @@ def _check_server_buttons(server) -> None:
 		server.name,
 		"run_task_dialog",
 		script="bootstrap-server.py",
-		variables=json.dumps({
-			"FIRECRACKER_VERSION": "v1.15.1",
-			"ARCHITECTURE": "x86_64",
-		}),
+		variables=json.dumps(
+			{
+				"FIRECRACKER_VERSION": "v1.15.1",
+				"ARCHITECTURE": "x86_64",
+			}
+		),
 	)
 	task = frappe.get_doc("Task", task_name)
 	assert task.status == "Success", task.stderr
@@ -303,24 +309,24 @@ def _check_virtual_machine_image_buttons(server_name: str, image_name: str) -> N
 # ----- Virtual Machine -----------------------------------------------------
 
 
-def _check_virtual_machine_buttons(
-	server_name: str, image_name: str, public_key: str
-) -> None:
+def _check_virtual_machine_buttons(server_name: str, image_name: str, public_key: str) -> None:
 	"""Auto-provision (insert -> Running) -> Stop -> Start -> Restart ->
 	Terminate, every step via `run_doc_method`. Mirrors the JS button map in
 	`virtual_machine.js`. Per Phase 4 the form's Provision button is gone on
 	Pending — `after_insert` enqueues `auto_provision`."""
 
-	vm = frappe.get_doc({
-		"doctype": "Virtual Machine",
-		"title": "desk-buttons lifecycle",
-		"server": server_name,
-		"image": image_name,
-		"vcpus": 1,
-		"memory_megabytes": 512,
-		"disk_gigabytes": 4,
-		"ssh_public_key": public_key,
-	}).insert(ignore_permissions=True)
+	vm = frappe.get_doc(
+		{
+			"doctype": "Virtual Machine",
+			"title": "desk-buttons lifecycle",
+			"server": server_name,
+			"image": image_name,
+			"vcpus": 1,
+			"memory_megabytes": 512,
+			"disk_gigabytes": 4,
+			"ssh_public_key": public_key,
+		}
+	).insert(ignore_permissions=True)
 	frappe.db.commit()
 
 	# Auto-provision worker flips Pending -> Running. No explicit button click.
@@ -408,9 +414,7 @@ def _check_snapshot_family_buttons(vm) -> None:
 	assert vm.status == "Stopped", vm.status
 
 	# Rebuild from image (source posts as strings the dialog sends).
-	rebuild_task = _call_button(
-		"Virtual Machine", vm.name, "rebuild", source_type="image", source=vm.image
-	)
+	rebuild_task = _call_button("Virtual Machine", vm.name, "rebuild", source_type="image", source=vm.image)
 	assert rebuild_task, "rebuild returned no Task"
 
 	# Rebuild with an unknown source_type is rejected cleanly.
@@ -419,8 +423,12 @@ def _check_snapshot_family_buttons(vm) -> None:
 
 	# Resize (Stopped). Int fields post as strings from the prompt.
 	resize_task = _call_button(
-		"Virtual Machine", vm.name, "resize",
-		vcpus="2", memory_megabytes="1024", disk_gigabytes="6",
+		"Virtual Machine",
+		vm.name,
+		"resize",
+		vcpus="2",
+		memory_megabytes="1024",
+		disk_gigabytes="6",
 	)
 	assert resize_task, "resize returned no Task"
 	vm.reload()
@@ -432,8 +440,11 @@ def _check_snapshot_family_buttons(vm) -> None:
 
 	# Clone into a new VM (Snapshot form's button). Returns the new VM name.
 	clone_name = _call_button(
-		"Virtual Machine Snapshot", snapshot_name, "clone_to_new_vm",
-		title="desk clone", ssh_public_key=ephemeral_public_key(),
+		"Virtual Machine Snapshot",
+		snapshot_name,
+		"clone_to_new_vm",
+		title="desk clone",
+		ssh_public_key=ephemeral_public_key(),
 	)
 	assert clone_name and clone_name != vm.name, clone_name
 	clone = frappe.get_doc("Virtual Machine", clone_name)
@@ -475,23 +486,29 @@ def _check_provision_server_bad_token() -> None:
 
 	provider_name = "atlas-e2e-bogus-token"
 	if not frappe.db.exists("Provider", provider_name):
-		frappe.get_doc({
-			"doctype": "Provider",
-			"provider_name": provider_name,
-			"provider_type": "DigitalOcean",
-			"is_active": 1,
-		}).insert(ignore_permissions=True)
+		frappe.get_doc(
+			{
+				"doctype": "Provider",
+				"provider_name": provider_name,
+				"provider_type": "DigitalOcean",
+				"is_active": 1,
+			}
+		).insert(ignore_permissions=True)
 		frappe.db.commit()
 
 	previous_provider = frappe.db.get_single_value("Atlas Settings", "provider")
 	previous_token = frappe.utils.password.get_decrypted_password(
-		"DigitalOcean Settings", "DigitalOcean Settings", "api_token",
+		"DigitalOcean Settings",
+		"DigitalOcean Settings",
+		"api_token",
 		raise_exception=False,
 	)
 	frappe.db.set_single_value("Atlas Settings", "provider", provider_name, update_modified=False)
 	frappe.utils.password.set_encrypted_password(
-		"DigitalOcean Settings", "DigitalOcean Settings",
-		"do_v1_bogus_token_for_negative_path", "api_token",
+		"DigitalOcean Settings",
+		"DigitalOcean Settings",
+		"do_v1_bogus_token_for_negative_path",
+		"api_token",
 	)
 	frappe.db.commit()
 
@@ -510,13 +527,13 @@ def _check_provision_server_bad_token() -> None:
 		assert "401" in message or "403" in message or "unauthorized" in message, message
 	finally:
 		if previous_provider:
-			frappe.db.set_single_value(
-				"Atlas Settings", "provider", previous_provider, update_modified=False
-			)
+			frappe.db.set_single_value("Atlas Settings", "provider", previous_provider, update_modified=False)
 		if previous_token:
 			frappe.utils.password.set_encrypted_password(
-				"DigitalOcean Settings", "DigitalOcean Settings",
-				previous_token, "api_token",
+				"DigitalOcean Settings",
+				"DigitalOcean Settings",
+				previous_token,
+				"api_token",
 			)
 		frappe.db.commit()
 		assert not frappe.db.exists("Server", {"title": target_title}), (

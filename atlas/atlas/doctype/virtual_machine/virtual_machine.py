@@ -219,15 +219,17 @@ class VirtualMachine(Document):
 		operator stops first (the form offers the prompt)."""
 		if self.status != "Stopped":
 			frappe.throw(f"Stop the VM before snapshotting (status is {self.status})")
-		snapshot = frappe.get_doc({
-			"doctype": "Virtual Machine Snapshot",
-			"title": title,
-			"virtual_machine": self.name,
-			"server": self.server,
-			"status": "Pending",
-			"source_image": self.image,
-			"disk_gigabytes": self.disk_gigabytes,
-		}).insert(ignore_permissions=True)
+		snapshot = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine Snapshot",
+				"title": title,
+				"virtual_machine": self.name,
+				"server": self.server,
+				"status": "Pending",
+				"source_image": self.image,
+				"disk_gigabytes": self.disk_gigabytes,
+			}
+		).insert(ignore_permissions=True)
 		# The snapshot is an LVM thin snapshot, not a file copy. rootfs_path holds
 		# its LV device path (derived from the snapshot's UUID, like the VM disk
 		# LV) — no schema change, and it flows unchanged into restore/clone, which
@@ -249,11 +251,13 @@ class VirtualMachine(Document):
 		# landed but status didn't (a half-update that stranded the row in
 		# Pending). size_bytes is a Long Int / bigint column — a real multi-GB
 		# rootfs overflows a plain Int.
-		snapshot.db_set({
-			"rootfs_path": rootfs_path,
-			"size_bytes": parse_result(task.stdout)["size_bytes"],
-			"status": "Available",
-		})
+		snapshot.db_set(
+			{
+				"rootfs_path": rootfs_path,
+				"size_bytes": parse_result(task.stdout)["size_bytes"],
+				"status": "Available",
+			}
+		)
 		return snapshot.name
 
 	@frappe.whitelist()
@@ -327,9 +331,7 @@ class VirtualMachine(Document):
 		new_memory = int(memory_megabytes) if memory_megabytes else self.memory_megabytes
 		new_disk = int(disk_gigabytes) if disk_gigabytes else self.disk_gigabytes
 		if new_disk < self.disk_gigabytes:
-			frappe.throw(
-				f"Disk can only grow: {self.disk_gigabytes} GB → {new_disk} GB is a shrink"
-			)
+			frappe.throw(f"Disk can only grow: {self.disk_gigabytes} GB → {new_disk} GB is a shrink")
 		# Run the on-host resize first; run_task raises on failure, so we only
 		# persist the new values once the config and disk actually changed.
 		# Saving before the Task would let a failed resize-vm.py leave the doc
@@ -377,9 +379,7 @@ class VirtualMachine(Document):
 		"""Release the VM's attached public IPv4 (if any) back to its Server's
 		pool on terminate, so the address can be re-attached to another VM. The
 		Reserved IP row survives — only the attachment is cleared."""
-		for name in frappe.get_all(
-			"Reserved IP", filters={"virtual_machine": self.name}, pluck="name"
-		):
+		for name in frappe.get_all("Reserved IP", filters={"virtual_machine": self.name}, pluck="name"):
 			frappe.get_doc("Reserved IP", name).detach()
 
 	def _delete_snapshots(self) -> None:
@@ -436,9 +436,7 @@ class VirtualMachine(Document):
 			# per-VM launcher. A value with an internal space (cpu.max's "<quota>
 			# <period>") is one argv token end to end — no systemd word-splitting,
 			# so the shell's newline-join + mapfile workaround is gone.
-			"CGROUP_ARG": _cgroup_values(
-				cgroup_args(self.vcpus, self.memory_megabytes, self.disk_gigabytes)
-			),
+			"CGROUP_ARG": _cgroup_values(cgroup_args(self.vcpus, self.memory_megabytes, self.disk_gigabytes)),
 			"RESOURCE_ARG": _cgroup_values(resource_limit_args(self.disk_gigabytes)),
 			# Per-VM NAT44 v4 egress link (host/guest /30 + gateway).
 			**self._ipv4_link_variables(),
@@ -470,4 +468,3 @@ def auto_provision(virtual_machine_name: str) -> None:
 	if virtual_machine.status != "Pending":
 		return
 	virtual_machine.provision()
-

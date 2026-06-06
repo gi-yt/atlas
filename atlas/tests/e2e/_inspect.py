@@ -47,6 +47,7 @@ def mark_task_failure(task_name: str, reason: str = "manually marked Failure (wo
 
 def list_droplets() -> None:
 	from atlas.tests.e2e._shared import get_client
+
 	client = get_client()
 	for droplet in client.list_droplets_by_tag("atlas-e2e"):
 		v4 = [n.get("ip_address") for n in droplet.get("networks", {}).get("v4", [])]

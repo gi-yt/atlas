@@ -9,7 +9,6 @@ from atlas.atlas import scripts_catalog
 from atlas.atlas.ssh import connection_for_server, run_task, upload_files
 from atlas.atlas.task_results import parse_result
 
-
 IMMUTABLE_AFTER_INSERT = (
 	"title",
 	"provider",
@@ -153,8 +152,7 @@ class Server(Document):
 	def _bootstrap_uploads(self) -> list[tuple[str, str]]:
 		directory = scripts_catalog.scripts_directory()
 		uploads = [
-			(str(directory / source), destination)
-			for source, destination in self.BOOTSTRAP_UPLOAD_SOURCES
+			(str(directory / source), destination) for source, destination in self.BOOTSTRAP_UPLOAD_SOURCES
 		]
 		# The durable atlas package: every lib module lands under
 		# /var/lib/atlas/bin/atlas/ so the .py hooks and atlas-pool.service can

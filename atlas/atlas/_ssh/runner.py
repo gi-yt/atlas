@@ -48,14 +48,16 @@ def run_task(
 		server_doc = frappe.get_doc("Server", server)
 		connection = connection_for_server(server_doc)
 
-	task = frappe.get_doc({
-		"doctype": "Task",
-		"server": server,
-		"virtual_machine": virtual_machine,
-		"script": script,
-		"status": "Pending",
-		"triggered_by": frappe.session.user if frappe.session else "Administrator",
-	})
+	task = frappe.get_doc(
+		{
+			"doctype": "Task",
+			"server": server,
+			"virtual_machine": virtual_machine,
+			"script": script,
+			"status": "Pending",
+			"triggered_by": frappe.session.user if frappe.session else "Administrator",
+		}
+	)
 	task.variables_dict = variables
 	task.insert(ignore_permissions=True)
 
@@ -95,16 +97,12 @@ def _execute_into(
 	_mark_running(task)
 	start = time.monotonic()
 	try:
-		stdout, stderr, exit_code = _run_remote_script(
-			connection, script, variables, timeout_seconds
-		)
+		stdout, stderr, exit_code = _run_remote_script(connection, script, variables, timeout_seconds)
 	except subprocess.TimeoutExpired as timeout:
-		_finalize(task, "", f"Timed out after {timeout.timeout}s", None,
-			"Failure", _elapsed_ms(start))
+		_finalize(task, "", f"Timed out after {timeout.timeout}s", None, "Failure", _elapsed_ms(start))
 		frappe.throw(f"Task {task.name} timed out after {timeout.timeout}s")
 	except Exception as exception:
-		_finalize(task, "", str(exception), None, "Failure",
-			_elapsed_ms(start))
+		_finalize(task, "", str(exception), None, "Failure", _elapsed_ms(start))
 		if isinstance(exception, frappe.ValidationError):
 			raise
 		raise frappe.ValidationError(str(exception)) from exception
@@ -114,9 +112,7 @@ def _execute_into(
 	if status == "Failure":
 		# Tail, not head: scripts run under `bash -x`, so the first hundreds of
 		# chars are tracing noise and the real error message lives near the end.
-		frappe.throw(
-			f"Task {task.name} ({script}) exited {exit_code}: {stderr[-500:]}"
-		)
+		frappe.throw(f"Task {task.name} ({script}) exited {exit_code}: {stderr[-500:]}")
 
 
 def _mark_running(task: "Task") -> None:
@@ -200,9 +196,7 @@ def _remote_command(script: str, remote_script_path: str, variables: dict) -> st
 	if script.endswith(".py"):
 		args = _variables_to_flags(variables)
 		return f"python3 {quoted_path} {args}".strip()
-	env_prefix = " ".join(
-		f"{key}={shlex.quote(str(value))}" for key, value in variables.items()
-	)
+	env_prefix = " ".join(f"{key}={shlex.quote(str(value))}" for key, value in variables.items())
 	return f"env {env_prefix} bash -x {quoted_path}".strip()
 
 

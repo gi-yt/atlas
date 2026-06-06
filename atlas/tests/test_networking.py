@@ -44,18 +44,20 @@ def _insert_vm(server: str, address: str, status: str = "Pending") -> str:
 	# Insert a row directly to occupy an address. Skip the controller's
 	# before_insert by using db_insert via frappe.get_doc with set_name.
 	name = str(uuid.uuid4())
-	frappe.get_doc({
-		"doctype": "Virtual Machine",
-		"__newname": name,
-		"title": f"used-{address}",
-		"server": server,
-		"image": _ensure_image(),
-		"vcpus": 1,
-		"memory_megabytes": 512,
-		"disk_gigabytes": 4,
-		"ssh_public_key": "ssh-ed25519 AAAA",
-		"status": status,
-	}).insert(ignore_permissions=True, set_name=name)
+	frappe.get_doc(
+		{
+			"doctype": "Virtual Machine",
+			"__newname": name,
+			"title": f"used-{address}",
+			"server": server,
+			"image": _ensure_image(),
+			"vcpus": 1,
+			"memory_megabytes": 512,
+			"disk_gigabytes": 4,
+			"ssh_public_key": "ssh-ed25519 AAAA",
+			"status": status,
+		}
+	).insert(ignore_permissions=True, set_name=name)
 	# The controller's before_insert will have allocated its own IPv6; overwrite.
 	frappe.db.set_value("Virtual Machine", name, "ipv6_address", address)
 	return name

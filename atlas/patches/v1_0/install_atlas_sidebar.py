@@ -9,9 +9,7 @@ def execute():
 		return
 
 	# Import the Atlas Workspace Sidebar fixture.
-	path = os.path.join(
-		frappe.get_app_path("atlas"), "workspace_sidebar", "atlas.json"
-	)
+	path = os.path.join(frappe.get_app_path("atlas"), "workspace_sidebar", "atlas.json")
 	if os.path.exists(path):
 		import_file_by_path(path, force=True)
 		# Frappe's auto_generate_sidebar_from_module skips modules whose
@@ -28,4 +26,5 @@ def execute():
 	# need this one-time backfill.
 	if not frappe.db.exists("Desktop Icon", {"app": "atlas", "icon_type": "App"}):
 		from frappe.utils.install import auto_generate_icons_and_sidebar
+
 		auto_generate_icons_and_sidebar()

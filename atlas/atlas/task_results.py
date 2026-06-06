@@ -26,5 +26,5 @@ def parse_result(stdout: str) -> dict:
 	one, so a truncated/failed run surfaces loudly."""
 	for line in reversed((stdout or "").splitlines()):
 		if line.startswith(RESULT_MARKER):
-			return json.loads(line[len(RESULT_MARKER):])
+			return json.loads(line[len(RESULT_MARKER) :])
 	raise ValueError(f"no {RESULT_MARKER} line in task output")

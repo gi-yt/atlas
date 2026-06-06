@@ -36,16 +36,18 @@ def run(reuse: bool = True, keep: bool = True) -> None:
 		image_doc = ensure_image_on_server(server.name)
 		public_key = ephemeral_public_key()
 
-		vm = frappe.get_doc({
-			"doctype": "Virtual Machine",
-			"title": "vm-lifecycle",
-			"server": server.name,
-			"image": image_doc.name,
-			"vcpus": 1,
-			"memory_megabytes": 512,
-			"disk_gigabytes": 4,
-			"ssh_public_key": public_key,
-		}).insert(ignore_permissions=True)
+		vm = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine",
+				"title": "vm-lifecycle",
+				"server": server.name,
+				"image": image_doc.name,
+				"vcpus": 1,
+				"memory_megabytes": 512,
+				"disk_gigabytes": 4,
+				"ssh_public_key": public_key,
+			}
+		).insert(ignore_permissions=True)
 		frappe.db.commit()
 
 		_check_full_lifecycle(server.name, vm)

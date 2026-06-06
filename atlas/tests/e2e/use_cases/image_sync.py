@@ -141,13 +141,15 @@ def _check_execute_task_sync(server_name: str, image) -> None:
 		"DEFAULT_DISK_GB": str(image.default_disk_gigabytes),
 		"GUEST_NETWORK_UNIT": "/tmp/atlas/atlas-network.service",
 	}
-	task = frappe.get_doc({
-		"doctype": "Task",
-		"server": server_name,
-		"script": "sync-image.py",
-		"status": "Pending",
-		"triggered_by": "Administrator",
-	})
+	task = frappe.get_doc(
+		{
+			"doctype": "Task",
+			"server": server_name,
+			"script": "sync-image.py",
+			"status": "Pending",
+			"triggered_by": "Administrator",
+		}
+	)
 	task.variables_dict = variables
 	task.insert(ignore_permissions=True)
 	frappe.db.commit()
@@ -161,30 +163,34 @@ def _check_execute_task_sync(server_name: str, image) -> None:
 def _check_image_url_validation() -> None:
 	"""Both kernel_url and rootfs_url must be https."""
 	with expect_validation_error("must be an https"):
-		frappe.get_doc({
-			"doctype": "Virtual Machine Image",
-			"image_name": "usecase-bad-kernel",
-			"kernel_url": "http://example.com/kernel",
-			"kernel_filename": "k",
-			"kernel_sha256": "0" * 64,
-			"rootfs_url": "https://example.com/rootfs",
-			"rootfs_filename": "r",
-			"rootfs_sha256": "0" * 64,
-			"default_disk_gigabytes": 1,
-		}).insert(ignore_permissions=True)
+		frappe.get_doc(
+			{
+				"doctype": "Virtual Machine Image",
+				"image_name": "usecase-bad-kernel",
+				"kernel_url": "http://example.com/kernel",
+				"kernel_filename": "k",
+				"kernel_sha256": "0" * 64,
+				"rootfs_url": "https://example.com/rootfs",
+				"rootfs_filename": "r",
+				"rootfs_sha256": "0" * 64,
+				"default_disk_gigabytes": 1,
+			}
+		).insert(ignore_permissions=True)
 
 	with expect_validation_error("must be an https"):
-		frappe.get_doc({
-			"doctype": "Virtual Machine Image",
-			"image_name": "usecase-bad-rootfs",
-			"kernel_url": "https://example.com/kernel",
-			"kernel_filename": "k",
-			"kernel_sha256": "0" * 64,
-			"rootfs_url": "ftp://example.com/rootfs",
-			"rootfs_filename": "r",
-			"rootfs_sha256": "0" * 64,
-			"default_disk_gigabytes": 1,
-		}).insert(ignore_permissions=True)
+		frappe.get_doc(
+			{
+				"doctype": "Virtual Machine Image",
+				"image_name": "usecase-bad-rootfs",
+				"kernel_url": "https://example.com/kernel",
+				"kernel_filename": "k",
+				"kernel_sha256": "0" * 64,
+				"rootfs_url": "ftp://example.com/rootfs",
+				"rootfs_filename": "r",
+				"rootfs_sha256": "0" * 64,
+				"default_disk_gigabytes": 1,
+			}
+		).insert(ignore_permissions=True)
 
 
 def _check_sync_to_all_servers() -> None:

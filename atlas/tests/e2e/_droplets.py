@@ -74,8 +74,7 @@ def _wait_for_droplet_active(client: DigitalOceanClient, droplet_id: int, timeou
 			from atlas.atlas.digitalocean import DigitalOceanError
 
 			raise DigitalOceanError(
-				f"Droplet {droplet_id} not active after {timeout_seconds}s "
-				f"(status={droplet.get('status')})"
+				f"Droplet {droplet_id} not active after {timeout_seconds}s (status={droplet.get('status')})"
 			)
 		time.sleep(5)
 
@@ -159,9 +158,7 @@ def ensure_bootstrapped_server(
 			break
 		time.sleep(5)
 	else:
-		print(
-			f"[e2e] timeout: dumping recent Tasks for {server_name!r}"
-		)
+		print(f"[e2e] timeout: dumping recent Tasks for {server_name!r}")
 		for task in frappe.get_all(
 			"Task",
 			filters={"server": server_name},
@@ -184,25 +181,28 @@ def ensure_e2e_provider() -> "frappe.model.document.Document":
 	"""Seed the e2e Provider row + Atlas Settings + DigitalOcean Settings +
 	Provider Size / Provider Image rows from site config. Idempotent."""
 	import frappe.utils.password
+
 	from atlas.tests.fixtures import seed_catalogs
 
 	seed_catalogs()
 	name = "atlas-e2e-provider"
 	if not frappe.db.exists("Provider", name):
-		frappe.get_doc({
-			"doctype": "Provider",
-			"provider_name": name,
-			"provider_type": "DigitalOcean",
-			"is_active": 1,
-		}).insert(ignore_permissions=True)
+		frappe.get_doc(
+			{
+				"doctype": "Provider",
+				"provider_name": name,
+				"provider_type": "DigitalOcean",
+				"is_active": 1,
+			}
+		).insert(ignore_permissions=True)
 	provider = frappe.get_doc("Provider", name)
 
 	frappe.db.set_single_value("Atlas Settings", "provider", name, update_modified=False)
+	frappe.db.set_single_value("Atlas Settings", "ssh_key_id", get_ssh_key_id(), update_modified=False)
 	frappe.db.set_single_value(
-		"Atlas Settings", "ssh_key_id", get_ssh_key_id(), update_modified=False
-	)
-	frappe.db.set_single_value(
-		"Atlas Settings", "ssh_private_key_path", get_ssh_private_key_path(),
+		"Atlas Settings",
+		"ssh_private_key_path",
+		get_ssh_private_key_path(),
 		update_modified=False,
 	)
 
@@ -231,13 +231,16 @@ def _ensure_catalog_row(doctype: str, name: str, provider_type: str, slug: str) 
 	if frappe.db.exists(doctype, name):
 		return
 	import json
-	frappe.get_doc({
-		"doctype": doctype,
-		"provider_type": provider_type,
-		"slug": slug,
-		"enabled": 1,
-		"provider_metadata": json.dumps({}),
-	}).insert(ignore_permissions=True)
+
+	frappe.get_doc(
+		{
+			"doctype": doctype,
+			"provider_type": provider_type,
+			"slug": slug,
+			"enabled": 1,
+			"provider_metadata": json.dumps({}),
+		}
+	).insert(ignore_permissions=True)
 
 
 @contextmanager

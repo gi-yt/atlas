@@ -144,9 +144,7 @@ def _write_settings(state: dict | None) -> None:
 	if state["ssh"]:
 		for field, value in state["ssh"].items():
 			if value:
-				frappe.db.set_single_value(
-					"Atlas Settings", field, value, update_modified=False
-				)
+				frappe.db.set_single_value("Atlas Settings", field, value, update_modified=False)
 	if state["active_provider"]:
 		frappe.db.set_single_value(
 			"Atlas Settings", "provider", state["active_provider"], update_modified=False
@@ -156,9 +154,7 @@ def _write_settings(state: dict | None) -> None:
 		default_size = _ensure_provider_size("DigitalOcean", do["default_size_slug"])
 		default_image = _ensure_provider_image("DigitalOcean", do["default_image_slug"])
 		if do["region"]:
-			frappe.db.set_single_value(
-				"DigitalOcean Settings", "region", do["region"], update_modified=False
-			)
+			frappe.db.set_single_value("DigitalOcean Settings", "region", do["region"], update_modified=False)
 		if default_size:
 			frappe.db.set_single_value(
 				"DigitalOcean Settings", "default_size", default_size, update_modified=False
@@ -197,9 +193,7 @@ def _migrate_server_table() -> None:
 	if not frappe.db.table_exists("Server"):
 		return
 
-	for server in frappe.db.sql(
-		"SELECT name, provider, size FROM `tabServer`", as_dict=True
-	):
+	for server in frappe.db.sql("SELECT name, provider, size FROM `tabServer`", as_dict=True):
 		size = server["size"]
 		if not size or "/" in size:
 			continue
@@ -237,18 +231,18 @@ def _ensure_provider_size(provider_type: str, slug: str | None, monthly_cost_usd
 		if monthly_cost_usd is not None and not frappe.db.get_value(
 			"Provider Size", name, "monthly_cost_usd"
 		):
-			frappe.db.set_value(
-				"Provider Size", name, "monthly_cost_usd", monthly_cost_usd
-			)
+			frappe.db.set_value("Provider Size", name, "monthly_cost_usd", monthly_cost_usd)
 		return name
-	frappe.get_doc({
-		"doctype": "Provider Size",
-		"provider_type": provider_type,
-		"slug": slug,
-		"enabled": 1,
-		"monthly_cost_usd": monthly_cost_usd,
-		"provider_metadata": json.dumps({}),
-	}).insert(ignore_permissions=True)
+	frappe.get_doc(
+		{
+			"doctype": "Provider Size",
+			"provider_type": provider_type,
+			"slug": slug,
+			"enabled": 1,
+			"monthly_cost_usd": monthly_cost_usd,
+			"provider_metadata": json.dumps({}),
+		}
+	).insert(ignore_permissions=True)
 	return name
 
 
@@ -258,11 +252,13 @@ def _ensure_provider_image(provider_type: str, slug: str | None) -> str:
 	name = f"{provider_type}/{slug}"
 	if frappe.db.exists("Provider Image", name):
 		return name
-	frappe.get_doc({
-		"doctype": "Provider Image",
-		"provider_type": provider_type,
-		"slug": slug,
-		"enabled": 1,
-		"provider_metadata": json.dumps({}),
-	}).insert(ignore_permissions=True)
+	frappe.get_doc(
+		{
+			"doctype": "Provider Image",
+			"provider_type": provider_type,
+			"slug": slug,
+			"enabled": 1,
+			"provider_metadata": json.dumps({}),
+		}
+	).insert(ignore_permissions=True)
 	return name

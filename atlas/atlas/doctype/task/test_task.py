@@ -25,13 +25,15 @@ class TestTask(IntegrationTestCase):
 
 	def test_task_variables_must_be_json(self) -> None:
 		with self.assertRaises(frappe.ValidationError):
-			frappe.get_doc({
-				"doctype": "Task",
-				"script": "noop.sh",
-				"variables": "{not json",
-				"status": "Pending",
-				"triggered_by": "Administrator",
-			}).insert(ignore_permissions=True)
+			frappe.get_doc(
+				{
+					"doctype": "Task",
+					"script": "noop.sh",
+					"variables": "{not json",
+					"status": "Pending",
+					"triggered_by": "Administrator",
+				}
+			).insert(ignore_permissions=True)
 
 	def test_task_immutable_after_insert(self) -> None:
 		task = self._make()
@@ -45,46 +47,54 @@ class TestTask(IntegrationTestCase):
 
 	def test_variables_dict_property_returns_empty_when_variables_empty(self) -> None:
 		# Construct in-memory (don't insert; insert validates non-empty).
-		task = frappe.get_doc({
-			"doctype": "Task",
-			"script": "noop.sh",
-			"variables": "",
-			"status": "Pending",
-			"triggered_by": "Administrator",
-		})
-		self.assertEqual(task.variables_dict, {})
-
-	def test_variables_dict_setter_serializes_to_json(self) -> None:
-		task = frappe.get_doc({
-			"doctype": "Task",
-			"script": "noop.sh",
-			"variables": "{}",
-			"status": "Pending",
-			"triggered_by": "Administrator",
-		})
-		task.variables_dict = {"NAME": "alice"}
-		self.assertEqual(json.loads(task.variables), {"NAME": "alice"})
-
-	def test_variables_dict_setter_rejects_non_dict(self) -> None:
-		task = frappe.get_doc({
-			"doctype": "Task",
-			"script": "noop.sh",
-			"variables": "{}",
-			"status": "Pending",
-			"triggered_by": "Administrator",
-		})
-		with self.assertRaises(frappe.ValidationError):
-			task.variables_dict = "not a dict"
-
-	def test_validate_rejects_empty_variables(self) -> None:
-		with self.assertRaises(frappe.ValidationError) as raised:
-			frappe.get_doc({
+		task = frappe.get_doc(
+			{
 				"doctype": "Task",
 				"script": "noop.sh",
 				"variables": "",
 				"status": "Pending",
 				"triggered_by": "Administrator",
-			}).insert(ignore_permissions=True)
+			}
+		)
+		self.assertEqual(task.variables_dict, {})
+
+	def test_variables_dict_setter_serializes_to_json(self) -> None:
+		task = frappe.get_doc(
+			{
+				"doctype": "Task",
+				"script": "noop.sh",
+				"variables": "{}",
+				"status": "Pending",
+				"triggered_by": "Administrator",
+			}
+		)
+		task.variables_dict = {"NAME": "alice"}
+		self.assertEqual(json.loads(task.variables), {"NAME": "alice"})
+
+	def test_variables_dict_setter_rejects_non_dict(self) -> None:
+		task = frappe.get_doc(
+			{
+				"doctype": "Task",
+				"script": "noop.sh",
+				"variables": "{}",
+				"status": "Pending",
+				"triggered_by": "Administrator",
+			}
+		)
+		with self.assertRaises(frappe.ValidationError):
+			task.variables_dict = "not a dict"
+
+	def test_validate_rejects_empty_variables(self) -> None:
+		with self.assertRaises(frappe.ValidationError) as raised:
+			frappe.get_doc(
+				{
+					"doctype": "Task",
+					"script": "noop.sh",
+					"variables": "",
+					"status": "Pending",
+					"triggered_by": "Administrator",
+				}
+			).insert(ignore_permissions=True)
 		self.assertIn("variables", str(raised.exception))
 
 	def test_validate_immutability_skips_when_no_before_save(self) -> None:
@@ -98,13 +108,15 @@ class TestTask(IntegrationTestCase):
 
 	def test_validate_rejects_non_object_json(self) -> None:
 		with self.assertRaises(frappe.ValidationError) as raised:
-			frappe.get_doc({
-				"doctype": "Task",
-				"script": "noop.sh",
-				"variables": "[1, 2, 3]",
-				"status": "Pending",
-				"triggered_by": "Administrator",
-			}).insert(ignore_permissions=True)
+			frappe.get_doc(
+				{
+					"doctype": "Task",
+					"script": "noop.sh",
+					"variables": "[1, 2, 3]",
+					"status": "Pending",
+					"triggered_by": "Administrator",
+				}
+			).insert(ignore_permissions=True)
 		self.assertIn("JSON object", str(raised.exception))
 
 	def test_subject_set_for_known_script(self) -> None:
@@ -134,9 +146,7 @@ class TestTask(IntegrationTestCase):
 		import json
 		import pathlib
 
-		json_path = (
-			pathlib.Path(__file__).parent / "task.json"
-		)
+		json_path = pathlib.Path(__file__).parent / "task.json"
 		schema = json.loads(json_path.read_text())
 		states = {row["title"]: row["color"] for row in schema["states"]}
 		self.assertEqual(

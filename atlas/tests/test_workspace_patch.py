@@ -13,11 +13,18 @@ class TestMigrateWorkspaceToOnboarding(FrappeTestCase):
 	the canonical fixture content, removing the legacy `bsc_block`
 	custom-HTML reference."""
 
-	STALE_CONTENT = json.dumps([
-		{"id": "bsc_block", "type": "custom_block", "data": {
-			"custom_block_name": "atlas-bootstrap-checklist", "col": 12,
-		}},
-	])
+	STALE_CONTENT = json.dumps(
+		[
+			{
+				"id": "bsc_block",
+				"type": "custom_block",
+				"data": {
+					"custom_block_name": "atlas-bootstrap-checklist",
+					"col": 12,
+				},
+			},
+		]
+	)
 
 	def setUp(self) -> None:
 		# Snapshot the live workspace state so each test can mutate freely
@@ -25,8 +32,7 @@ class TestMigrateWorkspaceToOnboarding(FrappeTestCase):
 		# snapshot rows, not via `set_value` on a JSON column.
 		self._original_content = frappe.db.get_value("Workspace", "Atlas", "content")
 		self._original_custom_blocks = [
-			row.as_dict()
-			for row in frappe.get_doc("Workspace", "Atlas").custom_blocks
+			row.as_dict() for row in frappe.get_doc("Workspace", "Atlas").custom_blocks
 		]
 
 	def tearDown(self) -> None:
@@ -36,14 +42,16 @@ class TestMigrateWorkspaceToOnboarding(FrappeTestCase):
 		frappe.db.delete("Workspace Custom Block", {"parent": "Atlas"})
 		for index, row in enumerate(self._original_custom_blocks, start=1):
 			row.pop("name", None)
-			frappe.get_doc({
-				"doctype": "Workspace Custom Block",
-				"parenttype": "Workspace",
-				"parentfield": "custom_blocks",
-				"parent": "Atlas",
-				"idx": index,
-				**row,
-			}).insert(ignore_permissions=True)
+			frappe.get_doc(
+				{
+					"doctype": "Workspace Custom Block",
+					"parenttype": "Workspace",
+					"parentfield": "custom_blocks",
+					"parent": "Atlas",
+					"idx": index,
+					**row,
+				}
+			).insert(ignore_permissions=True)
 		if frappe.db.exists("Custom HTML Block", "atlas-bootstrap-checklist"):
 			frappe.delete_doc("Custom HTML Block", "atlas-bootstrap-checklist", force=1)
 
@@ -105,12 +113,14 @@ class TestMigrateWorkspaceToOnboarding(FrappeTestCase):
 		"""The stale `atlas-bootstrap-checklist` Custom HTML Block gets
 		deleted if it survives in the DB."""
 		if not frappe.db.exists("Custom HTML Block", "atlas-bootstrap-checklist"):
-			frappe.get_doc({
-				"doctype": "Custom HTML Block",
-				"name": "atlas-bootstrap-checklist",
-				"html": "<div>stale</div>",
-				"private": 0,
-			}).insert(ignore_permissions=True)
+			frappe.get_doc(
+				{
+					"doctype": "Custom HTML Block",
+					"name": "atlas-bootstrap-checklist",
+					"html": "<div>stale</div>",
+					"private": 0,
+				}
+			).insert(ignore_permissions=True)
 
 		execute()
 

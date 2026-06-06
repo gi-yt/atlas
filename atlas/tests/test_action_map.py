@@ -16,13 +16,7 @@ import unittest
 
 import frappe
 
-ACTIONS_JS = (
-	pathlib.Path(frappe.get_app_path("atlas"))
-	/ "frontend"
-	/ "src"
-	/ "data"
-	/ "actions.js"
-)
+ACTIONS_JS = pathlib.Path(frappe.get_app_path("atlas")) / "frontend" / "src" / "data" / "actions.js"
 
 # Sentinels that are NOT controller methods (handled in the SPA via standard
 # Frappe endpoints, not run_doc_method).

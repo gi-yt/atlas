@@ -35,16 +35,18 @@ def run(server: str, keep: bool = True):
 	print(f"[vm] image ready: {image.name!r}")
 
 	start = time.monotonic()
-	vm = frappe.get_doc({
-		"doctype": "Virtual Machine",
-		"title": f"ui-capacity-check-{int(time.time())}",
-		"server": server,
-		"image": image.name,
-		"vcpus": 1,
-		"memory_megabytes": 512,
-		"disk_gigabytes": 4,
-		"ssh_public_key": ephemeral_public_key(),
-	}).insert(ignore_permissions=True)
+	vm = frappe.get_doc(
+		{
+			"doctype": "Virtual Machine",
+			"title": f"ui-capacity-check-{int(time.time())}",
+			"server": server,
+			"image": image.name,
+			"vcpus": 1,
+			"memory_megabytes": 512,
+			"disk_gigabytes": 4,
+			"ssh_public_key": ephemeral_public_key(),
+		}
+	).insert(ignore_permissions=True)
 	frappe.db.commit()
 	print(f"[vm] inserted Virtual Machine {vm.name!r} status={vm.status!r}")
 

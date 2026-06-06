@@ -27,9 +27,7 @@ def execute():
 	# hasn't run yet. Adding it by hand is idempotent — Frappe's later sync
 	# is a no-op when the column already matches.
 	if not frappe.db.has_column("Server Provider", "ssh_private_key_path"):
-		frappe.db.sql_ddl(
-			"ALTER TABLE `tabServer Provider` ADD COLUMN `ssh_private_key_path` VARCHAR(255)"
-		)
+		frappe.db.sql_ddl("ALTER TABLE `tabServer Provider` ADD COLUMN `ssh_private_key_path` VARCHAR(255)")
 
 	for provider in frappe.get_all("Server Provider", pluck="name"):
 		if frappe.db.get_value("Server Provider", provider, "ssh_private_key_path"):
@@ -59,6 +57,9 @@ def execute():
 			target.write_text(key)
 			target.chmod(0o600)
 		frappe.db.set_value(
-			"Server Provider", provider, "ssh_private_key_path", path,
+			"Server Provider",
+			provider,
+			"ssh_private_key_path",
+			path,
 			update_modified=False,
 		)

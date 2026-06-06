@@ -74,9 +74,7 @@ class TestVirtualMachineLifecycle(IntegrationTestCase):
 		vm = _vm_with_status("Running")
 		stop_task = fake_task(name="task-stop-r")
 		start_task = fake_task(name="task-start-r")
-		with patch.object(
-			module, "run_task", side_effect=[stop_task, start_task]
-		) as mocked:
+		with patch.object(module, "run_task", side_effect=[stop_task, start_task]) as mocked:
 			result = vm.restart()
 		self.assertEqual(result, {"stop_task": "task-stop-r", "start_task": "task-start-r"})
 		self.assertEqual(mocked.call_count, 2)
@@ -90,9 +88,7 @@ class TestVirtualMachineLifecycle(IntegrationTestCase):
 
 		vm = _vm_with_status("Stopped")
 		start_task = fake_task(name="task-start-only")
-		with patch.object(
-			module, "run_task", return_value=start_task
-		) as mocked:
+		with patch.object(module, "run_task", return_value=start_task) as mocked:
 			result = vm.restart()
 		self.assertEqual(result, {"stop_task": None, "start_task": "task-start-only"})
 		mocked.assert_called_once()
@@ -125,14 +121,16 @@ class TestVirtualMachineLifecycle(IntegrationTestCase):
 		from atlas.atlas.doctype.virtual_machine import virtual_machine as module
 
 		vm = _vm_with_status("Stopped")
-		snapshot = frappe.get_doc({
-			"doctype": "Virtual Machine Snapshot",
-			"title": "snap",
-			"virtual_machine": vm.name,
-			"server": vm.server,
-			"status": "Available",
-			"rootfs_path": "/dev/atlas/atlas-snap-s1",
-		}).insert(ignore_permissions=True)
+		snapshot = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine Snapshot",
+				"title": "snap",
+				"virtual_machine": vm.name,
+				"server": vm.server,
+				"status": "Available",
+				"rootfs_path": "/dev/atlas/atlas-snap-s1",
+			}
+		).insert(ignore_permissions=True)
 		task = fake_task(name="task-rebuild-snap")
 		with patch.object(module, "run_task", return_value=task) as mocked:
 			result = vm.rebuild("snapshot", snapshot.name)
@@ -150,27 +148,31 @@ class TestVirtualMachineLifecycle(IntegrationTestCase):
 	def test_rebuild_snapshot_of_other_vm_rejected(self) -> None:
 		vm = _vm_with_status("Stopped")
 		other = _new_vm()
-		snapshot = frappe.get_doc({
-			"doctype": "Virtual Machine Snapshot",
-			"title": "foreign",
-			"virtual_machine": other.name,
-			"server": other.server,
-			"status": "Available",
-			"rootfs_path": "/dev/atlas/atlas-snap-foreign",
-		}).insert(ignore_permissions=True)
+		snapshot = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine Snapshot",
+				"title": "foreign",
+				"virtual_machine": other.name,
+				"server": other.server,
+				"status": "Available",
+				"rootfs_path": "/dev/atlas/atlas-snap-foreign",
+			}
+		).insert(ignore_permissions=True)
 		with self.assertRaises(frappe.ValidationError) as raised:
 			vm.rebuild("snapshot", snapshot.name)
 		self.assertIn("different Virtual Machine", str(raised.exception))
 
 	def test_rebuild_unavailable_snapshot_rejected(self) -> None:
 		vm = _vm_with_status("Stopped")
-		snapshot = frappe.get_doc({
-			"doctype": "Virtual Machine Snapshot",
-			"title": "pending-snap",
-			"virtual_machine": vm.name,
-			"server": vm.server,
-			"status": "Pending",
-		}).insert(ignore_permissions=True)
+		snapshot = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine Snapshot",
+				"title": "pending-snap",
+				"virtual_machine": vm.name,
+				"server": vm.server,
+				"status": "Pending",
+			}
+		).insert(ignore_permissions=True)
 		with self.assertRaises(frappe.ValidationError) as raised:
 			vm.rebuild("snapshot", snapshot.name)
 		self.assertIn("not Available", str(raised.exception))

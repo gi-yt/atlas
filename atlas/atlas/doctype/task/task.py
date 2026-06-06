@@ -122,11 +122,7 @@ class Task(Document):
 		Without this hook, an operator looking at the VM form sees Pending and
 		has no clue the last provision attempt blew up.
 		"""
-		if (
-			self.status != "Failure"
-			or self.script != "provision-vm.py"
-			or not self.virtual_machine
-		):
+		if self.status != "Failure" or self.script != "provision-vm.py" or not self.virtual_machine:
 			return
 		current = frappe.db.get_value("Virtual Machine", self.virtual_machine, "status")
 		if current not in ("Pending", "Running"):

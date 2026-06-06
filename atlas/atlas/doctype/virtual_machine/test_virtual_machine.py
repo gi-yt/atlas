@@ -96,9 +96,7 @@ class TestVirtualMachine(IntegrationTestCase):
 			if not token.startswith("--")
 		]
 		expected_resource = [
-			token
-			for token in resource_limit_args(vm.disk_gigabytes)
-			if not token.startswith("--")
+			token for token in resource_limit_args(vm.disk_gigabytes) if not token.startswith("--")
 		]
 		self.assertEqual(variables["CGROUP_ARG"], expected_cgroup)
 		self.assertEqual(variables["RESOURCE_ARG"], expected_resource)
@@ -123,15 +121,18 @@ class TestVirtualMachine(IntegrationTestCase):
 			# Mimic the real `run_task`: insert a Task row, mark it Failure,
 			# raise. The on_update hook on the Task then propagates Failed
 			# to the linked VM.
-			task = frappe.get_doc({
-				"doctype": "Task",
-				"server": kwargs["server"],
-				"virtual_machine": kwargs.get("virtual_machine"),
-				"script": kwargs["script"],
-				"status": "Pending",
-				"triggered_by": "Administrator",
-			})
+			task = frappe.get_doc(
+				{
+					"doctype": "Task",
+					"server": kwargs["server"],
+					"virtual_machine": kwargs.get("virtual_machine"),
+					"script": kwargs["script"],
+					"status": "Pending",
+					"triggered_by": "Administrator",
+				}
+			)
 			import json as _json
+
 			task.variables = _json.dumps(kwargs.get("variables") or {})
 			task.insert(ignore_permissions=True)
 			task.status = "Failure"
@@ -170,15 +171,17 @@ class TestVirtualMachine(IntegrationTestCase):
 	def test_set_status_default_assigns_pending_when_empty(self) -> None:
 		# Frappe's JSON default pre-populates status, so we have to clear it
 		# in-memory to exercise the assignment branch.
-		vm = frappe.get_doc({
-			"doctype": "Virtual Machine",
-			"server": _ensure_test_server(),
-			"image": _ensure_test_image(),
-			"vcpus": 1,
-			"memory_megabytes": 512,
-			"disk_gigabytes": 2,
-			"ssh_public_key": "ssh-ed25519 AAAA",
-		})
+		vm = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine",
+				"server": _ensure_test_server(),
+				"image": _ensure_test_image(),
+				"vcpus": 1,
+				"memory_megabytes": 512,
+				"disk_gigabytes": 2,
+				"ssh_public_key": "ssh-ed25519 AAAA",
+			}
+		)
 		vm.status = None
 		vm.set_status_default()
 		self.assertEqual(vm.status, "Pending")
@@ -186,16 +189,18 @@ class TestVirtualMachine(IntegrationTestCase):
 	def test_set_status_default_keeps_existing(self) -> None:
 		# `set_status_default` is a no-op when status is already populated.
 		# Construct an in-memory VM and exercise the helper directly.
-		vm = frappe.get_doc({
-			"doctype": "Virtual Machine",
-			"server": _ensure_test_server(),
-			"image": _ensure_test_image(),
-			"status": "Stopped",
-			"vcpus": 1,
-			"memory_megabytes": 512,
-			"disk_gigabytes": 2,
-			"ssh_public_key": "ssh-ed25519 AAAA",
-		})
+		vm = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine",
+				"server": _ensure_test_server(),
+				"image": _ensure_test_image(),
+				"status": "Stopped",
+				"vcpus": 1,
+				"memory_megabytes": 512,
+				"disk_gigabytes": 2,
+				"ssh_public_key": "ssh-ed25519 AAAA",
+			}
+		)
 		vm.set_status_default()
 		self.assertEqual(vm.status, "Stopped")
 
@@ -260,7 +265,9 @@ class TestVirtualMachine(IntegrationTestCase):
 		vm = _new_vm()
 		vm.db_set("status", "Stopped")
 		vm.reload()
-		task = fake_task(name="task-snap-1", stdout='+ stat\nATLAS_RESULT={"size_bytes": 4294967296}\nSnapshotted.')
+		task = fake_task(
+			name="task-snap-1", stdout='+ stat\nATLAS_RESULT={"size_bytes": 4294967296}\nSnapshotted.'
+		)
 
 		with patch.object(module, "run_task", return_value=task) as mocked:
 			snapshot_name = vm.snapshot("nightly")
@@ -296,7 +303,9 @@ class TestVirtualMachine(IntegrationTestCase):
 		vm = _new_vm()
 		vm.db_set("status", "Stopped")
 		vm.reload()
-		with patch.object(module, "run_task", return_value=fake_task(stdout='ATLAS_RESULT={"size_bytes": 1}')):
+		with patch.object(
+			module, "run_task", return_value=fake_task(stdout='ATLAS_RESULT={"size_bytes": 1}')
+		):
 			snapshot_name = vm.snapshot("doomed")
 		self.assertTrue(frappe.db.exists("Virtual Machine Snapshot", snapshot_name))
 
@@ -305,13 +314,14 @@ class TestVirtualMachine(IntegrationTestCase):
 		# the thin pool, OUTSIDE the VM directory terminate-vm.py rm -rf'd, so they
 		# must be removed explicitly (no Terminated short-circuit). on_trash uses
 		# the snapshot module's run_task, so patch that one too.
-		from atlas.atlas.doctype.virtual_machine_snapshot import (
-			virtual_machine_snapshot as snapshot_module,
-		)
+		from atlas.atlas.doctype.virtual_machine_snapshot import virtual_machine_snapshot as snapshot_module
 
-		with patch.object(module, "run_task", return_value=fake_task(name="task-term")), patch.object(
-			snapshot_module, "run_task", return_value=fake_task(name="task-snap-del")
-		) as mocked_snapshot:
+		with (
+			patch.object(module, "run_task", return_value=fake_task(name="task-term")),
+			patch.object(
+				snapshot_module, "run_task", return_value=fake_task(name="task-snap-del")
+			) as mocked_snapshot,
+		):
 			vm.terminate()
 		self.assertFalse(frappe.db.exists("Virtual Machine Snapshot", snapshot_name))
 		# The snapshot LV was removed via the per-snapshot delete script.
@@ -320,9 +330,7 @@ class TestVirtualMachine(IntegrationTestCase):
 	def test_parse_size_bytes(self) -> None:
 		from atlas.atlas.task_results import parse_result
 
-		self.assertEqual(
-			parse_result('+ cmd\nATLAS_RESULT={"size_bytes": 512}\ndone')["size_bytes"], 512
-		)
+		self.assertEqual(parse_result('+ cmd\nATLAS_RESULT={"size_bytes": 512}\ndone')["size_bytes"], 512)
 
 	def test_title_is_immutable(self) -> None:
 		vm = _new_vm()

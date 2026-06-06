@@ -85,11 +85,13 @@ class VirtualMachineImage(Document):
 				as_dict=True,
 			)
 			row = last[0] if last else None
-			results.append({
-				"server": server.name,
-				"synced_at": row["modified"].isoformat() if row else None,
-				"task": row["name"] if row else None,
-			})
+			results.append(
+				{
+					"server": server.name,
+					"synced_at": row["modified"].isoformat() if row else None,
+					"task": row["name"] if row else None,
+				}
+			)
 		return results
 
 	@frappe.whitelist()
@@ -99,9 +101,7 @@ class VirtualMachineImage(Document):
 		if isinstance(servers, str):
 			servers = frappe.parse_json(servers) or None
 		if not servers:
-			servers = frappe.get_all(
-				"Server", filters={"status": "Active"}, pluck="name"
-			)
+			servers = frappe.get_all("Server", filters={"status": "Active"}, pluck="name")
 		return [self.sync_to_server(server) for server in servers]
 
 	@frappe.whitelist()
@@ -118,13 +118,15 @@ class VirtualMachineImage(Document):
 			"DEFAULT_DISK_GB": str(self.default_disk_gigabytes),
 			"GUEST_NETWORK_UNIT": "/tmp/atlas/atlas-network.service",
 		}
-		task = frappe.get_doc({
-			"doctype": "Task",
-			"server": server_name,
-			"script": "sync-image.py",
-			"status": "Pending",
-			"triggered_by": frappe.session.user if frappe.session else "Administrator",
-		})
+		task = frappe.get_doc(
+			{
+				"doctype": "Task",
+				"server": server_name,
+				"script": "sync-image.py",
+				"status": "Pending",
+				"triggered_by": frappe.session.user if frappe.session else "Administrator",
+			}
+		)
 		task.variables_dict = variables
 		task.insert(ignore_permissions=True)
 		frappe.db.commit()

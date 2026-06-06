@@ -18,5 +18,9 @@ def execute() -> None:
 	for row in rows:
 		subject = SCRIPT_LABELS.get(row.script, row.script or "Task")
 		frappe.db.set_value(
-			"Task", row.name, "subject", subject, update_modified=False,
+			"Task",
+			row.name,
+			"subject",
+			subject,
+			update_modified=False,
 		)

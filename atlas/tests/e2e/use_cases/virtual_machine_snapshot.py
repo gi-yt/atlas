@@ -37,16 +37,18 @@ def run_against_shared(reuse: bool = True, keep: bool = True) -> None:
 		image_doc = ensure_image_on_server(server.name)
 		public_key = ephemeral_public_key()
 
-		vm = frappe.get_doc({
-			"doctype": "Virtual Machine",
-			"title": "vm-snapshot",
-			"server": server.name,
-			"image": image_doc.name,
-			"vcpus": 1,
-			"memory_megabytes": 512,
-			"disk_gigabytes": 4,
-			"ssh_public_key": public_key,
-		}).insert(ignore_permissions=True)
+		vm = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine",
+				"title": "vm-snapshot",
+				"server": server.name,
+				"image": image_doc.name,
+				"vcpus": 1,
+				"memory_megabytes": 512,
+				"disk_gigabytes": 4,
+				"ssh_public_key": public_key,
+			}
+		).insert(ignore_permissions=True)
 		frappe.db.commit()
 
 		wait_for_vm_running(vm.name, timeout_seconds=120)
@@ -68,9 +70,9 @@ def run_against_shared(reuse: bool = True, keep: bool = True) -> None:
 		for path in snapshot_paths:
 			if path:
 				assert_probe(server.name, "phase-snapshot-gone.sh", SNAPSHOT_ROOTFS_PATH=path)
-		assert not frappe.get_all(
-			"Virtual Machine Snapshot", filters={"virtual_machine": vm.name}
-		), "snapshot rows survived terminate"
+		assert not frappe.get_all("Virtual Machine Snapshot", filters={"virtual_machine": vm.name}), (
+			"snapshot rows survived terminate"
+		)
 
 		clone.reload()
 		clone.terminate()
@@ -93,9 +95,7 @@ def _check_snapshot_and_restore(server_name: str, vm) -> None:
 	snapshot = frappe.get_doc("Virtual Machine Snapshot", snapshot_name)
 	assert snapshot.status == "Available", snapshot.status
 	assert snapshot.size_bytes > 0, snapshot.size_bytes
-	assert_probe(
-		server_name, "phase-snapshot-present.sh", SNAPSHOT_ROOTFS_PATH=snapshot.rootfs_path
-	)
+	assert_probe(server_name, "phase-snapshot-present.sh", SNAPSHOT_ROOTFS_PATH=snapshot.rootfs_path)
 
 	# Restore the snapshot back onto the same VM (rollback in place).
 	snapshot.restore_to_vm()
@@ -179,9 +179,7 @@ def _check_clone(server_name: str, vm):
 	snapshot_name = vm.snapshot("vm-snapshot for clone")
 	snapshot = frappe.get_doc("Virtual Machine Snapshot", snapshot_name)
 
-	clone_name = snapshot.clone_to_new_vm(
-		title="vm-snapshot clone", ssh_public_key=ephemeral_public_key()
-	)
+	clone_name = snapshot.clone_to_new_vm(title="vm-snapshot clone", ssh_public_key=ephemeral_public_key())
 	frappe.db.commit()
 	clone = frappe.get_doc("Virtual Machine", clone_name)
 	assert clone.name != vm.name
