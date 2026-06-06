@@ -110,6 +110,7 @@ keep it the source of truth.
 9. [Roadmap and deferred decisions](./09-roadmap.md)
 10. [Desk UI (operator)](./10-desk-ui.md)
 11. [User UI — the dashboard SPA](./11-user-ui.md)
+12. [The reverse proxy](./12-proxy.md)
 
 ## First run on a fresh site
 

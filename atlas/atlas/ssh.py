@@ -6,6 +6,7 @@ import path `from atlas.atlas.ssh import ...` stays stable.
 """
 
 from atlas.atlas._ssh.runner import (
+	connection_for_guest,
 	connection_for_server,
 	execute_task,
 	run_task,
@@ -15,6 +16,8 @@ from atlas.atlas._ssh.transport import (
 	REMOTE_STAGING_DIRECTORY,
 	SSH_OPTIONS,
 	Connection,
+	run_ssh,
+	ssh_key_file,
 	upload_files,
 	wait_for_ssh,
 )
@@ -24,9 +27,12 @@ __all__ = [
 	"REMOTE_STAGING_DIRECTORY",
 	"SSH_OPTIONS",
 	"Connection",
+	"connection_for_guest",
 	"connection_for_server",
 	"execute_task",
+	"run_ssh",
 	"run_task",
+	"ssh_key_file",
 	"upload_files",
 	"wait_for_ssh",
 ]

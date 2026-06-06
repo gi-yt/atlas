@@ -87,6 +87,31 @@ def connection_for_server(server) -> Connection:
 	return Connection(host=server.ipv4_address, ssh_private_key=get_ssh_key_from_disk(path))
 
 
+def connection_for_guest(virtual_machine) -> Connection:
+	"""Build the SSH Connection from a Virtual Machine doc — the second SSH
+	target type (the guest, not the host).
+
+	The host path SSHes a Server as root over its public v4 to run staged Tasks.
+	This path SSHes a *guest* directly over its public IPv6 `/128`, as root, with
+	the SAME Atlas key — the public half is already in the guest's
+	`root/.ssh/authorized_keys`, injected by `rootfs.inject_identity()` at
+	provision, so no new image plumbing is needed. The control plane (the proxy
+	map sync, cert push) uses this to reach a guest's unix-socket admin API over
+	SSH. The admin socket's file permissions remain the gate inside the guest;
+	SSH-to-the-guest is the only way to reach it.
+
+	A guest is addressed by its public `/128`; sites and the controller are
+	generally on different hosts, so there is no host-local shortcut (spec/06:
+	no private fabric)."""
+	import atlas
+	from atlas.atlas.secrets import get_ssh_key_from_disk
+
+	if not virtual_machine.ipv6_address:
+		frappe.throw(f"Virtual Machine {virtual_machine.name} has no ipv6_address; cannot SSH to the guest")
+	path = atlas.get_ssh_private_key_path()
+	return Connection(host=virtual_machine.ipv6_address, ssh_private_key=get_ssh_key_from_disk(path))
+
+
 def _execute_into(
 	task: "Task",
 	connection: Connection,

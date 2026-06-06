@@ -34,6 +34,10 @@
   "column_break_networking",
   "mac_address",
   "tap_device",
+  "section_break_proxy",
+  "is_proxy",
+  "column_break_proxy",
+  "region",
   "section_break_activity",
   "last_started",
   "column_break_activity",
@@ -220,6 +224,31 @@
    "fieldtype": "Data",
    "label": "TAP Device",
    "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_proxy",
+   "fieldtype": "Section Break",
+   "label": "Proxy"
+  },
+  {
+   "default": "0",
+   "description": "Mark this VM as a reverse-proxy node. Proxy VMs front the region's subdomains (the Subdomain doctype) and are reconciled by the proxy control plane. An ordinary operator-owned VM with a proxy image and an attached public IPv4.",
+   "fieldname": "is_proxy",
+   "fieldtype": "Check",
+   "label": "Is Proxy"
+  },
+  {
+   "fieldname": "column_break_proxy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "is_proxy",
+   "description": "The region whose subdomains this proxy serves. Every proxy VM in a region serves the full set of active subdomains for that region.",
+   "fieldname": "region",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Region"
   },
   {
    "collapsible": 1,

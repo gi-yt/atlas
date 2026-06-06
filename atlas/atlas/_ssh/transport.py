@@ -77,7 +77,12 @@ def run_ssh(
 	key_path: str,
 	remote_command: str,
 	timeout_seconds: int,
+	stdin: str | None = None,
 ) -> tuple[str, str, int]:
+	"""Run one remote command over SSH. `stdin`, if given, is piped to the remote
+	command's stdin — the path the proxy control plane uses to stream a map body
+	to a guest's `curl --unix-socket … --data-binary @-` (design §7.3), without
+	first staging a file on the guest."""
 	args = [
 		"ssh",
 		"-i",
@@ -88,6 +93,7 @@ def run_ssh(
 	]
 	result = subprocess.run(
 		args,
+		input=stdin,
 		capture_output=True,
 		text=True,
 		timeout=timeout_seconds,

@@ -1,6 +1,6 @@
 # DocTypes
 
-Twelve DocTypes. Module `Atlas`. None are submittable. All track changes.
+Thirteen DocTypes. Module `Atlas`. None are submittable. All track changes.
 Read permission for `System Manager`.
 
 1. [Atlas Settings](#atlas-settings) — vendor-agnostic Atlas config (Single).
@@ -14,7 +14,8 @@ Read permission for `System Manager`.
 9. [Virtual Machine Image](#virtual-machine-image)
 10. [Virtual Machine Snapshot](#virtual-machine-snapshot) — a disk snapshot of a VM.
 11. [Reserved IP](#reserved-ip) — a public IPv4 allocated to a Server, optionally attached to a VM.
-12. [Task](#task)
+12. [Subdomain](#subdomain) — a `<subdomain>.<region>.frappe.dev` routing entry pointing at a site VM.
+13. [Task](#task)
 
 The first six form the **Provider abstraction**: a single ABC in
 `atlas/atlas/providers/base.py` with one implementation per
@@ -417,6 +418,8 @@ deletion.
 | `public_ipv4`      | Data                          |      | Y         |         | The attached public IPv4, denormalized from the `Reserved IP` row whose `virtual_machine` points here. Empty until one is attached. Maintained by `Reserved IP.attach()` / `detach()` (and cleared on terminate); never hand-edited. See [Reserved IP](#reserved-ip) and [06-networking.md](./06-networking.md). |
 | `mac_address`      | Data                          |      | Y         |         | Derived from `name`. Set in `before_validate`.                   |
 | `tap_device`       | Data                          |      | Y         |         | Derived from `name`. Set in `before_validate`.                   |
+| `is_proxy`         | Check                         |      |           | 0       | Marks this VM as a reverse-proxy node. A proxy VM fronts a region's [Subdomain](#subdomain)s and is reconciled by the proxy control plane. It is an *ordinary* operator-owned VM (no infra tier) running the proxy image with an attached `public_ipv4`. See [12-proxy.md](./12-proxy.md). |
+| `region`           | Data                          |      |           |         | The region whose subdomains this proxy serves (`depends_on: is_proxy`). Every proxy VM in a region serves the full set of active subdomains for that region. |
 | `last_started`     | Datetime                      |      | Y         |         |                                                                  |
 | `last_stopped`     | Datetime                      |      | Y         |         |                                                                  |
 
@@ -467,6 +470,9 @@ ipv6_address
 public_ipv4
 | mac_address
   tap_device
+── Proxy ── (collapsible)
+is_proxy
+| region
 ── Activity ── (collapsible)
 last_started
 | last_stopped
@@ -781,6 +787,69 @@ On the **Server** form (the pool entry points, `Actions ▾`, while `Active`):
   IPs bound to this droplet; reports the count. See
   [06-networking.md](./06-networking.md#ipv4-ingress-reserved-ip). The Server's
   Connections panel surfaces the pool under **Networking → Reserved IP**.
+
+---
+
+## Subdomain
+
+One routing entry for the reverse proxy: a `<subdomain>.<region>.frappe.dev`
+name that points at exactly one site VM. The set of **active** Subdomain rows for
+a region is the **desired map** every proxy VM in that region serves — the proxy
+control plane (`atlas/atlas/proxy.py`) reconciles each proxy guest's live
+`lua_shared_dict` to it over SSH. See
+[12-proxy.md](./12-proxy.md) for the proxy and the reconcile loop.
+
+Standalone and linked (the `Reserved IP` / `Virtual Machine Snapshot` idiom), not
+a child grid on a proxy doctype: every proxy VM holds the **whole** regional map,
+so a child-of-proxy model would fight that — the map is owned per **region**, not
+per proxy. The row is independently queryable ("which VM does `acme` point at?",
+"what's the map for `blr1`?").
+
+### Fields
+
+| Field             | Type                   | Reqd | Read-only | Default | Notes                                                            |
+| ----------------- | ---------------------- | ---- | --------- | ------- | ---------------------------------------------------------------- |
+| `name`            | = `subdomain` (autoname `field:subdomain`) | Y | Y |    | Primary key is the subdomain label itself. |
+| `subdomain`       | Data                   | Y    |           |         | The bare label, `unique` fleet-wide. Reachable at `<subdomain>.<region>.frappe.dev`. The proxy's routing key. `title_field`. Immutable after insert. |
+| `region`          | Data                   | Y    |           |         | Which regional proxy fleet fronts it. Every proxy VM in the region serves all active subdomains for the region. Immutable after insert. |
+| `active`          | Check                  |      |           | 1       | Inactive rows are excluded from the served map (kept for history). Toggle off to take a site off the front door without deleting the row. |
+| `virtual_machine` | Link → Virtual Machine | Y    |           |         | The site VM this subdomain points at. The proxy dials its public IPv6 `:80` (plaintext) over the v6 internet. Immutable after insert. |
+| `address`         | Data                   | Y    | Y         |         | The target VM's public IPv6 `/128`, denormalized so the desired-map query is join-free. Kept in sync with the VM's `ipv6_address` on save. The literal the proxy dials. |
+
+Immutability: `subdomain`, `virtual_machine`, and `region` lock after insert —
+repointing a live subdomain at a different VM is a delete-and-recreate, so the
+proxy map change is explicit, never a silent in-place edit. The one mutable field
+is `active` (toggles the mapping in/out of the served map). `address` is always
+derived from the linked VM, never hand-edited.
+
+### Controller methods
+
+- `validate()` — denormalizes `address` from the target VM's `ipv6_address`
+  (throws if the VM has none — an unaddressable target can't be a route) and
+  enforces the immutability above.
+- `map_for_region(region)` *(module function)* — returns `{subdomain: address}`
+  for every **active** subdomain in the region. This is the full map every proxy
+  VM in the region serves; the reconcile loop serializes it canonically
+  (`json.dumps(sort_keys=True, indent=2)` + newline, byte-identical to the
+  guest's `persist.lua`) and byte-compares it against each proxy guest's live
+  `/map`. See [12-proxy.md](./12-proxy.md).
+
+### Form layout
+
+```
+── Overview ──
+subdomain
+region
+| active
+── Target ──
+virtual_machine
+| address
+```
+
+### List view
+
+- Columns: `subdomain`, `region`, `active`, `virtual_machine`, `address`.
+- Standard filters: `region`, `active`, `virtual_machine`.
 
 ---
 

@@ -26,8 +26,8 @@ Concretely, a Task is a row in `Task` with:
 ## How it runs
 
 The public SSH surface lives in [`atlas/atlas/ssh.py`](../atlas/atlas/ssh.py)
-(a re-export shim over `atlas/atlas/_ssh/{runner,transport}.py`). Five
-symbols, used by every controller and test:
+(a re-export shim over `atlas/atlas/_ssh/{runner,transport}.py`). The symbols
+used by every controller and test:
 
 ```python
 def run_task(*, script, variables, server=None, connection=None,
@@ -55,6 +55,15 @@ def connection_for_server(server) -> Connection:
     time. Only guard is `Server.ipv4_address` — `Server.provider` is not
     read by this function (the SSH key is vendor-agnostic)."""
 
+def connection_for_guest(virtual_machine) -> Connection:
+    """The SECOND SSH target type: a guest, not a host. Builds a Connection
+    to a VM's public IPv6 `/128`, as `root`, with the SAME Atlas key — its
+    public half is already in the guest's `root/.ssh/authorized_keys`
+    (injected by the rootfs at provision), so no new image plumbing. Used by
+    the proxy control plane (`atlas/atlas/proxy.py`) to reach a proxy guest's
+    unix-socket admin API over SSH (map sync, cert push). The admin socket's
+    file permissions remain the gate inside the guest. See [12-proxy.md]."""
+
 def upload_files(connection, files: list[tuple[str, str]]) -> None:
     """scp a list of (local, remote) pairs. Not a Task. Used by
     `Server.bootstrap()` to lay down helpers + the systemd unit before
@@ -79,7 +88,11 @@ def wait_for_ssh(connection, timeout_seconds: int = 300) -> None:
 
 ### Connection details
 
-- User: `root`.
+- User: `root` — for both target types. The host path SSHes a Server by its
+  public v4; the guest path (`connection_for_guest`) SSHes a VM by its public
+  v6 `/128`, also as `root`, with the same key (the guest's
+  `root/.ssh/authorized_keys` already carries it). `Connection.user` is the
+  field that carries this, defaulting to `root`.
 - Auth: SSH private key read from the path on
   `Atlas Settings.ssh_private_key_path` (a `0600` PEM on the Atlas host,
   see [07-filesystem-layout.md § SSH keys](./07-filesystem-layout.md)).
