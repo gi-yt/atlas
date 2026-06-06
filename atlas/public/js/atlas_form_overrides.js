@@ -183,6 +183,7 @@ for (const doctype of [
 	"Virtual Machine",
 	"Virtual Machine Image",
 	"Virtual Machine Snapshot",
+	"Reserved IP",
 	"Task",
 ]) {
 	frappe.ui.form.on(doctype, {

@@ -75,3 +75,17 @@ class TestSelfManagedProvider(IntegrationTestCase):
 	def test_destroy_is_noop(self) -> None:
 		# No exception, no return.
 		self.assertIsNone(SelfManagedProvider().destroy("anything"))
+
+	def test_allocate_reserved_ip_throws(self) -> None:
+		# Self-Managed has no reserved-IP API; the operator supplies the address.
+		with self.assertRaises(frappe.ValidationError):
+			SelfManagedProvider().allocate_reserved_ip()
+
+	def test_reserved_ip_assign_unassign_release_are_noops(self) -> None:
+		provider = SelfManagedProvider()
+		self.assertIsNone(provider.assign_reserved_ip("203.0.113.5", "host-1"))
+		self.assertIsNone(provider.unassign_reserved_ip("203.0.113.5"))
+		self.assertIsNone(provider.release_reserved_ip("203.0.113.5"))
+
+	def test_list_reserved_ips_is_empty(self) -> None:
+		self.assertEqual(SelfManagedProvider().list_reserved_ips(), ())

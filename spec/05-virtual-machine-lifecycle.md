@@ -327,7 +327,13 @@ values are persisted on the row through a guarded path (see
 
 ## Terminate
 
-Runs [`terminate-vm.py`](../scripts/terminate-vm.py), which:
+`terminate()` first refuses if `termination_protection` is set — a hard throw
+("Disable termination protection before terminating this VM"), not a
+confirmation. The operator unchecks the field, saves, and clicks Terminate
+again. See [Stop / Terminate protection](#stop--terminate-protection).
+
+Once past the gate it runs [`terminate-vm.py`](../scripts/terminate-vm.py),
+which:
 
 1. `systemctl disable --now firecracker-vm@<uuid>.service` (no-op if already
    stopped).
@@ -341,7 +347,9 @@ Runs [`terminate-vm.py`](../scripts/terminate-vm.py), which:
    here (their names aren't derivable from the VM UUID) — they go via the
    per-snapshot delete path below.
 
-Then Python sets `status = Terminated` and deletes the VM's
+Then Python sets `status = Terminated`, **detaches the VM's `Reserved IP`** (if
+any) back to its Server's pool — clearing the VM's `public_ipv4` and leaving the
+`Reserved IP` row `Allocated` and re-attachable — and deletes the VM's
 `Virtual Machine Snapshot` rows; each row's `on_trash` `lvremove`s its snapshot
 LV (those live in the pool, outside the VM directory, so step 3's `rm -rf` did
 not touch them). **The UUID does not change.** The Task row that did the

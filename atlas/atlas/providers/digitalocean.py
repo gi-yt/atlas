@@ -20,6 +20,7 @@ from atlas.atlas.digitalocean import (
 	DigitalOceanError,
 	public_ipv4,
 	public_ipv6,
+	reserved_ip_droplet_id,
 )
 from atlas.atlas.networking import carve_virtual_machine_range
 from atlas.atlas.providers import register
@@ -30,6 +31,7 @@ from atlas.atlas.providers.base import (
 	Provider,
 	ProvisionRequest,
 	ProvisionResult,
+	ReservedIp,
 	ServerNetworking,
 	SizeInfo,
 )
@@ -149,6 +151,38 @@ class DigitalOceanProvider(Provider):
 
 	def destroy(self, provider_resource_id: str) -> None:
 		self.client.delete_droplet(int(provider_resource_id))
+
+	# --- Reserved IPs ----------------------------------------------------
+	# On DigitalOcean a reserved IP is keyed by its own address, so the
+	# vendor handle (`provider_resource_id`) IS the IP string. The droplet
+	# handle is the droplet id as a string (matching `Server.provider_resource_id`).
+
+	def allocate_reserved_ip(self) -> ReservedIp:
+		reserved = self.client.create_reserved_ip(self.region)
+		return _reserved_ip_from_payload(reserved)
+
+	def assign_reserved_ip(self, provider_resource_id: str, droplet_resource_id: str) -> None:
+		self.client.assign_reserved_ip(provider_resource_id, int(droplet_resource_id))
+
+	def unassign_reserved_ip(self, provider_resource_id: str) -> None:
+		self.client.unassign_reserved_ip(provider_resource_id)
+
+	def list_reserved_ips(self) -> tuple[ReservedIp, ...]:
+		return tuple(_reserved_ip_from_payload(r) for r in self.client.list_reserved_ips())
+
+	def release_reserved_ip(self, provider_resource_id: str) -> None:
+		self.client.delete_reserved_ip(provider_resource_id)
+
+
+def _reserved_ip_from_payload(reserved: dict) -> ReservedIp:
+	ip = reserved["ip"]
+	droplet_id = reserved_ip_droplet_id(reserved)
+	return ReservedIp(
+		ip_address=ip,
+		provider_resource_id=ip,
+		droplet_resource_id=str(droplet_id) if droplet_id is not None else None,
+		provider_metadata=reserved,
+	)
 
 
 def _strip_prefix(value: str, provider_type: str) -> str:

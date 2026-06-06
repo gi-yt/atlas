@@ -1,6 +1,6 @@
 # DocTypes
 
-Ten DocTypes. Module `Atlas`. None are submittable. All track changes.
+Twelve DocTypes. Module `Atlas`. None are submittable. All track changes.
 Read permission for `System Manager`.
 
 1. [Atlas Settings](#atlas-settings) — vendor-agnostic Atlas config (Single).
@@ -13,7 +13,8 @@ Read permission for `System Manager`.
 8. [Virtual Machine](#virtual-machine)
 9. [Virtual Machine Image](#virtual-machine-image)
 10. [Virtual Machine Snapshot](#virtual-machine-snapshot) — a disk snapshot of a VM.
-11. [Task](#task)
+11. [Reserved IP](#reserved-ip) — a public IPv4 allocated to a Server, optionally attached to a VM.
+12. [Task](#task)
 
 The first six form the **Provider abstraction**: a single ABC in
 `atlas/atlas/providers/base.py` with one implementation per
@@ -375,10 +376,18 @@ provider_metadata
   [10-desk-ui.md](./10-desk-ui.md).
 
 Frappe's standard Connections dashboard renders below the form, linking
-Virtual Machines and Tasks via their `server` field (configured in
-`server_dashboard.py`). The desk's bespoke "Recent Tasks" quick_list
-has been removed — Operations on the Connections dashboard already
+Virtual Machines and Tasks (under **Operations**) and the Server's
+[Reserved IP](#reserved-ip) pool (under **Networking**) via their `server`
+field (configured in `server_dashboard.py`). The desk's bespoke "Recent Tasks"
+quick_list has been removed — Operations on the Connections dashboard already
 exposes the same information.
+
+A Server's **Reserved IP pool** is the set of `Reserved IP` rows whose `server`
+is this host — public IPv4 addresses bound to the host (DigitalOcean reserved
+IPs), each either unattached (`Allocated`) or attached to one of this Server's
+VMs (`Attached`). The host's own SSH endpoint is the separate `ipv4_address`
+field above; a Reserved IP is an *additional*, attachable address, not the
+host's primary v4.
 
 ---
 
@@ -405,6 +414,7 @@ deletion.
 | `termination_protection` | Check                   |      |           | 0       | When set, `terminate()` refuses to terminate the VM. Off by default. Unchecked + saved before terminate. Independent of `stop_protection` (terminate does not go through `stop()`). |
 | `clone_source_rootfs` | Data                       |      | Y         |         | Internal, hidden. On-host snapshot rootfs to seed this VM's disk from (clone). Empty for a normal image-backed VM. `set_only_once`, `no_copy`. |
 | `ipv6_address`     | Data                          |      | Y         |         | From the server's /124. Set in `before_insert`.                  |
+| `public_ipv4`      | Data                          |      | Y         |         | The attached public IPv4, denormalized from the `Reserved IP` row whose `virtual_machine` points here. Empty until one is attached. Maintained by `Reserved IP.attach()` / `detach()` (and cleared on terminate); never hand-edited. See [Reserved IP](#reserved-ip) and [06-networking.md](./06-networking.md). |
 | `mac_address`      | Data                          |      | Y         |         | Derived from `name`. Set in `before_validate`.                   |
 | `tap_device`       | Data                          |      | Y         |         | Derived from `name`. Set in `before_validate`.                   |
 | `last_started`     | Datetime                      |      | Y         |         |                                                                  |
@@ -454,6 +464,7 @@ ssh_public_key
   termination_protection
 ── Networking ── (collapsible)
 ipv6_address
+public_ipv4
 | mac_address
   tap_device
 ── Activity ── (collapsible)
@@ -491,8 +502,10 @@ Tiering is keyed off `status` — see [10-desk-ui.md § Virtual Machine](./10-de
 - **Terminate** (under `Actions ▾`, danger; available until
   `Terminated`) — runs
   [`scripts/terminate-vm.py`](../scripts/terminate-vm.py), sets
-  `status = Terminated` and deletes the VM's snapshot rows. The UUID does
-  not change. The desk requires the operator to type the VM's `title` into a
+  `status = Terminated`, detaches the VM's `Reserved IP` (if any) back to the
+  Server pool, and deletes the VM's snapshot rows. The UUID does not change.
+  Refused while `termination_protection` is set (the controller throws). The
+  desk requires the operator to type the VM's `title` into a
   `confirm_destructive` dialog before the red button enables; the dialog body
   is empty — typing the title is the entire deterrent.
 
@@ -649,6 +662,118 @@ read-only after creation, and the field lock is enforced by both
 No primary action, no Sync Status panel, no Sync-to-Server picker on
 the form. Initial sync is automatic on save; ad-hoc per-server sync
 goes through **Sync Image** on the target Server's `Actions ▾` menu.
+
+---
+
+## Reserved IP
+
+A public IPv4 address that belongs to a `Server` and may be attached to one of
+that Server's VMs. The address is the unit of allocation: it is **allocated to
+the Server** (the vendor binds a reserved IP to the droplet — see
+[06-networking.md](./06-networking.md)) and exists whether or not a VM is using
+it. Attaching it to a VM is a separate, reversible step.
+
+This is what makes a VM reachable on IPv4. Atlas VMs are otherwise
+inbound-IPv6-only (`spec/06`: one public `/128`, IPv4 egress-only via host
+NAT44). A Reserved IP, attached to a VM and 1:1-NATed by the host to the guest's
+private `/30`, gives that one VM inbound IPv4. Today this is used by the reverse
+proxy (an operator-owned VM); the same mechanism generalizes to tenant VMs
+later.
+
+A Server owns a **pool** of Reserved IPs: the set of `Reserved IP` rows whose
+`server` points at it. There is no child-grid embedding — like
+`Virtual Machine Snapshot`, a Reserved IP is a standalone DocType linked to its
+Server (and surfaced in the Server's Connections dashboard), so it has its own
+allocate/attach/detach/release lifecycle and is independently queryable
+("which VM has this IP?", "is there a free IP on this Server?").
+
+### Fields
+
+| Field                  | Type                  | Reqd | Read-only | Default   | Notes                                                            |
+| ---------------------- | --------------------- | ---- | --------- | --------- | ---------------------------------------------------------------- |
+| `name`                 | UUID (autoname `hash`) | Y   | Y         |           | Primary key. |
+| `ip_address`           | Data                  | Y    | Y         |           | The public IPv4. `unique`. `title_field`. Locked once written. |
+| `server`               | Link → Server         | Y    | Y         |           | The host this IP is allocated to. The IP belongs to the Server even with no VM attached. Locked once written. |
+| `status`               | Select                | Y    | Y         | Allocated | `Allocated` (on the Server, no VM) or `Attached` (bound to a VM). Derived in `validate()` from `virtual_machine` — never set by hand. |
+| `virtual_machine`      | Link → Virtual Machine |     | Y         |           | The attached VM, or empty when unattached. Only a VM on the **same Server** may be attached. Maintained by `attach()` / `detach()`. |
+| `provider_resource_id` | Data                  |      | Y         |           | Vendor's handle for the reserved IP (DigitalOcean reserved-IP id). Empty for Self-Managed. Locked once written. |
+
+Immutability follows the `Server` idiom: `ip_address`, `server`, and
+`provider_resource_id` lock once they carry a value (`None → value` allowed for
+initial population). `status` is always derived from `virtual_machine`, so it is
+never an independent input.
+
+### Controller methods
+
+The pool's vendor side (reserve / discover / release) goes through the provider
+abstraction (`allocate_reserved_ip` / `list_reserved_ips` / `release_reserved_ip`,
+see [06-networking.md](./06-networking.md#ipv4-ingress-reserved-ip)); the
+attach/detach pair owns only the Frappe invariant.
+
+- `allocate(server)` *(module function)* — reserve a fresh public IPv4 at the
+  vendor (in its single region, unassigned) and write an `Allocated` `Reserved
+  IP` row for `server`. Returns the new row name. Binding to the droplet + the
+  host 1:1-NAT happen on `attach()` (a follow-up Task), not here.
+- `discover(server)` *(module function)* — list the vendor's reserved IPs and
+  import any bound to `server`'s droplet that Atlas doesn't yet model, creating
+  an `Allocated` row per new one (existing ones skipped). A vendor → Frappe
+  reconcile, mapped by droplet id; returns the names created. Throws if the
+  Server has no `provider_resource_id`.
+- `attach(virtual_machine)` — bind this `Allocated` IP to a VM on the same
+  Server. Throws if the IP is already attached, if the VM is on a different
+  Server, or if the VM already has a `public_ipv4`. Sets `virtual_machine`
+  (→ `status = Attached`) and denormalizes `ip_address` onto the VM's
+  `public_ipv4`. The host-side wiring (the DO reserved-IP attach + the 1:1
+  nftables NAT to the guest `/30`) is a follow-up Task; this method owns the
+  Frappe-side invariant — **one IP, one VM, same Server**.
+- `detach()` — release the IP from its VM back to the Server pool (→ `status =
+  Allocated`) and clear the VM's `public_ipv4`. Guards a missing VM row (a
+  terminated VM whose record was deleted). Called automatically by
+  `Virtual Machine.terminate()` so a terminated VM returns its address to the
+  pool.
+- `release()` — destroy the vendor reserved IP and delete this row, returning
+  the address to the vendor pool. Refuses while the IP is attached. **Explicit,
+  like `Server.archive()`** — destroying the vendor resource is never a side
+  effect of deleting the Frappe row (`on_trash` only blocks deleting an attached
+  IP; it does not touch the vendor).
+
+### Form layout
+
+```
+── Overview ──
+ip_address
+server
+| status
+  virtual_machine
+── Provider ──
+provider_resource_id
+```
+
+### List view
+
+- Columns: `ip_address`, `server`, `status`, `virtual_machine`.
+- Standard filters: `server`, `status`, `virtual_machine`.
+
+### Buttons
+
+On the **Reserved IP** form (status-gated):
+
+- **Attach** (primary, shown while `status = Allocated`) — opens a one-field
+  dialog (Link → Virtual Machine, filtered to the IP's Server and to VMs without
+  a `public_ipv4`) and calls `attach(virtual_machine)`.
+- **Release** (under `Actions ▾`, danger, shown while `status = Allocated`) —
+  type-to-confirm; calls `release()` to destroy the vendor IP and delete the row.
+- **Detach** (under `Actions ▾`, danger, shown while `status = Attached`) —
+  calls `detach()`.
+
+On the **Server** form (the pool entry points, `Actions ▾`, while `Active`):
+
+- **Allocate Reserved IP** — cost-confirm; calls `allocate(server)` to reserve a
+  new vendor IP and routes to the new row.
+- **Discover Reserved IPs** — calls `discover(server)` to import vendor reserved
+  IPs bound to this droplet; reports the count. See
+  [06-networking.md](./06-networking.md#ipv4-ingress-reserved-ip). The Server's
+  Connections panel surfaces the pool under **Networking → Reserved IP**.
 
 ---
 

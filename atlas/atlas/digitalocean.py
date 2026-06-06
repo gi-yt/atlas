@@ -2,11 +2,16 @@
 
 Only the endpoints Atlas needs:
 
-- GET  /account                  — credential check
-- POST /droplets                 — create
-- GET  /droplets/{id}            — poll
-- DELETE /droplets/{id}          — delete
-- GET  /droplets?tag_name=...    — list by tag, used by the e2e pre-sweep
+- GET  /account                       — credential check
+- POST /droplets                      — create
+- GET  /droplets/{id}                 — poll
+- DELETE /droplets/{id}               — delete
+- GET  /droplets?tag_name=...         — list by tag, used by the e2e pre-sweep
+- POST /reserved_ips                  — allocate a reserved IP (to a region)
+- GET  /reserved_ips                  — list reserved IPs (discover/import)
+- GET  /reserved_ips/{ip}             — read one
+- POST /reserved_ips/{ip}/actions     — assign/unassign to a droplet
+- DELETE /reserved_ips/{ip}           — release
 
 No retry on transient 5xx in this iteration. One shot, fail loud. Operator
 retries.
@@ -84,6 +89,41 @@ class DigitalOceanClient:
 	def list_droplets_by_tag(self, tag: str) -> list[dict]:
 		return self._request("GET", f"/droplets?tag_name={tag}").get("droplets", [])
 
+	def create_reserved_ip(self, region: str) -> dict:
+		"""Allocate a reserved IP to a region (not yet assigned to a droplet).
+
+		DO also accepts `{"droplet_id": N}` to allocate-and-assign in one call,
+		but we keep the two steps separate (allocate to the Server's region,
+		assign on attach) so the Reserved IP row exists before any VM binds it."""
+		return self._request("POST", "/reserved_ips", json={"region": region})["reserved_ip"]
+
+	def get_reserved_ip(self, ip: str) -> dict:
+		return self._request("GET", f"/reserved_ips/{ip}")["reserved_ip"]
+
+	def list_reserved_ips(self) -> list[dict]:
+		"""List the account's reserved IPs (first page). The account holds a
+		handful, so pagination is not worth the extra round-trips here."""
+		return self._request("GET", "/reserved_ips").get("reserved_ips", [])
+
+	def assign_reserved_ip(self, ip: str, droplet_id: int) -> dict:
+		"""Bind the reserved IP to a droplet. The droplet gets the address as an
+		anchor IP; the host then 1:1-NATs it to the guest (a later Task)."""
+		return self._request(
+			"POST", f"/reserved_ips/{ip}/actions",
+			json={"type": "assign", "droplet_id": droplet_id},
+		)["action"]
+
+	def unassign_reserved_ip(self, ip: str) -> dict:
+		"""Release the reserved IP from whatever droplet holds it, leaving it
+		allocated to the account/region for re-assignment."""
+		return self._request(
+			"POST", f"/reserved_ips/{ip}/actions",
+			json={"type": "unassign"},
+		)["action"]
+
+	def delete_reserved_ip(self, ip: str) -> None:
+		self._request("DELETE", f"/reserved_ips/{ip}", allow_404=True)
+
 	def _request(self, method: str, path: str, json: dict | None = None, allow_404: bool = False):
 		response = self._raw_request(method, path, json=json)
 		if response.status_code == 204:
@@ -136,6 +176,15 @@ def public_ipv4(droplet: dict) -> str:
 		if entry.get("type") == "public":
 			return entry["ip_address"]
 	raise DigitalOceanError(f"Droplet {droplet.get('id')} has no public IPv4")
+
+
+def reserved_ip_droplet_id(reserved_ip: dict) -> int | None:
+	"""The droplet id a reserved IP is assigned to, or None if floating.
+
+	DO returns `droplet: null` for an unassigned reserved IP and the embedded
+	droplet object once it's bound."""
+	droplet = reserved_ip.get("droplet")
+	return droplet.get("id") if droplet else None
 
 
 def _network_cidr(address: str, prefix_length: int) -> str:

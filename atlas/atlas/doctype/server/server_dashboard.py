@@ -6,5 +6,6 @@ def get_data():
 		"fieldname": "server",
 		"transactions": [
 			{"label": _("Operations"), "items": ["Virtual Machine", "Task"]},
+			{"label": _("Networking"), "items": ["Reserved IP"]},
 		],
 	}

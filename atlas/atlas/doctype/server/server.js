@@ -20,9 +20,52 @@ function add_buttons(frm) {
 	}
 	if (status === "Active") {
 		frappe.atlas.add_action(frm, "Sync Image", () => open_sync_image_dialog(frm));
+		frappe.atlas.add_action(frm, "Allocate Reserved IP", () => confirm_allocate_reserved_ip(frm));
+		frappe.atlas.add_action(frm, "Discover Reserved IPs", () => discover_reserved_ips(frm));
 	}
 	frappe.atlas.add_action(frm, "Archive", () => confirm_archive(frm));
 	frappe.atlas.add_danger(frm, "Reboot", () => confirm_reboot(frm));
+}
+
+
+function confirm_allocate_reserved_ip(frm) {
+	frappe.atlas.confirm_cost({
+		title: __("Allocate a reserved IP for {0}?", [frm.doc.title]),
+		body_html: `<p>${__(
+			"Reserves a new public IPv4 at the provider (a billable resource) and adds it to this server's pool, unattached.",
+		)}</p>`,
+		proceed_label: __("Allocate"),
+		proceed() {
+			frappe.call({
+				method: "atlas.atlas.doctype.reserved_ip.reserved_ip.allocate",
+				args: {server: frm.doc.name},
+			}).then(({message: name}) => {
+				if (!name) return;
+				frappe.show_alert({message: __("Reserved IP allocated."), indicator: "green"});
+				frappe.set_route("Form", "Reserved IP", name);
+			});
+		},
+	});
+}
+
+
+function discover_reserved_ips(frm) {
+	// Read-only reconcile (vendor → Frappe): safe to run without a confirm.
+	frappe.call({
+		method: "atlas.atlas.doctype.reserved_ip.reserved_ip.discover",
+		args: {server: frm.doc.name},
+		freeze: true,
+		freeze_message: __("Discovering reserved IPs…"),
+	}).then(({message: created}) => {
+		const count = (created || []).length;
+		frappe.show_alert({
+			message: count
+				? __("Imported {0} reserved IP(s).", [count])
+				: __("No new reserved IPs to import."),
+			indicator: count ? "green" : "blue",
+		}, 6);
+		frm.dashboard.refresh();
+	});
 }
 
 

@@ -19,10 +19,31 @@ from atlas.atlas.providers.base import (
 	Provider,
 	ProvisionRequest,
 	ProvisionResult,
+	ReservedIp,
 )
 
 
-class _StubProvider(Provider):
+class _ReservedIpStubMixin:
+	"""The reserved-IP half of the ABC, stubbed — the registry tests only care
+	about instantiation, not these methods' behavior."""
+
+	def allocate_reserved_ip(self) -> ReservedIp:
+		return ReservedIp(ip_address="203.0.113.1", provider_resource_id="203.0.113.1")
+
+	def assign_reserved_ip(self, provider_resource_id: str, droplet_resource_id: str) -> None:
+		return None
+
+	def unassign_reserved_ip(self, provider_resource_id: str) -> None:
+		return None
+
+	def list_reserved_ips(self) -> tuple[ReservedIp, ...]:
+		return ()
+
+	def release_reserved_ip(self, provider_resource_id: str) -> None:
+		return None
+
+
+class _StubProvider(_ReservedIpStubMixin, Provider):
 	provider_type = "Stub"
 
 	def authenticate(self) -> AuthResult:
@@ -61,7 +82,7 @@ class TestProviderRegistry(IntegrationTestCase):
 
 	def test_register_decorator_stores_class(self) -> None:
 		@providers.register
-		class _DecoratorStub(Provider):
+		class _DecoratorStub(_ReservedIpStubMixin, Provider):
 			provider_type = "DecoratorStub"
 
 			def authenticate(self) -> AuthResult:

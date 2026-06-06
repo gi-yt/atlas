@@ -17,6 +17,7 @@ from atlas.atlas.providers.base import (
 	Provider,
 	ProvisionRequest,
 	ProvisionResult,
+	ReservedIp,
 	ServerNetworking,
 )
 
@@ -70,4 +71,29 @@ class SelfManagedProvider(Provider):
 	def destroy(self, provider_resource_id: str) -> None:
 		# Self-Managed has nothing remote to release. The operator decides
 		# what to do with the physical host; Atlas just stops talking to it.
+		return None
+
+	# --- Reserved IPs ----------------------------------------------------
+	# There is no vendor reserved-IP API. The operator owns a routable v4 and
+	# routes it to the guest themselves; the `Reserved IP` row is created by
+	# hand (operator-supplied `ip_address`, empty `provider_resource_id`). So
+	# allocate has nothing to call and refuses; the rest are no-ops because
+	# there is no vendor object to assign, list, or release.
+
+	def allocate_reserved_ip(self) -> ReservedIp:
+		frappe.throw(
+			"Self-Managed has no reserved-IP API; create the Reserved IP row "
+			"with an operator-supplied address instead of allocating one"
+		)
+
+	def assign_reserved_ip(self, provider_resource_id: str, droplet_resource_id: str) -> None:
+		return None
+
+	def unassign_reserved_ip(self, provider_resource_id: str) -> None:
+		return None
+
+	def list_reserved_ips(self) -> tuple[ReservedIp, ...]:
+		return ()
+
+	def release_reserved_ip(self, provider_resource_id: str) -> None:
 		return None

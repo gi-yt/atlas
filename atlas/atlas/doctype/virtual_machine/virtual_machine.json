@@ -30,6 +30,7 @@
   "termination_protection",
   "section_break_networking",
   "ipv6_address",
+  "public_ipv4",
   "column_break_networking",
   "mac_address",
   "tap_device",
@@ -195,6 +196,13 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "IPv6 Address",
+   "read_only": 1
+  },
+  {
+   "description": "The attached public IPv4 (a Reserved IP from this VM's Server). Empty until one is attached. Denormalized from the Reserved IP row whose virtual_machine points here.",
+   "fieldname": "public_ipv4",
+   "fieldtype": "Data",
+   "label": "Public IPv4",
    "read_only": 1
   },
   {

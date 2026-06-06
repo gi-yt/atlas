@@ -52,6 +52,7 @@ doctype_js = {
 	"Virtual Machine": "public/js/atlas_form_overrides.js",
 	"Virtual Machine Image": "public/js/atlas_form_overrides.js",
 	"Virtual Machine Snapshot": "public/js/atlas_form_overrides.js",
+	"Reserved IP": "public/js/atlas_form_overrides.js",
 	"Task": "public/js/atlas_form_overrides.js",
 }
 

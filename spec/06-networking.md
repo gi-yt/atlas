@@ -40,6 +40,63 @@ exactly mirroring how it uses `fe80::1` as its IPv6 gateway. Because the
 address is masqueraded at the uplink it never appears on the wire; it only has
 to be unique per host.
 
+## IPv4 ingress (Reserved IP)
+
+The base model above is egress-only: a VM has **no** inbound v4. One VM at a
+time may opt into inbound v4 by attaching a **Reserved IP** — a public IPv4 the
+provider reserves and Atlas binds, host-side, to that one guest. This is the
+**inbound mirror of NAT44**: the same `100.64.x.x/30` private link, the same
+host as the translation point, the reverse direction. Today it exists for the
+reverse proxy (an operator-owned VM); the same mechanism generalizes to tenant
+VMs later. It is **deliberately scoped to Atlas-owned VMs for now** — letting a
+dashboard user attach a public v4 to their own VM is a separate, later step.
+
+The address is the unit: it is **allocated to the `Server`** (the vendor binds
+a reserved IP to the droplet, not to a Firecracker guest), and modelled by the
+standalone [`Reserved IP`](./02-doctypes.md#reserved-ip) DocType. Attaching it
+to one of that Server's VMs is a separate, reversible step.
+
+### What the provider does (built)
+
+Atlas reserves, binds, and releases the vendor object through the provider
+abstraction — five methods alongside the server-lifecycle five, so callers
+never branch on `provider_type`:
+
+| Method | DigitalOcean | Self-Managed |
+| --- | --- | --- |
+| `allocate_reserved_ip()` | `POST /reserved_ips {region}` — reserve a new v4 in the (single) region, unassigned | refuses (no vendor API; operator supplies the address by hand) |
+| `assign_reserved_ip(ip, droplet)` | `POST /reserved_ips/{ip}/actions {assign}` — bind to the droplet | no-op (operator routes it) |
+| `unassign_reserved_ip(ip)` | `POST /reserved_ips/{ip}/actions {unassign}` | no-op |
+| `list_reserved_ips()` | `GET /reserved_ips` — the account's reserved IPs, for discover/import | empty |
+| `release_reserved_ip(ip)` | `DELETE /reserved_ips/{ip}` | no-op |
+
+On DigitalOcean a reserved IP is keyed by its own address, so the vendor handle
+(`Reserved IP.provider_resource_id`) **is** the IP string. The `Reserved IP`
+DocType drives these: `allocate(server)` reserves a fresh v4 and writes an
+`Allocated` row; `discover(server)` lists the account's reserved IPs and
+imports any bound to this Server's droplet that Atlas doesn't yet model (a
+vendor → Frappe reconcile, mapped by droplet id); `release()` destroys the
+vendor IP and deletes the row (explicit, like `Server.archive()` — deleting the
+row alone never touches the vendor).
+
+### What the host does (not built yet)
+
+A reserved IP attaches to the **droplet**, not the guest, so the host must
+**1:1-NAT** it to the guest's private `/30` — symmetric with the egress
+masquerade, in the same `inet atlas` nftables table, recreated idempotently:
+
+- **inbound:** `prerouting` DNAT — `ip daddr <reserved-v4> dnat to <guest-v4>`
+- **outbound:** `postrouting` SNAT — `ip saddr <guest-v4> snat to <reserved-v4>`
+  (overriding the host-wide masquerade for this one guest, so its egress v4 is
+  the reserved IP, not the host's shared address).
+
+The **guest contract is unchanged**: it still sees only its private
+`100.64.x.x/30` and never knows it's behind NAT, exactly as for egress today.
+This host script (and wiring `Reserved IP.attach()` to run it as a Task) is the
+follow-up to the provider layer above; `attach()`/`detach()` today own only the
+Frappe invariant (one IP, one VM, same Server) and the denormalized
+`Virtual Machine.public_ipv4`.
+
 ## What the host actually gives us
 
 This depends on the provider type.
@@ -332,9 +389,10 @@ even though it touches host routing.
 
 ## What we do not do
 
-- **No inbound IPv4.** IPv4 is egress-only via host NAT44. The VM has no public
-  v4 and no port-forward/DNAT — nothing on the internet can open a connection
-  to it over v4. Inbound is IPv6-only.
+- **No inbound IPv4 by default.** IPv4 is egress-only via host NAT44; a VM has
+  no public v4 and no port-forward/DNAT unless it opts in by attaching a
+  [Reserved IP](#ipv4-ingress-reserved-ip) — the one deliberate, scoped
+  exception (Atlas-owned VMs only, today). Without one, inbound is IPv6-only.
 - **No per-VM egress IP / no NAT64.** Every VM on a host shares the host's
   public v4 via one masquerade rule. We do not give VMs distinct egress v4s and
   we do not run NAT64/DNS64 (that would be a layer above Atlas).

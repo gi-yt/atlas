@@ -10,6 +10,7 @@ from atlas.atlas.digitalocean import (
 	DigitalOceanError,
 	public_ipv4,
 	public_ipv6,
+	reserved_ip_droplet_id,
 )
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "digitalocean"
@@ -164,3 +165,53 @@ class TestDigitalOceanClient(IntegrationTestCase):
 		with patch("atlas.atlas.digitalocean.requests.request", return_value=fake):
 			with self.assertRaises(DigitalOceanError):
 				self.client.verify_credentials()
+
+	# --- Reserved IPs ----------------------------------------------------
+
+	def test_create_reserved_ip_posts_region(self) -> None:
+		fake = _FakeResponse(202, {"reserved_ip": {"ip": "203.0.113.5", "region": {"slug": "blr1"}, "droplet": None}})
+		with patch("atlas.atlas.digitalocean.requests.request", return_value=fake) as request:
+			reserved = self.client.create_reserved_ip("blr1")
+		self.assertEqual(reserved["ip"], "203.0.113.5")
+		args, kwargs = request.call_args
+		self.assertEqual(args[0], "POST")
+		self.assertTrue(args[1].endswith("/reserved_ips"))
+		self.assertEqual(kwargs["json"], {"region": "blr1"})
+
+	def test_assign_reserved_ip_posts_action(self) -> None:
+		fake = _FakeResponse(201, {"action": {"id": 1, "type": "assign_ip", "status": "in-progress"}})
+		with patch("atlas.atlas.digitalocean.requests.request", return_value=fake) as request:
+			action = self.client.assign_reserved_ip("203.0.113.5", 999)
+		self.assertEqual(action["type"], "assign_ip")
+		args, kwargs = request.call_args
+		self.assertTrue(args[1].endswith("/reserved_ips/203.0.113.5/actions"))
+		self.assertEqual(kwargs["json"], {"type": "assign", "droplet_id": 999})
+
+	def test_unassign_reserved_ip_posts_action(self) -> None:
+		fake = _FakeResponse(201, {"action": {"id": 2, "type": "unassign_ip", "status": "in-progress"}})
+		with patch("atlas.atlas.digitalocean.requests.request", return_value=fake) as request:
+			self.client.unassign_reserved_ip("203.0.113.5")
+		_, kwargs = request.call_args
+		self.assertEqual(kwargs["json"], {"type": "unassign"})
+
+	def test_list_reserved_ips_returns_array(self) -> None:
+		fake = _FakeResponse(200, {"reserved_ips": [{"ip": "203.0.113.5"}, {"ip": "203.0.113.6"}]})
+		with patch("atlas.atlas.digitalocean.requests.request", return_value=fake):
+			reserved = self.client.list_reserved_ips()
+		self.assertEqual([r["ip"] for r in reserved], ["203.0.113.5", "203.0.113.6"])
+
+	def test_list_reserved_ips_handles_missing_key(self) -> None:
+		fake = _FakeResponse(200, {})
+		with patch("atlas.atlas.digitalocean.requests.request", return_value=fake):
+			self.assertEqual(self.client.list_reserved_ips(), [])
+
+	def test_delete_reserved_ip_treats_404_as_success(self) -> None:
+		fake = _FakeResponse(404)
+		with patch("atlas.atlas.digitalocean.requests.request", return_value=fake):
+			self.client.delete_reserved_ip("203.0.113.5")
+
+	def test_reserved_ip_droplet_id_reads_embedded_droplet(self) -> None:
+		self.assertEqual(reserved_ip_droplet_id({"ip": "203.0.113.5", "droplet": {"id": 999}}), 999)
+
+	def test_reserved_ip_droplet_id_none_when_floating(self) -> None:
+		self.assertIsNone(reserved_ip_droplet_id({"ip": "203.0.113.5", "droplet": None}))

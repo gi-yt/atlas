@@ -144,3 +144,44 @@ class TestDigitalOceanProviderDestroy(IntegrationTestCase):
 		provider = _build_provider()
 		provider.destroy("12345")
 		provider.client.delete_droplet.assert_called_once_with(12345)
+
+
+class TestDigitalOceanProviderReservedIp(IntegrationTestCase):
+	def test_allocate_uses_provider_region_and_maps_payload(self) -> None:
+		provider = _build_provider()
+		provider.client.create_reserved_ip.return_value = {
+			"ip": "203.0.113.5",
+			"region": {"slug": "blr1"},
+			"droplet": None,
+		}
+		reserved = provider.allocate_reserved_ip()
+		provider.client.create_reserved_ip.assert_called_once_with("blr1")
+		# On DO the address IS the vendor handle.
+		self.assertEqual(reserved.ip_address, "203.0.113.5")
+		self.assertEqual(reserved.provider_resource_id, "203.0.113.5")
+		self.assertIsNone(reserved.droplet_resource_id)
+
+	def test_assign_passes_int_droplet_id(self) -> None:
+		provider = _build_provider()
+		provider.assign_reserved_ip("203.0.113.5", "999")
+		provider.client.assign_reserved_ip.assert_called_once_with("203.0.113.5", 999)
+
+	def test_unassign_calls_client(self) -> None:
+		provider = _build_provider()
+		provider.unassign_reserved_ip("203.0.113.5")
+		provider.client.unassign_reserved_ip.assert_called_once_with("203.0.113.5")
+
+	def test_release_calls_delete(self) -> None:
+		provider = _build_provider()
+		provider.release_reserved_ip("203.0.113.5")
+		provider.client.delete_reserved_ip.assert_called_once_with("203.0.113.5")
+
+	def test_list_maps_assigned_droplet_to_string(self) -> None:
+		provider = _build_provider()
+		provider.client.list_reserved_ips.return_value = [
+			{"ip": "203.0.113.5", "droplet": {"id": 999}},
+			{"ip": "203.0.113.6", "droplet": None},
+		]
+		reserved = provider.list_reserved_ips()
+		self.assertEqual(reserved[0].droplet_resource_id, "999")
+		self.assertIsNone(reserved[1].droplet_resource_id)

@@ -369,8 +369,18 @@ class VirtualMachine(Document):
 		)
 		self.status = "Terminated"
 		self.save()
+		self._detach_reserved_ip()
 		self._delete_snapshots()
 		return task.name
+
+	def _detach_reserved_ip(self) -> None:
+		"""Release the VM's attached public IPv4 (if any) back to its Server's
+		pool on terminate, so the address can be re-attached to another VM. The
+		Reserved IP row survives — only the attachment is cleared."""
+		for name in frappe.get_all(
+			"Reserved IP", filters={"virtual_machine": self.name}, pluck="name"
+		):
+			frappe.get_doc("Reserved IP", name).detach()
 
 	def _delete_snapshots(self) -> None:
 		"""Drop this VM's snapshot rows after terminate. Each row's on_trash
