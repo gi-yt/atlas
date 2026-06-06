@@ -14,6 +14,7 @@ from atlas.atlas._ssh.transport import (
 	Connection,
 	_ensure_known_hosts_directory,
 	run_scp,
+	run_ssh,
 	ssh_key_file,
 	upload_files,
 	wait_for_ssh,
@@ -99,6 +100,27 @@ class TestUploadFiles(IntegrationTestCase):
 		# Subsequent calls: scp for each file.
 		scp_calls = [command for command in commands[1:] if command[0] == "scp"]
 		self.assertEqual(len(scp_calls), 2)
+
+
+class TestEnsuresKnownHostsBeforeConnecting(IntegrationTestCase):
+	"""run_ssh and run_scp must create ~/.atlas before invoking ssh/scp:
+	StrictHostKeyChecking=accept-new writes the new host key into
+	KNOWN_HOSTS_PATH, so the parent must exist or ssh warns and drops the key.
+	Pushing the guard into these two helpers (rather than relying on callers)
+	is what lets the proxy control plane (atlas.atlas.proxy) SSH guests safely —
+	it doesn't go through the runner that used to ensure this."""
+
+	def test_run_ssh_ensures_known_hosts_dir(self) -> None:
+		with patch("atlas.atlas._ssh.transport._ensure_known_hosts_directory") as ensure:
+			with patch("atlas.atlas._ssh.transport.subprocess.run", side_effect=_ok):
+				run_ssh(CONNECTION, "/tmp/key", "true", timeout_seconds=30)
+		ensure.assert_called_once()
+
+	def test_run_scp_ensures_known_hosts_dir(self) -> None:
+		with patch("atlas.atlas._ssh.transport._ensure_known_hosts_directory") as ensure:
+			with patch("atlas.atlas._ssh.transport.subprocess.run", side_effect=_ok):
+				run_scp(CONNECTION, "/tmp/key", "/local/a", "/remote/a", timeout_seconds=30)
+		ensure.assert_called_once()
 
 
 class TestRunScp(IntegrationTestCase):

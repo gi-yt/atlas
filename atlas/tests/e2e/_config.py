@@ -152,3 +152,25 @@ def ephemeral_private_key() -> str:
 	need to SSH back into a freshly provisioned VM."""
 	with open(_ephemeral_key_path()) as handle:
 		return handle.read()
+
+
+def control_plane_public_key() -> str:
+	"""The public half of the key Atlas's control plane SSHes with — derived from
+	`get_ssh_private_key_path()` (the same path `connection_for_guest` resolves via
+	Atlas Settings).
+
+	Most e2e VMs are reached only by host-side probes that carry the ephemeral key,
+	so they provision with `ephemeral_public_key()` alone. The proxy VM is
+	different: `atlas.atlas.proxy` (build/reconcile/cert) reaches the guest via
+	`connection_for_guest`, which uses the Atlas-settings key — in production the
+	proxy image bakes that key (the `connection_for_guest` contract). So a proxy VM
+	must trust BOTH keys; provision it with `ephemeral_public_key() + "\\n" +
+	control_plane_public_key()` (authorized_keys is one key per line)."""
+	private_path = get_ssh_private_key_path()
+	result = subprocess.run(
+		["ssh-keygen", "-y", "-f", private_path],
+		check=True,
+		capture_output=True,
+		text=True,
+	)
+	return result.stdout.strip()

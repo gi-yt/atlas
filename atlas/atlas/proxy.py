@@ -17,18 +17,32 @@ the operator's audit trail, with a synthetic script name (`proxy-sync` /
 
 import json
 import shlex
+from pathlib import Path
 
 import frappe
 
-from atlas.atlas._ssh.transport import run_ssh, ssh_key_file
+from atlas.atlas._ssh.transport import run_scp, run_ssh, ssh_key_file
 from atlas.atlas.doctype.subdomain.subdomain import map_for_region
 from atlas.atlas.ssh import connection_for_guest
 
 ADMIN_SOCKET = "/run/atlas-proxy/admin.sock"
 CERT_DIRECTORY = "/var/lib/atlas-proxy/certs"
+REGION_FILE = "/var/lib/atlas-proxy/region"
 # The guest admin API answers HTTP over the unix socket; the host part is ignored
 # but curl needs one, so use a fixed placeholder.
 ADMIN_BASE = "http://localhost"
+
+# The committed proxy stack ships in the repo's top-level `proxy/` tree (not in
+# the Python package). build_proxy uploads it verbatim and runs build.sh, the
+# same way the compose harness's Dockerfile does (proxy/test/Dockerfile), so the
+# guest runs the byte-identical stack the release gate exercises. The `..` idiom
+# matches scripts_catalog.scripts_directory() — it resolves the app symlink to
+# the repo root, where `proxy/` sits beside `scripts/`.
+REMOTE_PROXY_DIRECTORY = "/tmp/atlas-proxy-build"
+
+
+def _proxy_source_directory() -> Path:
+	return Path(frappe.get_app_path("atlas", "..")).resolve() / "proxy"
 
 
 def canonical_json(site_map: dict[str, str]) -> str:
@@ -129,6 +143,79 @@ def push_cert(virtual_machine: str, fullchain: str, privkey: str) -> None:
 	_record_guest_task(virtual_machine, "proxy-push-cert", {"region": region}, stdout, stderr, code)
 	if code != 0:
 		frappe.throw(f"Cert push/reload to {virtual_machine} failed (exit {code}): {stderr[-500:]}")
+
+
+def build_proxy(virtual_machine: str) -> None:
+	"""Turn a freshly-provisioned Ubuntu guest into a proxy: upload the committed
+	`proxy/` tree and run build.sh inside the guest, then write the region and
+	start the unit.
+
+	This is the controller side of the design's §3.1 ("compile nginx+Lua inside
+	the guest"): the same SSH-to-the-guest path the map sync uses, pointed at a
+	bare VM. It runs build.sh — the AUTHORITATIVE build the compose release gate
+	also exercises (proxy/test/Dockerfile runs the same script) — so a built guest
+	runs the byte-identical stack. Idempotent (build.sh re-runs cleanly), so this
+	doubles as the "re-bake the snapshot" verb. After this returns, the operator
+	snapshots the VM; that snapshot is the rollable proxy image (§3.4).
+
+	Recorded as a `proxy-build` Task row for the audit trail, like every guest op.
+	"""
+	vm = frappe.get_doc("Virtual Machine", virtual_machine)
+	if not vm.is_proxy:
+		frappe.throw(f"Virtual Machine {virtual_machine} is not a proxy (is_proxy unset)")
+	if not vm.region:
+		frappe.throw(f"Virtual Machine {virtual_machine} has no region; not a proxy")
+	connection = connection_for_guest(vm)
+	uploads = _proxy_tree_uploads()
+	with ssh_key_file(connection.ssh_private_key) as key_path:
+		# Stage the whole tree under one dir so build.sh finds its sibling
+		# conf/lua/html/guest (it reads from its own directory).
+		remote_dirs = sorted({_remote_parent(remote) for _, remote in uploads})
+		run_ssh(
+			connection,
+			key_path,
+			"mkdir -p " + " ".join(shlex.quote(d) for d in remote_dirs),
+			timeout_seconds=60,
+		)
+		for local, remote in uploads:
+			run_scp(connection, key_path, str(local), remote, timeout_seconds=300)
+		# Run the build (long: compiles nginx + luajit2 from source), then write
+		# the real region (build.sh leaves it empty) and (re)start the unit so
+		# init_by_lua picks the region up. `systemctl restart` is a no-op-to-start
+		# on a guest with no running unit yet, and a clean restart on a rebuild.
+		build = (
+			f"chmod +x {REMOTE_PROXY_DIRECTORY}/build.sh && "
+			f"{REMOTE_PROXY_DIRECTORY}/build.sh && "
+			f"printf '%s\\n' {shlex.quote(vm.region)} > {shlex.quote(REGION_FILE)} && "
+			"systemctl restart atlas-proxy.service"
+		)
+		stdout, stderr, code = run_ssh(connection, key_path, build, timeout_seconds=1800)
+	_record_guest_task(virtual_machine, "proxy-build", {"region": vm.region}, stdout, stderr, code)
+	if code != 0:
+		frappe.throw(f"Proxy build on {virtual_machine} failed (exit {code}): {stderr[-500:]}")
+
+
+def _proxy_tree_uploads() -> list[tuple[Path, str]]:
+	"""Every committed file under `proxy/` (excluding the compose test harness and
+	caches), mapped to its remote path under REMOTE_PROXY_DIRECTORY, preserving the
+	relative layout so build.sh finds conf/lua/html/guest beside itself."""
+	source = _proxy_source_directory()
+	uploads: list[tuple[Path, str]] = []
+	for entry in sorted(source.rglob("*")):
+		if not entry.is_file():
+			continue
+		relative = entry.relative_to(source)
+		# The `test/` harness and any __pycache__ are dev-only; the guest build
+		# needs only build.sh + conf/lua/html/guest.
+		if relative.parts[0] == "test" or "__pycache__" in relative.parts:
+			continue
+		uploads.append((entry, f"{REMOTE_PROXY_DIRECTORY}/{relative.as_posix()}"))
+	return uploads
+
+
+def _remote_parent(remote_path: str) -> str:
+	parent = remote_path.rsplit("/", 1)[0]
+	return parent or "/"
 
 
 def _write_guest_file(

@@ -67,16 +67,26 @@ and the socket's file permissions are the gate.
   fine here (unlike map changes). The cert is pushed, never baked into the image,
   so one proxy image serves any region and a renewal is a re-push, not a rebuild.
 
-Each guest operation is recorded as a `Task` row (`script` = `proxy-sync` /
-`proxy-push-cert`, with the proxy VM) for the operator's audit trail, the same
-row shape as every host Task.
+- **`build_proxy(vm)`** — turn a freshly-provisioned Ubuntu guest into a proxy:
+  upload the committed [`proxy/`](../proxy) tree over the same guest-SSH path and
+  run [`proxy/build.sh`](../proxy/build.sh) **inside** the guest (compiling nginx +
+  Lua from pinned sources), then write the VM's `region` and start the unit. This
+  is the controller side of "build inside the guest" (§3.1 below) and the same
+  byte-identical stack the compose release gate exercises (the gate's Dockerfile
+  runs the same `build.sh`). Idempotent, so it doubles as the re-bake verb. The
+  operator snapshots the built VM; that snapshot is the rollable proxy image.
+
+Each guest operation is recorded as a `Task` row (`script` = `proxy-build` /
+`proxy-sync` / `proxy-push-cert`, with the proxy VM) for the operator's audit
+trail, the same row shape as every host Task.
 
 ## Build & roll = VM lifecycle
 
 The proxy is built the Atlas-native way (no custom rootfs, no host service):
-provision an ordinary VM from stock Ubuntu, SSH in and run
-[`proxy/build.sh`](../proxy/build.sh) (compiles nginx 1.30.2 + OpenResty
-`luajit2` + `lua-nginx-module` + NDK + resty-core/lrucache + lua-cjson +
+provision an ordinary VM from stock Ubuntu, then `build_proxy(vm)` SSHes in,
+uploads the [`proxy/`](../proxy) tree, and runs
+[`proxy/build.sh`](../proxy/build.sh) inside the guest (compiles nginx 1.30.2 +
+OpenResty `luajit2` + `lua-nginx-module` + NDK + resty-core/lrucache + lua-cjson +
 headers-more from pinned sources, installs the stack + the three Lua modules +
 the guest unit), then **snapshot** it — that snapshot is the reusable "proxy
 image". Install / update / roll / rollback are the existing VM lifecycle verbs
@@ -90,22 +100,45 @@ docker-compose harness under [`proxy/test/`](../proxy/test) exercises the same
 HTTP→HTTPS, HTTP/2, socket.io upgrade) — 10/10 green. Nothing is installed on the
 dev host.
 
-## Pending (host-bound facts — Atlas e2e)
+## Host-bound facts — the `proxy_vm` Atlas e2e
 
-These prove what only a real droplet can, and are **not yet built** (the design's
-Phase D, [`llm/proxy-design.md`](../llm/proxy-design.md) §9.2):
+These prove what only a real droplet can. They are wired as a single e2e use
+case, [`atlas/tests/e2e/use_cases/proxy_vm.py`](../atlas/tests/e2e/use_cases/proxy_vm.py),
+registered in `run_all` / `run_all_smoke` and run on the shared bootstrapped
+droplet (the design's Phase D, [`llm/proxy-design.md`](../llm/proxy-design.md)
+§9.2). The controller logic underneath each is unit-covered in milliseconds
+(`atlas/atlas/test_proxy.py`: canonical JSON, the reconcile diff, the proxy-tree
+enumeration; `scripts/lib/atlas/test_reserved_ip_nat.py`: the host NAT math). The
+e2e itself needs a billable droplet + a real reserved IP, so it is run on the
+operator's turn (`bench --site atlas.tests.local execute
+atlas.tests.e2e.use_cases.proxy_vm.run_smoke`), not in the unit suite.
 
-- **inbound-v4 reachability** of the proxy guest's `:443` (the attach primitive's
-  e2e is proven for SSH/`:22`; `:443` is the proxy's first real listener).
+- **Build inside the guest** — `build_proxy` SSHes a fresh Ubuntu VM, uploads the
+  `proxy/` tree, and runs `build.sh`; nginx + Lua compiles and the unit comes up.
+  (A proxy guest is reached two ways — host-side probes carry the e2e ephemeral
+  key, the control plane reaches it via `connection_for_guest` with the
+  Atlas-settings key — so the e2e provisions the proxy trusting **both** keys. In
+  production the proxy image bakes the Atlas key, the same as every VM.)
+- **guest-SSH map sync end-to-end** — `reconcile_proxy` syncs the live map over
+  SSH-to-the-guest; the e2e reads `/map` back and asserts it equals the canonical
+  desired map byte-for-byte.
 - **inbound-:80 to a site from the proxy's vantage** — the public-v6 south-side
-  release gate that has never been tested
-  ([06-networking.md](./06-networking.md), `proxy-design.md` §2.1). A site's `:80`
-  is reachable by anyone on the v6 internet; a future per-VM firewall must scope
-  it to the proxies and must not drop the proxy hop.
-- **guest-SSH map sync end-to-end** — Atlas SSHes a real proxy guest, syncs the
-  map, reads it back.
-- **rolling rebuild** — rebuild one proxy from a new snapshot, re-push cert,
-  re-sync map, confirm it serves while the others stay up.
+  release gate that had never been tested
+  ([06-networking.md](./06-networking.md), `proxy-design.md` §2.1): from inside
+  the proxy guest, reach a stand-in site VM's `[v6]:80` (the exact
+  `proxy_pass http://[<site-v6>]:80` hop). A site's `:80` is reachable by anyone
+  on the v6 internet; a future per-VM firewall must scope it to the proxies and
+  must not drop the proxy hop.
+- **inbound-:443 reachability** — attach a real reserved IPv4 to the proxy, push
+  the wildcard cert, and from **off the droplet** (the controller, over the public
+  v4 internet) hit `https://<sub>.<region>.frappe.dev` (`--resolve` to the
+  reserved v4, `-k` for the self-signed test cert) and get the site's response
+  back through the proxy. `:443` is the proxy's first real listener (the attach
+  primitive's e2e was previously proven only for SSH/`:22`).
+- **rolling rebuild** — stop the proxy, snapshot it, rebuild from that snapshot,
+  re-push cert, re-sync map, and confirm it serves again. In production DNS keeps
+  the other 2–3 proxies serving while one rolls; the e2e rolls the single proxy
+  and re-verifies the front door.
 
 TLS **grade** (A+) is the one image-gate row not automated (needs a real cert /
 `testssl.sh`), so it is a manual/D check.

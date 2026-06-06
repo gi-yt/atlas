@@ -83,6 +83,11 @@ def run_ssh(
 	command's stdin — the path the proxy control plane uses to stream a map body
 	to a guest's `curl --unix-socket … --data-binary @-` (design §7.3), without
 	first staging a file on the guest."""
+	# StrictHostKeyChecking=accept-new must WRITE the new host key into
+	# ~/.atlas/known_hosts, so the parent dir has to exist — ensure it here so no
+	# caller can forget (cheap + idempotent; the guest control plane in proxy.py
+	# SSHes without going through the runner that used to do this).
+	_ensure_known_hosts_directory()
 	args = [
 		"ssh",
 		"-i",
@@ -109,6 +114,7 @@ def run_scp(
 	remote_path: str,
 	timeout_seconds: int,
 ) -> None:
+	_ensure_known_hosts_directory()
 	args = [
 		"scp",
 		"-i",

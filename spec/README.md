@@ -247,7 +247,18 @@ between them is enormous:
   droplet** (the controller, the only honest vantage: a host-local packet
   skips PREROUTING), and **egress SNAT** by a guest-side `cdn-cgi/trace`
   asserting the source is the reserved IP. Teardown releases the (billable)
-  IP in a `finally`.
+  IP in a `finally`. The **reverse proxy** (`proxy_vm`) builds on it: it
+  compiles the nginx+Lua stack *inside* a freshly-provisioned guest
+  (`atlas.atlas.proxy.build_proxy`), routes a stand-in site through it, and
+  proves the four facts only a droplet can — the public-v6 south hop
+  (inbound `:80` to the site from the **proxy's own vantage**, the §2.1
+  release gate that had never been tested), the guest-SSH live-map sync
+  (`reconcile_proxy`, read back byte-for-byte), the inbound `:443`
+  reachability (a reserved v4 attached to the proxy, the pushed wildcard
+  cert, an off-droplet HTTPS request that routes through the proxy to the
+  site), and a **rolling rebuild** (rebuild from the proxy's own snapshot,
+  re-push cert, re-sync, serve again). Same `finally` teardown: release the
+  reserved IP, terminate both VMs.
 - **Unit-covered logic** — validation throws, state-machine guards, pure
   helpers (networking math, DO response parsing, JSON-shape checks). Every
   one is also covered by a `test_*.py` unit test that runs in
