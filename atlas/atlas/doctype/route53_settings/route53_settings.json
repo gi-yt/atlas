@@ -1,0 +1,56 @@
+{
+ "actions": [],
+ "creation": "2026-06-08 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "access_key_id",
+  "secret_access_key",
+  "region"
+ ],
+ "fields": [
+  {
+   "fieldname": "access_key_id",
+   "fieldtype": "Data",
+   "label": "Access Key ID",
+   "reqd": 1,
+   "set_only_once": 1,
+   "description": "AWS IAM access key id with route53:* on the hosted zone."
+  },
+  {
+   "fieldname": "secret_access_key",
+   "fieldtype": "Password",
+   "label": "Secret Access Key",
+   "reqd": 1,
+   "description": "AWS IAM secret. Rotate by clearing via db.set_value, then re-saving."
+  },
+  {
+   "default": "us-east-1",
+   "fieldname": "region",
+   "fieldtype": "Data",
+   "label": "Region",
+   "description": "AWS API region for signing. Route 53 is global; us-east-1 is a safe default."
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-06-08 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Atlas",
+ "name": "Route53 Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

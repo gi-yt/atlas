@@ -110,20 +110,32 @@ SYSTEMD_HOOKS: frozenset[str] = frozenset(
 	}
 )
 
+# Controller-only Tasks: they run on the Atlas controller via the local runner
+# (atlas.atlas.local_task), NOT over SSH onto a Server host. `resolve()` must
+# still find them, but they are not host SSH tasks, so they are excluded from
+# `allowed_scripts()` (the host run-task gate) and the operator picker.
+CONTROLLER_ONLY: frozenset[str] = frozenset(
+	{
+		"issue-cert.py",
+	}
+)
+
 
 def allowed_scripts() -> list[str]:
 	"""Return the sorted list of task-runnable script filenames on a server host.
 
 	Both `.py` (the typed CLI tasks) and `.sh` (the few remaining shell tasks,
-	e.g. reboot-server.sh) are runnable. The systemd hooks are excluded — they
-	are not Tasks (see SYSTEMD_HOOKS)."""
+	e.g. reboot-server.sh) are runnable. The systemd hooks and controller-only
+	tasks are excluded — they are not host SSH Tasks (see SYSTEMD_HOOKS /
+	CONTROLLER_ONLY)."""
 	directory = scripts_directory()
 	if not directory.is_dir():
 		return []
+	excluded = SYSTEMD_HOOKS | CONTROLLER_ONLY
 	return sorted(
 		entry.name
 		for entry in directory.iterdir()
-		if entry.is_file() and entry.suffix in (".py", ".sh") and entry.name not in SYSTEMD_HOOKS
+		if entry.is_file() and entry.suffix in (".py", ".sh") and entry.name not in excluded
 	)
 
 

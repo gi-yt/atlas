@@ -1,0 +1,121 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-06-08 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "root_domain",
+  "common_name",
+  "status",
+  "column_break_header",
+  "tls_provider",
+  "issued_on",
+  "expires_on",
+  "section_break_paths",
+  "fullchain_path",
+  "privkey_path"
+ ],
+ "fields": [
+  {
+   "fieldname": "root_domain",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Root Domain",
+   "options": "Root Domain",
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "common_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Common Name",
+   "read_only": 1,
+   "description": "*.<domain>, derived from the Root Domain."
+  },
+  {
+   "default": "Pending",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Pending\nActive\nExpiring\nFailed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_header",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "tls_provider",
+   "fieldtype": "Link",
+   "label": "TLS Provider",
+   "options": "TLS Provider",
+   "description": "Denormalized from the Root Domain; the issuer used."
+  },
+  {
+   "fieldname": "issued_on",
+   "fieldtype": "Datetime",
+   "label": "Issued On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "expires_on",
+   "fieldtype": "Datetime",
+   "in_standard_filter": 1,
+   "label": "Expires On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_paths",
+   "fieldtype": "Section Break",
+   "label": "On-disk PEM paths (controller)"
+  },
+  {
+   "fieldname": "fullchain_path",
+   "fieldtype": "Data",
+   "label": "Fullchain Path",
+   "read_only": 1,
+   "description": "Path to fullchain.pem on the controller. Bytes stay out of the DB."
+  },
+  {
+   "fieldname": "privkey_path",
+   "fieldtype": "Data",
+   "label": "Private Key Path",
+   "read_only": 1,
+   "description": "Path to privkey.pem on the controller (0600, Frappe-user owned)."
+  }
+ ],
+ "links": [],
+ "modified": "2026-06-08 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Atlas",
+ "name": "TLS Certificate",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 0,
+   "cancel": 0,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "import": 0,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 0,
+   "write": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "common_name",
+ "track_changes": 1
+}

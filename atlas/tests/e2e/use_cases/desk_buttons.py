@@ -85,6 +85,7 @@ def run(reuse: bool = True, keep: bool = True) -> None:
 		_check_server_buttons(server)
 		_check_virtual_machine_image_buttons(server.name, image_doc.name)
 		_check_virtual_machine_buttons(server.name, image_doc.name, public_key)
+		_check_tls_buttons()
 		_check_provision_server_bad_token()
 
 
@@ -540,3 +541,114 @@ def _check_provision_server_bad_token() -> None:
 			f"Server row with title {target_title!r} leaked despite DO API failure"
 		)
 	assert caught, "provision_server with a bogus token should have raised"
+
+
+# ----- TLS & Domain layer --------------------------------------------------
+
+
+def _check_tls_buttons() -> None:
+	"""Domain Provider / TLS Provider / Root Domain / TLS Certificate buttons,
+	all through `run_doc_method` — the desk-layer regression net (a method that
+	stops being whitelisted, an arg name that diverges from the JS).
+
+	The external edges are mocked so this needs no certbot, no AWS, no proxy VM:
+	the TLS provider's `issue()` returns canned PEM paths and `proxy.push_cert` is
+	a no-op. What this proves is the HTTP wrapper: the methods are whitelisted, the
+	arg shapes match, and the issue->cert->(would-)push chain runs end to end through
+	the controllers. The unit suite covers the real fan-out and the providers; this
+	covers the desk seam. Self-contained: it creates and tears down its own rows."""
+	from unittest.mock import patch
+
+	from atlas.atlas.doctype.tls_certificate import tls_certificate as cert_module
+	from atlas.atlas.tls.base import IssuedCert
+
+	stamp = int(time.time())
+	domain = f"e2e-{stamp}.frappe.dev"
+	region = f"e2e-{stamp}"
+	dp_name = "atlas-e2e-route53"
+	tp_name = "atlas-e2e-letsencrypt"
+	created_certs: list[str] = []
+
+	def _cleanup() -> None:
+		for cert in created_certs:
+			if frappe.db.exists("TLS Certificate", cert):
+				frappe.delete_doc("TLS Certificate", cert, force=1, ignore_permissions=True)
+		for dt, name in (("Root Domain", domain), ("Domain Provider", dp_name), ("TLS Provider", tp_name)):
+			if frappe.db.exists(dt, name):
+				frappe.delete_doc(dt, name, force=1, ignore_permissions=True)
+		frappe.db.commit()
+
+	_cleanup()
+	# Dummy provider credentials so Test Connection runs its real auth path (and
+	# fails cleanly on the bogus creds / missing boto3) rather than throwing on a
+	# missing-secret read. Mirrors the operator order: configure, then test.
+	# `from … import` (not `import frappe.utils.password`) so we don't rebind the
+	# module-level `frappe` to a function local — the _cleanup closure reads it.
+	from frappe.utils.password import set_encrypted_password
+
+	set_encrypted_password(
+		"Route53 Settings", "Route53 Settings", "atlas-e2e-bogus-secret", "secret_access_key"
+	)
+	frappe.db.set_single_value("Route53 Settings", "access_key_id", "AKIAE2EBOGUS", update_modified=False)
+	frappe.db.set_single_value(
+		"Lets Encrypt Settings", "account_email", "e2e@frappe.dev", update_modified=False
+	)
+	frappe.db.set_single_value("Lets Encrypt Settings", "agree_tos", 1, update_modified=False)
+	frappe.db.commit()
+
+	frappe.get_doc(
+		{"doctype": "Domain Provider", "provider_name": dp_name, "provider_type": "Route53"}
+	).insert(ignore_permissions=True)
+	frappe.get_doc(
+		{"doctype": "TLS Provider", "provider_name": tp_name, "provider_type": "Let's Encrypt"}
+	).insert(ignore_permissions=True)
+	frappe.get_doc(
+		{
+			"doctype": "Root Domain",
+			"domain": domain,
+			"region": region,
+			"domain_provider": dp_name,
+			"tls_provider": tp_name,
+		}
+	).insert(ignore_permissions=True)
+	frappe.db.commit()
+
+	try:
+		# Test Connection on both providers: AuthResult-as-dict with an "ok" key.
+		# Real AWS/ACME isn't configured here, so ok is allowed to be False with an
+		# error — what matters is the wrapper returns the dict shape.
+		for provider_dt, provider_name in (("Domain Provider", dp_name), ("TLS Provider", tp_name)):
+			result = _call_button(provider_dt, provider_name, "authenticate")
+			assert result and "ok" in result, (provider_dt, result)
+
+		# Issue / Renew Certificate on Root Domain: creates the cert and runs the
+		# issue chain (mocked issuer + mocked push). Returns the cert name.
+		issued = IssuedCert(
+			fullchain_path="/dev/null",
+			privkey_path="/dev/null",
+			not_before="2026-06-08 00:00:00",
+			not_after="2026-09-06 00:00:00",
+		)
+		with (
+			patch.object(cert_module.tls, "for_tls_provider") as tls_for,
+			patch.object(cert_module.proxy, "push_cert"),
+			# /dev/null isn't a readable PEM; short-circuit the on-disk read.
+			patch.object(cert_module, "_read_pem", return_value="PEM"),
+		):
+			tls_for.return_value.issue.return_value = issued
+			cert_name = _call_button("Root Domain", domain, "issue_certificate")
+			assert cert_name, "issue_certificate should return a TLS Certificate name"
+			created_certs.append(cert_name)
+
+			# Push to Proxies on the issued cert: no proxies in this throwaway
+			# region, so the result is an empty list — but the wrapper + read path run.
+			pushed = _call_button("TLS Certificate", cert_name, "push_to_proxies")
+			assert pushed == [], pushed
+
+		# Archive flips is_active on both providers (the danger button).
+		_call_button("Domain Provider", dp_name, "archive")
+		assert not frappe.db.get_value("Domain Provider", dp_name, "is_active")
+		_call_button("TLS Provider", tp_name, "archive")
+		assert not frappe.db.get_value("TLS Provider", tp_name, "is_active")
+	finally:
+		_cleanup()

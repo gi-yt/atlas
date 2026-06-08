@@ -1,0 +1,105 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:domain",
+ "creation": "2026-06-08 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "domain",
+  "region",
+  "column_break_header",
+  "is_active",
+  "section_break_providers",
+  "domain_provider",
+  "tls_provider"
+ ],
+ "fields": [
+  {
+   "fieldname": "domain",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Domain",
+   "reqd": 1,
+   "set_only_once": 1,
+   "unique": 1,
+   "description": "The wildcard zone, e.g. blr1.frappe.dev. The issued cert is *.<domain>."
+  },
+  {
+   "fieldname": "region",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Region",
+   "reqd": 1,
+   "set_only_once": 1,
+   "description": "The proxy fleet this domain fronts. Join key to Virtual Machine.region (is_proxy=1)."
+  },
+  {
+   "fieldname": "column_break_header",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Is Active"
+  },
+  {
+   "fieldname": "section_break_providers",
+   "fieldtype": "Section Break",
+   "label": "Providers"
+  },
+  {
+   "fieldname": "domain_provider",
+   "fieldtype": "Link",
+   "label": "Domain Provider",
+   "options": "Domain Provider",
+   "reqd": 1,
+   "description": "DNS account that owns the zone (DNS-01 challenge)."
+  },
+  {
+   "fieldname": "tls_provider",
+   "fieldtype": "Link",
+   "label": "TLS Provider",
+   "options": "TLS Provider",
+   "reqd": 1,
+   "description": "Issuer that produces the wildcard certificate."
+  }
+ ],
+ "links": [
+  {
+   "link_doctype": "TLS Certificate",
+   "link_fieldname": "root_domain"
+  }
+ ],
+ "modified": "2026-06-08 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Atlas",
+ "name": "Root Domain",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 0,
+   "cancel": 0,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "import": 0,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 0,
+   "write": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

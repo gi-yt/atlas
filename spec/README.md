@@ -111,6 +111,7 @@ keep it the source of truth.
 10. [Desk UI (operator)](./10-desk-ui.md)
 11. [User UI — the dashboard SPA](./11-user-ui.md)
 12. [The reverse proxy](./12-proxy.md)
+13. [TLS & domain layer](./13-tls.md)
 
 ## First run on a fresh site
 
@@ -142,6 +143,20 @@ the desk buttons call. Requires a `bench worker` running because
 `provision_server` and `sync_to_server` both enqueue background jobs.
 The file's docstring lists every config key.
 
+To put a site behind a real cert, layer the proxy ([12-proxy.md](./12-proxy.md))
+and TLS ([13-tls.md](./13-tls.md)) setup on top:
+
+7. **Domain Provider** + **Route53 Settings** — the DNS account (DNS-01).
+8. **TLS Provider** + **Lets Encrypt Settings** — the issuer (ACME directory,
+   account email, agree-to-ToS).
+9. **Root Domain** — one row per region (`<region>.frappe.dev`, `region`, the
+   two providers); click **Issue / Renew Certificate** to issue the regional
+   wildcard and push it onto every proxy VM in the region.
+
+The TLS layer has a **controller-host dependency**: `certbot`,
+`certbot-dns-route53`, and `openssl` must be installed on the Atlas controller
+(issuance runs there, not over SSH — see [13-tls.md](./13-tls.md)).
+
 ## Operator use cases
 
 Everything Atlas does for an operator falls into one of nine use cases.
@@ -158,6 +173,7 @@ operator-facing features add to this list; new tests follow it.
 | Operate a virtual machine      | `Virtual Machine` → **Start / Stop / Restart / Pause / Resume / Terminate** | [05-virtual-machine-lifecycle.md](./05-virtual-machine-lifecycle.md) |
 | Manage a VM's disk and size    | `Virtual Machine` → **Snapshot / Rebuild / Resize**; `Virtual Machine Snapshot` → **Restore to VM / Clone to new VM / Delete** | [05-virtual-machine-lifecycle.md](./05-virtual-machine-lifecycle.md) |
 | Attach a public IPv4 to a VM   | `Reserved IP` → **Attach / Detach** (the inbound-v4 primitive: DNAT in, SNAT out) | [06-networking.md](./06-networking.md#ipv4-ingress-reserved-ip) |
+| Issue a TLS cert for a region  | `Root Domain` → **Issue / Renew Certificate**; `TLS Certificate` → **Issue/Renew / Push to Proxies**; `Domain Provider` / `TLS Provider` → **Test Connection / Archive** | [13-tls.md](./13-tls.md) |
 | Run an ad-hoc task / reboot    | `Server` → **Run Task / Reboot**                        | [04-tasks.md](./04-tasks.md) |
 | Click any button on the desk   | every form button driven through `run_doc_method`       | (this section, *Desk-button coverage*) |
 | Talk to DigitalOcean           | (internal) verify the DO HTTP client                    | [01-architecture.md](./01-architecture.md) |

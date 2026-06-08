@@ -54,6 +54,12 @@ doctype_js = {
 	"Virtual Machine Snapshot": "public/js/atlas_form_overrides.js",
 	"Reserved IP": "public/js/atlas_form_overrides.js",
 	"Task": "public/js/atlas_form_overrides.js",
+	"Domain Provider": "public/js/atlas_form_overrides.js",
+	"Route53 Settings": "public/js/atlas_form_overrides.js",
+	"TLS Provider": "public/js/atlas_form_overrides.js",
+	"Lets Encrypt Settings": "public/js/atlas_form_overrides.js",
+	"Root Domain": "public/js/atlas_form_overrides.js",
+	"TLS Certificate": "public/js/atlas_form_overrides.js",
 }
 
 # Note: redirecting `/desk` → `/app/atlas` is non-trivial (Frappe hardcodes
@@ -186,24 +192,16 @@ has_permission = {
 
 # Scheduled Tasks
 # ---------------
+# Daily TLS renewal: renew every Active certificate whose expiry is within the
+# renewal window (re-issue AND re-push to the region's proxies), mirroring the
+# proxy reconcile philosophy — the desired state (a fresh cert on every proxy) is
+# continuously restored. See spec/13-tls.md.
 
-# scheduler_events = {
-# 	"all": [
-# 		"atlas.tasks.all"
-# 	],
-# 	"daily": [
-# 		"atlas.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"atlas.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"atlas.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"atlas.tasks.monthly"
-# 	],
-# }
+scheduler_events = {
+	"daily": [
+		"atlas.atlas.doctype.tls_certificate.tls_certificate.renew_expiring",
+	],
+}
 
 # Testing
 # -------

@@ -185,6 +185,12 @@ for (const doctype of [
 	"Virtual Machine Snapshot",
 	"Reserved IP",
 	"Task",
+	"Domain Provider",
+	"Route53 Settings",
+	"TLS Provider",
+	"Lets Encrypt Settings",
+	"Root Domain",
+	"TLS Certificate",
 ]) {
 	frappe.ui.form.on(doctype, {
 		onload(frm) {

@@ -1,6 +1,6 @@
 # DocTypes
 
-Thirteen DocTypes. Module `Atlas`. None are submittable. All track changes.
+Nineteen DocTypes. Module `Atlas`. None are submittable. All track changes.
 Read permission for `System Manager`.
 
 1. [Atlas Settings](#atlas-settings) — vendor-agnostic Atlas config (Single).
@@ -16,6 +16,12 @@ Read permission for `System Manager`.
 11. [Reserved IP](#reserved-ip) — a public IPv4 allocated to a Server, optionally attached to a VM.
 12. [Subdomain](#subdomain) — a `<subdomain>.<region>.frappe.dev` routing entry pointing at a site VM.
 13. [Task](#task)
+14. [Domain Provider](#domain-provider) — one row per configured DNS vendor (DNS-01).
+15. [Route53 Settings](#route53-settings) — AWS Route 53 API config (Single).
+16. [TLS Provider](#tls-provider) — one row per configured certificate issuer.
+17. [Lets Encrypt Settings](#lets-encrypt-settings) — ACME account config (Single).
+18. [Root Domain](#root-domain) — one wildcard zone == one region.
+19. [TLS Certificate](#tls-certificate) — the issued regional wildcard cert.
 
 The first six form the **Provider abstraction**: a single ABC in
 `atlas/atlas/providers/base.py` with one implementation per
@@ -23,6 +29,13 @@ The first six form the **Provider abstraction**: a single ABC in
 controllers never branch on `provider_type`. See
 [provider-abstraction.md](../llm/plan/provider-abstraction.md) for the
 implementation plan.
+
+DocTypes 14–19 form the **TLS & Domain layer** ([13-tls.md](./13-tls.md)) — the
+producer for the proxy's `push_cert`. They mirror the Provider shape with two
+more registries: `atlas/atlas/dns/` (a `DnsProvider` ABC per `Domain
+Provider.provider_type`) and `atlas/atlas/tls/` (a `TlsProvider` ABC per `TLS
+Provider.provider_type`). Same rule: controllers resolve an implementation by
+name and never branch on the vendor type.
 
 Each DocType is specified by three sections: **Fields** (the schema), **Form
 layout** (the section/column structure of the desk form), and **List view**
@@ -934,3 +947,222 @@ Tasks aren't a black box.
   ahead of the header, which would break the form layout. Operators can
   still sort the list by `started`.)
 - Standard filters: `server`, `virtual_machine`, `script`, `status`.
+
+---
+
+## Domain Provider
+
+Thin link table over the DNS provider abstraction, the exact twin of
+[Provider](#provider) for compute. Stores only the identity of a DNS account; all
+behavior lives in the registered `DnsProvider`
+([atlas/atlas/dns/](../atlas/atlas/dns/)). Used by `Root Domain` to prove control
+of a zone during a DNS-01 challenge. See [13-tls.md](./13-tls.md).
+
+### Fields
+
+| Field           | Type   | Reqd | Notes                                                                 |
+| --------------- | ------ | ---- | --------------------------------------------------------------------- |
+| `provider_name` | Data   | Y    | Primary key (autoname `field:provider_name`), `unique`, `set_only_once`. E.g. `route53-prod`. |
+| `provider_type` | Select | Y    | `Route53` / `Cloudflare`. `set_only_once`. Keys the DNS registry. Only Route53 implemented; Cloudflare reserved. |
+| `is_active`     | Check  |      | Default 1; **Archive** flips it. `for_domain_provider` refuses an archived row. |
+
+Buttons: **Test Connection** (`dns.for_domain_provider(name).authenticate()` —
+Route 53 lists hosted zones), **Archive**.
+
+### Form layout
+
+```
+provider_name
+provider_type
+| is_active
+```
+
+### List view
+
+- Columns: `provider_name`, `provider_type`, `is_active`.
+- Standard filters: `provider_type`, `is_active`.
+
+---
+
+## Route53 Settings
+
+A Single. AWS Route 53 credentials, the twin of [DigitalOcean
+Settings](#digitalocean-settings). Read by `Route53DnsProvider`; the secret comes
+out via `atlas.atlas.secrets.get_secret`.
+
+### Fields
+
+| Field               | Type     | Reqd | Notes                                                          |
+| ------------------- | -------- | ---- | -------------------------------------------------------------- |
+| `access_key_id`     | Data     | Y    | AWS IAM access key id with `route53:*` on the zone. `set_only_once`. |
+| `secret_access_key` | Password | Y    | AWS IAM secret. Rotate by clearing via `db.set_value`, then re-saving. |
+| `region`            | Data     |      | AWS API region for signing (default `us-east-1`; Route 53 is global). |
+
+No zone-id field: `certbot-dns-route53` discovers the hosted zone from the domain
+name at issue time.
+
+### Form layout
+
+```
+access_key_id
+secret_access_key
+region
+```
+
+---
+
+## TLS Provider
+
+Thin link table over the TLS issuer abstraction, twin of [Provider](#provider) and
+[Domain Provider](#domain-provider). All behavior lives in the registered
+`TlsProvider` ([atlas/atlas/tls/](../atlas/atlas/tls/)).
+
+### Fields
+
+| Field           | Type   | Reqd | Notes                                                                 |
+| --------------- | ------ | ---- | --------------------------------------------------------------------- |
+| `provider_name` | Data   | Y    | Primary key (autoname `field:provider_name`), `unique`, `set_only_once`. E.g. `letsencrypt-prod`. |
+| `provider_type` | Select | Y    | `Let's Encrypt` / `ZeroSSL` / `Self-Managed`. `set_only_once`. Keys the TLS registry. Only Let's Encrypt implemented; ZeroSSL is a `frappe.throw` stub; Self-Managed expects operator-supplied PEMs. |
+| `is_active`     | Check  |      | Default 1; **Archive** flips it. |
+
+Buttons: **Test Connection** (`tls.for_tls_provider(name).authenticate()`),
+**Archive**.
+
+### Form layout
+
+```
+provider_name
+provider_type
+| is_active
+```
+
+### List view
+
+- Columns: `provider_name`, `provider_type`, `is_active`.
+- Standard filters: `provider_type`, `is_active`.
+
+---
+
+## Lets Encrypt Settings
+
+A Single. ACME account config read by `LetsEncryptProvider`. The DocType name
+drops the apostrophe in "Let's Encrypt" because Frappe scrubs a DocType name into
+a Python module path and `Let's Encrypt Settings` would scrub to the unimportable
+`let's_encrypt_settings`; the `TLS Provider.provider_type` Select value keeps the
+apostrophe (`Let's Encrypt`) since that is data, not a module.
+
+### Fields
+
+| Field               | Type | Reqd | Default | Notes                                                  |
+| ------------------- | ---- | ---- | ------- | ------------------------------------------------------ |
+| `acme_directory_url`| Data | Y    | LE production directory | Use the staging URL while testing. |
+| `account_email`     | Data | Y    |         | ACME registration / expiry-notice email. `set_only_once`. |
+| `agree_tos`         | Check|      | 0       | Required before any certificate can be issued. |
+
+### Form layout
+
+```
+acme_directory_url
+account_email
+agree_tos
+```
+
+---
+
+## Root Domain
+
+One wildcard zone == one region. A row `blr1.frappe.dev` owns the regional
+wildcard cert `*.blr1.frappe.dev` that fronts the proxy fleet in `region`.
+`region` is the join key to `Virtual Machine.region` (`is_proxy=1`). See
+[13-tls.md](./13-tls.md).
+
+### Fields
+
+| Field             | Type                  | Reqd | Notes                                                              |
+| ----------------- | --------------------- | ---- | ------------------------------------------------------------------ |
+| `name`            | = `domain` (autoname `field:domain`) | Y | Primary key is the domain itself. |
+| `domain`          | Data                  | Y    | The wildcard zone, e.g. `blr1.frappe.dev`. `unique`, `set_only_once`. The cert is `*.<domain>`. |
+| `region`          | Data                  | Y    | The proxy fleet this domain fronts. Join key to `Virtual Machine.region`. `set_only_once`. |
+| `is_active`       | Check                 |      | Default 1. |
+| `domain_provider` | Link → Domain Provider| Y    | The DNS account that owns the zone (DNS-01). |
+| `tls_provider`    | Link → TLS Provider   | Y    | The issuer that produces the cert. |
+
+`domain` and `region` lock after insert. `common_name` (`*.<domain>`) is a derived
+property, not a stored field.
+
+### Controller methods
+
+- `issue_certificate()` — **Issue / Renew Certificate** button. Finds or creates
+  the domain's single `TLS Certificate` (one cert per domain) and delegates to its
+  `issue()`.
+
+### Form layout
+
+```
+domain
+region
+| is_active
+── Providers ──
+domain_provider
+tls_provider
+```
+
+### List view
+
+- Columns: `domain`, `region`, `is_active`.
+- Standard filters: `region`, `is_active`.
+
+---
+
+## TLS Certificate
+
+The issued regional wildcard cert, and the wiring that lands it on every proxy VM
+in the domain's region — the producer the proxy's `push_cert` was missing. One per
+`Root Domain`. See [13-tls.md](./13-tls.md).
+
+### Fields
+
+| Field            | Type                | Reqd | Read-only | Notes                                                       |
+| ---------------- | ------------------- | ---- | --------- | ----------------------------------------------------------- |
+| `name`           | UUID (`hash`)       | Y    | Y         | Primary key. |
+| `root_domain`    | Link → Root Domain  | Y    |           | `set_only_once`. |
+| `common_name`    | Data                |      | Y         | `*.<domain>`, derived from the Root Domain. `title_field`. |
+| `status`         | Select              |      | Y         | `Pending` / `Active` / `Expiring` / `Failed`. Set by issue/renew + the scheduler. |
+| `tls_provider`   | Link → TLS Provider |      |           | Denormalized from the domain; the issuer used. |
+| `issued_on`      | Datetime            |      | Y         | Parsed from the issued cert. |
+| `expires_on`     | Datetime            |      | Y         | Parsed from the issued cert; drives `renew_expiring`. |
+| `fullchain_path` | Data                |      | Y         | Path to `fullchain.pem` on the controller. Bytes stay out of the DB. |
+| `privkey_path`   | Data                |      | Y         | Path to `privkey.pem` on the controller (`0600`, Frappe-user owned). |
+
+### Controller methods
+
+- `issue()` / `renew()` — run the domain's `TlsProvider.issue` (the controller-local
+  `issue-cert.py` Task; see [13-tls.md](./13-tls.md)), record paths + dates, set
+  `Active`, then `_push_to_proxies()`. On failure, flip `Failed` and re-raise.
+- `push_to_proxies()` — **Push to Proxies** button. Read the PEMs off disk and call
+  `atlas.atlas.proxy.push_cert(vm, fullchain, privkey)` for every `is_proxy` VM in
+  the domain's region. One unreachable proxy is logged and skipped.
+- `renew_expiring()` *(module function)* — the `daily` scheduler entry point. Renew
+  every `Active` cert whose `expires_on` is within 30 days (re-issue **and**
+  re-push).
+
+Buttons: **Issue/Renew** (primary), **Push to Proxies**.
+
+### Form layout
+
+```
+root_domain
+common_name
+status
+| tls_provider
+issued_on
+expires_on
+── On-disk PEM paths (controller) ──
+fullchain_path
+privkey_path
+```
+
+### List view
+
+- Columns: `root_domain`, `common_name`, `status`.
+- Standard filters: `status`, `expires_on`.
