@@ -28,6 +28,18 @@ SSH_OPTIONS = [
 	"BatchMode=yes",
 	"-o",
 	"ConnectTimeout=30",
+	# Keepalive so a long-running command (the golden bake's `bench init` +
+	# `new-site`, minutes of apt/clone/node) survives a brief network blip yet a
+	# genuinely half-open connection DIES instead of hanging to the Task timeout.
+	# ConnectTimeout only bounds the initial handshake, not a stalled session;
+	# without these a wedged mid-command SSH blocks for the full `timeout_seconds`
+	# (observed: a 1800s bake hang on a dead-but-not-closed connection). 15s x 4
+	# missed probes ≈ 60s to give up — fast enough to fail loud, slack enough not
+	# to false-trip on a slow remote step.
+	"-o",
+	"ServerAliveInterval=15",
+	"-o",
+	"ServerAliveCountMax=4",
 ]
 
 
@@ -50,6 +62,7 @@ def _bracket_host(host: str) -> str:
 def wait_for_ssh(connection: Connection, timeout_seconds: int = 300, poll_seconds: int = 5) -> None:
 	"""Poll the host until SSH accepts a `true` command, or raise."""
 	_ensure_known_hosts_directory()
+	forget_host(connection.host)
 	deadline = time.monotonic() + timeout_seconds
 	with ssh_key_file(connection.ssh_private_key) as key_path:
 		while True:
@@ -116,6 +129,61 @@ def run_ssh(
 	return result.stdout, result.stderr, result.returncode
 
 
+def run_detached(
+	connection: Connection,
+	key_path: str,
+	remote_command: str,
+	*,
+	log_path: str,
+	done_path: str,
+	overall_timeout_seconds: int = 1800,
+	poll_seconds: int = 10,
+) -> tuple[str, str, int]:
+	"""Run a LONG remote command detached from the SSH session, then poll for it.
+
+	Returns (stdout, stderr, exit_code) like run_ssh — stdout is the captured log,
+	exit_code the command's real exit status. Raises on the overall timeout (the
+	command genuinely overran), which is distinct from a dropped poll (retried).
+
+	Why detach: a multi-minute guest build (a golden bench bake, an nginx+luajit
+	compile — 10-20 min) run as a foreground child of one SSH session ties its life
+	to that connection, so a single "Connection reset by peer" mid-build SIGHUPs it
+	and kills the build (observed at ~162s). `setsid nohup` frees it from the
+	session, tees output to `log_path`, and stamps the exit code into `done_path` on
+	completion; we then poll for that marker over SHORT, independently-retried SSH
+	calls. A network blip now fails one poll (retried), never the build itself.
+	Callers pass distinct log/done paths so concurrent builds don't collide."""
+	# Fresh markers, then launch under setsid+nohup. `sh -c` so the redirect + the
+	# exit-code stamp run in the detached shell; the trailing write captures the
+	# command's own exit status ($?).
+	launch = (
+		f"rm -f {shlex.quote(log_path)} {shlex.quote(done_path)}; "
+		f"setsid nohup sh -c {shlex.quote(f'{remote_command} > {log_path} 2>&1; echo $? > {done_path}')} "
+		f">/dev/null 2>&1 < /dev/null &"
+	)
+	run_ssh(connection, key_path, launch, timeout_seconds=60)
+
+	deadline = time.monotonic() + overall_timeout_seconds
+	while time.monotonic() < deadline:
+		time.sleep(poll_seconds)
+		# Short poll: has the marker appeared? A dropped poll just retries next loop.
+		try:
+			done, _stderr, _code = run_ssh(
+				connection, key_path, f"cat {shlex.quote(done_path)} 2>/dev/null || true", timeout_seconds=30
+			)
+		except Exception:
+			continue  # transient SSH failure — keep polling, the build runs on
+		if done.strip():
+			exit_code = int(done.strip())
+			log, _e, _c = run_ssh(
+				connection, key_path, f"cat {shlex.quote(log_path)} 2>/dev/null || true", timeout_seconds=120
+			)
+			return log, "", exit_code
+	raise frappe.ValidationError(
+		f"Detached command on {connection.host} did not finish within {overall_timeout_seconds}s (still running)"
+	)
+
+
 def run_scp(
 	connection: Connection,
 	key_path: str,
@@ -169,3 +237,33 @@ def _ensure_known_hosts_directory() -> None:
 	parent = KNOWN_HOSTS_PATH.parent
 	if not parent.exists():
 		parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+
+def forget_host(host: str) -> None:
+	"""Drop any cached host key for `host` from `~/.atlas/known_hosts`.
+
+	The provider recycles public IPs: a new VM can land on an address a terminated
+	VM held, whose host key we already pinned. `StrictHostKeyChecking=accept-new`
+	does NOT cover that case — it accepts an *unknown* host, but a *changed* key for
+	a known host is a hard MITM failure ("REMOTE HOST IDENTIFICATION HAS CHANGED"),
+	which wedges every SSH to the recycled IP until someone runs `ssh-keygen -R` by
+	hand (memory: real-provision-traps #1). So `wait_for_ssh` — the first SSH any
+	freshly-(re)created VM gets — forgets the address first; the next successful
+	poll re-pins the new key via `accept-new`. Best-effort: no entry to remove (the
+	common case) exits 0; a missing known_hosts file or absent `ssh-keygen` is
+	swallowed, since this is a convenience de-pin, not a security boundary."""
+	if not KNOWN_HOSTS_PATH.exists():
+		return
+	# ssh-keygen stores v6 literals bracketed and non-22 ports as [host]:port; for
+	# the default-port case the bare literal is the key. Strip our own brackets so
+	# the form matches what accept-new wrote.
+	target = host[1:-1] if host.startswith("[") and host.endswith("]") else host
+	try:
+		subprocess.run(
+			["ssh-keygen", "-R", target, "-f", str(KNOWN_HOSTS_PATH)],
+			capture_output=True,
+			timeout=15,
+			check=False,
+		)
+	except (FileNotFoundError, subprocess.SubprocessError):
+		pass

@@ -279,21 +279,26 @@ class TestPushCert(IntegrationTestCase):
 
 
 @contextlib.contextmanager
-def _mock_build_ssh(run_ssh_responses):
-	"""Like _mock_ssh, but also patches run_scp (build_proxy uploads the tree).
-	Yields (run_ssh, run_scp) so a test can assert what was uploaded and run."""
+def _mock_build_ssh(run_ssh_responses, detached_result=("built", "", 0)):
+	"""Like _mock_ssh, but also patches run_scp (build_proxy uploads the tree) and
+	run_detached (the long build.sh runs detached now — its poll mechanics are
+	unit-tested in test_ssh_transport). `run_ssh_responses` feeds the SHORT calls
+	(mkdir, then the region-write + restart); `detached_result` is what run_detached
+	returns. Yields (run_ssh, run_scp, run_detached)."""
 	run_ssh = MagicMock(side_effect=list(run_ssh_responses))
 	run_scp = MagicMock(return_value=None)
+	run_detached = MagicMock(return_value=detached_result)
 	key_cm = MagicMock()
 	key_cm.__enter__ = MagicMock(return_value="/tmp/fake.key")
 	key_cm.__exit__ = MagicMock(return_value=False)
 	with (
 		patch.object(proxy, "run_ssh", run_ssh),
 		patch.object(proxy, "run_scp", run_scp),
+		patch.object(proxy, "run_detached", run_detached),
 		patch.object(proxy, "ssh_key_file", return_value=key_cm),
 		patch.object(proxy, "connection_for_guest", return_value=MagicMock(ssh_private_key="KEY")),
 	):
-		yield run_ssh, run_scp
+		yield run_ssh, run_scp, run_detached
 
 
 class TestProxyTreeUploads(IntegrationTestCase):
@@ -332,24 +337,29 @@ class TestBuildProxy(IntegrationTestCase):
 
 	def test_uploads_tree_then_builds_writes_region_and_starts(self) -> None:
 		proxy_vm = _proxy_vm("blr1")
-		# 2 SSH calls: mkdir staging dirs, then the build+region+restart command.
-		with _mock_build_ssh([("", "", 0), ("built", "", 0)]) as (run_ssh, run_scp):
+		# Short SSH calls: mkdir staging dirs, then (after the detached build) the
+		# region-write + restart. The long build.sh goes through run_detached.
+		with _mock_build_ssh([("", "", 0), ("built", "", 0)]) as (run_ssh, run_scp, run_detached):
 			proxy.build_proxy(proxy_vm.name)
 		# Every committed proxy file was scp'd up.
 		self.assertEqual(run_scp.call_count, len(proxy._proxy_tree_uploads()))
 		self.assertGreater(run_scp.call_count, 5)
-		# First SSH is the mkdir; the build SSH writes the region and restarts.
+		# First SSH is the mkdir.
 		self.assertIn("mkdir -p", run_ssh.call_args_list[0].args[2])
-		build_command = run_ssh.call_args_list[1].args[2]
-		self.assertIn("build.sh", build_command)
-		self.assertIn("blr1", build_command)
-		self.assertIn(proxy.REGION_FILE, build_command)
-		# The build must NOT repoint the cert symlink: build.sh leaves it on the
-		# _placeholder cert (which exists) so nginx starts; push_cert repoints to
-		# certs/<region>/ only after the real cert lands there. Repointing here
-		# would dangle the symlink and nginx would fail to load its cert at start.
-		self.assertNotIn("ln -sfn", build_command)
-		self.assertIn("systemctl restart atlas-proxy.service", build_command)
+		# The long build runs DETACHED (survives a dropped SSH mid-compile).
+		run_detached.assert_called_once()
+		self.assertIn("build.sh", run_detached.call_args.args[2])
+		self.assertEqual(run_detached.call_args.kwargs["log_path"], proxy._BUILD_LOG)
+		# The region-write + restart is the fast follow-up, after the build succeeds.
+		finalize = run_ssh.call_args_list[1].args[2]
+		self.assertIn("blr1", finalize)
+		self.assertIn(proxy.REGION_FILE, finalize)
+		# It must NOT repoint the cert symlink: build.sh leaves it on the _placeholder
+		# cert (which exists) so nginx starts; push_cert repoints to certs/<region>/
+		# only after the real cert lands there. Repointing here would dangle the
+		# symlink and nginx would fail to load its cert at start.
+		self.assertNotIn("ln -sfn", finalize)
+		self.assertIn("systemctl restart atlas-proxy.service", finalize)
 
 	def test_records_a_task_row(self) -> None:
 		proxy_vm = _proxy_vm("blr1")
@@ -362,7 +372,9 @@ class TestBuildProxy(IntegrationTestCase):
 
 	def test_build_failure_raises_and_records_failure(self) -> None:
 		proxy_vm = _proxy_vm("blr1")
-		with _mock_build_ssh([("", "", 0), ("", "configure: error", 1)]):
+		# The detached build reports a non-zero exit → build_proxy throws, and the
+		# region-write/restart never runs (only the mkdir precedes it).
+		with _mock_build_ssh([("", "", 0)], detached_result=("", "configure: error", 1)):
 			with self.assertRaises(frappe.ValidationError):
 				proxy.build_proxy(proxy_vm.name)
 		status = frappe.get_all(

@@ -21,7 +21,7 @@ from pathlib import Path
 
 import frappe
 
-from atlas.atlas._ssh.transport import run_scp, run_ssh, ssh_key_file
+from atlas.atlas._ssh.transport import run_detached, run_scp, run_ssh, ssh_key_file
 from atlas.atlas.doctype.subdomain.subdomain import map_for_region
 from atlas.atlas.ssh import connection_for_guest
 
@@ -39,6 +39,9 @@ ADMIN_BASE = "http://localhost"
 # matches scripts_catalog.scripts_directory() — it resolves the app symlink to
 # the repo root, where `proxy/` sits beside `scripts/`.
 REMOTE_PROXY_DIRECTORY = "/tmp/atlas-proxy-build"
+# Where the detached proxy build writes its log + exit-code marker on the guest.
+_BUILD_LOG = f"{REMOTE_PROXY_DIRECTORY}/build.log"
+_BUILD_DONE = f"{REMOTE_PROXY_DIRECTORY}/build.done"
 
 
 def _proxy_source_directory() -> Path:
@@ -182,23 +185,32 @@ def build_proxy(virtual_machine: str) -> None:
 		)
 		for local, remote in uploads:
 			run_scp(connection, key_path, str(local), remote, timeout_seconds=300)
-		# Run the build (long: compiles nginx + luajit2 from source), then write
-		# the real region (build.sh leaves it empty) and (re)start the unit so
-		# init_by_lua picks the region up. We deliberately do NOT repoint the cert
-		# symlink here: build.sh aims the flat certs/{fullchain,privkey}.pem at the
-		# `_placeholder` cert (which exists), so nginx starts with a valid cert.
-		# Repointing to certs/<region>/ happens in push_cert, AFTER the real cert
-		# is written there — repointing now would dangle the symlink (certs/<region>/
-		# doesn't exist yet) and nginx would fail to load the cert at start.
-		# `systemctl restart` is a no-op-to-start on a guest with no running unit
-		# yet, and a clean restart on a rebuild.
-		build = (
-			f"chmod +x {REMOTE_PROXY_DIRECTORY}/build.sh && "
-			f"{REMOTE_PROXY_DIRECTORY}/build.sh && "
-			f"printf '%s\\n' {shlex.quote(vm.region)} > {shlex.quote(REGION_FILE)} && "
-			"systemctl restart atlas-proxy.service"
+		# Run the build (long: compiles nginx + luajit2 from source) DETACHED, so a
+		# connection reset mid-compile doesn't SIGHUP it — the same fragility the
+		# bench bake hit (memory: real-provision-traps M-7). The shared run_detached
+		# helper owns the setsid+nohup + marker-poll mechanics.
+		stdout, stderr, code = run_detached(
+			connection,
+			key_path,
+			f"chmod +x {REMOTE_PROXY_DIRECTORY}/build.sh && {REMOTE_PROXY_DIRECTORY}/build.sh",
+			log_path=_BUILD_LOG,
+			done_path=_BUILD_DONE,
 		)
-		stdout, stderr, code = run_ssh(connection, key_path, build, timeout_seconds=1800)
+		if code == 0:
+			# Build done — now the FAST follow-ups (no detach needed): write the real
+			# region (build.sh leaves it empty) and (re)start the unit so init_by_lua
+			# picks the region up. We deliberately do NOT repoint the cert symlink
+			# here: build.sh aims the flat certs/{fullchain,privkey}.pem at the
+			# `_placeholder` cert (which exists), so nginx starts with a valid cert.
+			# Repointing to certs/<region>/ happens in push_cert, AFTER the real cert
+			# is written there — repointing now would dangle the symlink and nginx
+			# would fail to load the cert at start. `systemctl restart` is a
+			# no-op-to-start on a guest with no running unit yet, clean restart on rebuild.
+			finalize = (
+				f"printf '%s\\n' {shlex.quote(vm.region)} > {shlex.quote(REGION_FILE)} && "
+				"systemctl restart atlas-proxy.service"
+			)
+			_out, stderr, code = run_ssh(connection, key_path, finalize, timeout_seconds=120)
 	_record_guest_task(virtual_machine, "proxy-build", {"region": vm.region}, stdout, stderr, code)
 	if code != 0:
 		frappe.throw(f"Proxy build on {virtual_machine} failed (exit {code}): {stderr[-500:]}")

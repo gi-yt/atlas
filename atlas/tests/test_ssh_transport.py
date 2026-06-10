@@ -13,6 +13,8 @@ from atlas.atlas._ssh import transport
 from atlas.atlas._ssh.transport import (
 	Connection,
 	_ensure_known_hosts_directory,
+	forget_host,
+	run_detached,
 	run_scp,
 	run_ssh,
 	ssh_key_file,
@@ -39,6 +41,16 @@ class TestWaitForSsh(IntegrationTestCase):
 			with patch("atlas.atlas._ssh.transport.time.sleep"):
 				wait_for_ssh(CONNECTION, timeout_seconds=10)
 
+	def test_forgets_recycled_host_key_before_polling(self) -> None:
+		# A freshly-(re)created VM may land on a recycled IP whose stale key we
+		# pinned; wait_for_ssh must drop it first so accept-new re-pins the new
+		# key instead of hard-failing on a changed key (real-provision-traps #1).
+		with patch("atlas.atlas._ssh.transport.forget_host") as forget:
+			with patch("atlas.atlas._ssh.transport.run_ssh", return_value=("", "", 0)):
+				with patch("atlas.atlas._ssh.transport.time.sleep"):
+					wait_for_ssh(CONNECTION, timeout_seconds=10)
+		forget.assert_called_once_with(CONNECTION.host)
+
 	def test_times_out_when_never_ready(self) -> None:
 		with patch(
 			"atlas.atlas._ssh.transport.run_ssh",
@@ -51,6 +63,74 @@ class TestWaitForSsh(IntegrationTestCase):
 				):
 					with self.assertRaises(frappe.ValidationError):
 						wait_for_ssh(CONNECTION, timeout_seconds=10)
+
+
+class TestRunDetached(IntegrationTestCase):
+	"""The long-build detach helper: launch under setsid+nohup, poll a marker, read
+	the log. Drives the launch/poll mechanics both the bench bake and the proxy
+	build now share."""
+
+	def test_launches_detached_then_returns_log_and_exit_on_marker(self) -> None:
+		# Sequence: launch (rc 0), first poll returns the exit-code marker, then the
+		# log read. time.sleep is no-op'd so the poll loop doesn't actually wait.
+		responses = [("", "", 0), ("0\n", "", 0), ("BUILD LOG", "", 0)]
+		with patch("atlas.atlas._ssh.transport.run_ssh", side_effect=responses) as run_ssh:
+			with patch("atlas.atlas._ssh.transport.time.sleep"):
+				log, _stderr, code = run_detached(
+					CONNECTION, "/tmp/key", "/x/build.sh", log_path="/x/build.log", done_path="/x/build.done"
+				)
+		self.assertEqual((log, code), ("BUILD LOG", 0))
+		# The launch command detaches the build so a dropped SSH can't SIGHUP it.
+		launch = run_ssh.call_args_list[0].args[2]
+		self.assertIn("setsid", launch)
+		self.assertIn("nohup", launch)
+		self.assertIn("/x/build.sh", launch)
+
+	def test_propagates_nonzero_build_exit(self) -> None:
+		responses = [("", "", 0), ("1\n", "", 0), ("oops", "", 0)]
+		with patch("atlas.atlas._ssh.transport.run_ssh", side_effect=responses):
+			with patch("atlas.atlas._ssh.transport.time.sleep"):
+				_log, _stderr, code = run_detached(
+					CONNECTION, "/tmp/key", "/x/build.sh", log_path="/x/build.log", done_path="/x/build.done"
+				)
+		self.assertEqual(code, 1)
+
+	def test_transient_poll_failure_is_retried_not_fatal(self) -> None:
+		# A dropped poll (run_ssh raises) must not abort the wait — the next poll
+		# finds the marker. launch ok, poll raises, poll returns "0", log read.
+		calls = {"n": 0}
+
+		def flaky(connection, key_path, command, timeout_seconds):
+			calls["n"] += 1
+			if calls["n"] == 1:
+				return ("", "", 0)  # launch
+			if calls["n"] == 2:
+				raise OSError("connection reset")  # dropped poll
+			if calls["n"] == 3:
+				return ("0\n", "", 0)  # marker present
+			return ("LOG", "", 0)  # log read
+
+		with patch("atlas.atlas._ssh.transport.run_ssh", side_effect=flaky):
+			with patch("atlas.atlas._ssh.transport.time.sleep"):
+				log, _stderr, code = run_detached(
+					CONNECTION, "/tmp/key", "/x/build.sh", log_path="/x/build.log", done_path="/x/build.done"
+				)
+		self.assertEqual((log, code), ("LOG", 0))
+
+	def test_raises_when_build_overruns_overall_timeout(self) -> None:
+		# Marker never appears; monotonic jumps past the deadline → raise.
+		with patch("atlas.atlas._ssh.transport.run_ssh", return_value=("", "", 0)):
+			with patch("atlas.atlas._ssh.transport.time.sleep"):
+				with patch("atlas.atlas._ssh.transport.time.monotonic", side_effect=[0.0, 1.0, 9999.0]):
+					with self.assertRaises(frappe.ValidationError):
+						run_detached(
+							CONNECTION,
+							"/tmp/key",
+							"/x/build.sh",
+							log_path="/x/build.log",
+							done_path="/x/build.done",
+							overall_timeout_seconds=10,
+						)
 
 
 class TestUploadFiles(IntegrationTestCase):
@@ -201,3 +281,57 @@ class TestEnsureKnownHostsDirectory(IntegrationTestCase):
 			with patch("atlas.atlas._ssh.transport.KNOWN_HOSTS_PATH", fake_path):
 				_ensure_known_hosts_directory()
 			self.assertTrue(fake_path.parent.exists())
+
+
+class TestForgetHost(IntegrationTestCase):
+	def test_noop_when_known_hosts_missing(self) -> None:
+		with tempfile.TemporaryDirectory() as temp_directory:
+			fake_path = Path(temp_directory) / "known_hosts"  # never created
+			with patch("atlas.atlas._ssh.transport.KNOWN_HOSTS_PATH", fake_path):
+				with patch("atlas.atlas._ssh.transport.subprocess.run") as run:
+					forget_host("10.0.0.1")
+			run.assert_not_called()
+
+	def test_runs_keygen_remove_against_known_hosts(self) -> None:
+		with tempfile.TemporaryDirectory() as temp_directory:
+			fake_path = Path(temp_directory) / "known_hosts"
+			fake_path.write_text("")  # exists → forget proceeds
+			captured: dict = {}
+
+			def capture(args, **kwargs):
+				captured["args"] = list(args)
+				return _ok(args, **kwargs)
+
+			with patch("atlas.atlas._ssh.transport.KNOWN_HOSTS_PATH", fake_path):
+				with patch("atlas.atlas._ssh.transport.subprocess.run", side_effect=capture):
+					forget_host("10.0.0.1")
+			self.assertEqual(captured["args"][:3], ["ssh-keygen", "-R", "10.0.0.1"])
+			self.assertIn(str(fake_path), captured["args"])
+
+	def test_strips_brackets_from_v6_literal(self) -> None:
+		# We bracket v6 for scp's host:path syntax; ssh-keygen -R wants the bare
+		# literal (default port), matching what accept-new wrote.
+		with tempfile.TemporaryDirectory() as temp_directory:
+			fake_path = Path(temp_directory) / "known_hosts"
+			fake_path.write_text("")
+			captured: dict = {}
+
+			def capture(args, **kwargs):
+				captured["args"] = list(args)
+				return _ok(args, **kwargs)
+
+			with patch("atlas.atlas._ssh.transport.KNOWN_HOSTS_PATH", fake_path):
+				with patch("atlas.atlas._ssh.transport.subprocess.run", side_effect=capture):
+					forget_host("[2400:6180:100:d0:0:1:517f:8002]")
+			self.assertEqual(captured["args"][2], "2400:6180:100:d0:0:1:517f:8002")
+
+	def test_swallows_missing_ssh_keygen(self) -> None:
+		with tempfile.TemporaryDirectory() as temp_directory:
+			fake_path = Path(temp_directory) / "known_hosts"
+			fake_path.write_text("")
+			with patch("atlas.atlas._ssh.transport.KNOWN_HOSTS_PATH", fake_path):
+				with patch(
+					"atlas.atlas._ssh.transport.subprocess.run",
+					side_effect=FileNotFoundError(),
+				):
+					forget_host("10.0.0.1")  # must not raise
