@@ -348,6 +348,27 @@ class TestVirtualMachine(IntegrationTestCase):
 		# The snapshot LV was removed via the per-snapshot delete script.
 		self.assertEqual(mocked_snapshot.call_args.kwargs["script"], "delete-snapshot-vm.py")
 
+	def test_terminate_preserves_the_golden_bench_snapshot(self) -> None:
+		# The golden snapshot is the durable artifact self-serve sites clone from;
+		# terminating its build VM (bake scratch) must NOT delete it, or the row stays
+		# Available while its LV is gone and the next clone fails late (snapshot LV not
+		# found). See _delete_snapshots' golden skip.
+		from atlas.atlas.doctype.virtual_machine import virtual_machine as module
+
+		vm = _new_vm()
+		vm.db_set("status", "Stopped")
+		vm.reload()
+		with patch.object(
+			module, "run_task", return_value=fake_task(stdout='ATLAS_RESULT={"size_bytes": 1}')
+		):
+			snapshot_name = vm.snapshot("golden")
+		frappe.db.set_single_value("Atlas Settings", "default_bench_snapshot", snapshot_name)
+
+		with patch.object(module, "run_task", return_value=fake_task(name="task-term")):
+			vm.terminate()
+		# The referenced golden survives the build VM's termination.
+		self.assertTrue(frappe.db.exists("Virtual Machine Snapshot", snapshot_name))
+
 	def test_parse_size_bytes(self) -> None:
 		from atlas.atlas.task_results import parse_result
 

@@ -442,10 +442,20 @@ class VirtualMachine(Document):
 		lvremoves its snapshot LV — snapshot LVs live in the thin pool, OUTSIDE
 		the VM directory terminate-vm.py rm -rf'd, so they survive that and must
 		be removed via the per-snapshot delete path (one SSH round trip each;
-		the script is idempotent)."""
+		the script is idempotent).
+
+		The golden bench snapshot is the exception: it is a DURABLE artifact that
+		outlives its build VM — every self-serve site clones from it. Terminating the
+		build VM (the bake leaves it as scratch) must NOT take the golden with it, or
+		the snapshot row stays "Available" while its LV is gone and the next clone
+		fails late in provision-vm.py ("snapshot LV not found"). So skip the snapshot
+		currently referenced by Atlas Settings.default_bench_snapshot."""
+		golden = frappe.db.get_single_value("Atlas Settings", "default_bench_snapshot")
 		for name in frappe.get_all(
 			"Virtual Machine Snapshot", filters={"virtual_machine": self.name}, pluck="name"
 		):
+			if name == golden:
+				continue
 			frappe.delete_doc("Virtual Machine Snapshot", name, ignore_permissions=True)
 
 	def _ipv4_link_variables(self) -> dict:
