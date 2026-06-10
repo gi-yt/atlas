@@ -110,6 +110,13 @@ class TestSubdomain(IntegrationTestCase):
 			"atlas.atlas.doctype.subdomain.subdomain.auto_reconcile_region",
 		)
 		self.assertEqual(kwargs["region"], "blr1")
+		# Deduplicated per region so a burst of subdomain changes collapses to one
+		# queued reconcile (a wedged proxy makes each take its full SSH timeout, so
+		# undeduped they flood `long` and starve everything else).
+		self.assertTrue(kwargs["deduplicate"])
+		self.assertEqual(kwargs["job_id"], "auto_reconcile_region::blr1")
+		# After-commit so the reconcile reads this change's committed map row.
+		self.assertTrue(kwargs["enqueue_after_commit"])
 
 	def test_active_toggle_enqueues_reconcile(self) -> None:
 		vm = _new_vm()

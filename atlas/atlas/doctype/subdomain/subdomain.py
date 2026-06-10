@@ -39,11 +39,24 @@ class Subdomain(Document):
 		"""Background-reconcile this subdomain's region. queue=long because the job
 		SSHes into every proxy in the region (slow); reconcile_region tolerates an
 		empty fleet (no-op) and isolates per-proxy failures, so a missing or wedged
-		proxy never fails the operator's save."""
+		proxy never fails the operator's save.
+
+		Deduplicated per region: a reconcile reads the WHOLE region's desired map
+		(`map_for_region`), so it is the same job no matter which subdomain triggered
+		it — N subdomain changes need one reconcile, not N. Without this, a burst of
+		changes (an e2e, a bulk edit) floods `long` with identical jobs; with a wedged
+		or missing proxy each takes its full SSH timeout, so they pile up far faster
+		than they drain and starve every other `long` job (observed: 4000+ redundant
+		reconciles backing up the queue while a proxy was down). `deduplicate=True`
+		with a region-keyed `job_id` collapses the burst to a single queued reconcile;
+		`enqueue_after_commit` so the job sees this change's committed map row."""
 		frappe.enqueue(
 			"atlas.atlas.doctype.subdomain.subdomain.auto_reconcile_region",
 			queue="long",
 			timeout=300,
+			job_id=f"auto_reconcile_region::{self.region}",
+			deduplicate=True,
+			enqueue_after_commit=True,
 			region=self.region,
 		)
 
