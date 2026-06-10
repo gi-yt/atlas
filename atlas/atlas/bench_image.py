@@ -25,7 +25,7 @@ from pathlib import Path
 
 import frappe
 
-from atlas.atlas._ssh.transport import run_detached, run_scp, run_ssh, ssh_key_file
+from atlas.atlas._ssh.transport import forget_host, run_detached, run_scp, run_ssh, ssh_key_file
 from atlas.atlas.proxy import _record_guest_task, _remote_parent
 from atlas.atlas.ssh import connection_for_guest
 
@@ -73,6 +73,12 @@ def build_bench(virtual_machine: str) -> None:
 	vm = frappe.get_doc("Virtual Machine", virtual_machine)
 	connection = connection_for_guest(vm)
 	uploads = _bench_tree_uploads()
+	# This is a freshly-provisioned VM that may have landed on a recycled IP whose
+	# old host key we pinned; build_bench reaches the guest via run_scp/run_ssh
+	# directly (no wait_for_ssh in this path), so accept-new never re-pins — drop
+	# the stale key first or the first scp hard-fails with a MITM warning
+	# (real-provision-traps #1; the proxy build hit exactly this on a recycled e003).
+	forget_host(connection.host)
 	with ssh_key_file(connection.ssh_private_key) as key_path:
 		# Stage the whole tree under one dir so build.sh finds bench.toml beside
 		# itself (it reads from the directory it lives in).

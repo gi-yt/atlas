@@ -288,6 +288,7 @@ def _mock_build_ssh(run_ssh_responses, detached_result=("built", "", 0)):
 	run_ssh = MagicMock(side_effect=list(run_ssh_responses))
 	run_scp = MagicMock(return_value=None)
 	run_detached = MagicMock(return_value=detached_result)
+	forget_host = MagicMock(return_value=None)
 	key_cm = MagicMock()
 	key_cm.__enter__ = MagicMock(return_value="/tmp/fake.key")
 	key_cm.__exit__ = MagicMock(return_value=False)
@@ -295,10 +296,13 @@ def _mock_build_ssh(run_ssh_responses, detached_result=("built", "", 0)):
 		patch.object(proxy, "run_ssh", run_ssh),
 		patch.object(proxy, "run_scp", run_scp),
 		patch.object(proxy, "run_detached", run_detached),
+		patch.object(proxy, "forget_host", forget_host),
 		patch.object(proxy, "ssh_key_file", return_value=key_cm),
-		patch.object(proxy, "connection_for_guest", return_value=MagicMock(ssh_private_key="KEY")),
+		patch.object(
+			proxy, "connection_for_guest", return_value=MagicMock(ssh_private_key="KEY", host="2400::beef")
+		),
 	):
-		yield run_ssh, run_scp, run_detached
+		yield run_ssh, run_scp, run_detached, forget_host
 
 
 class TestProxyTreeUploads(IntegrationTestCase):
@@ -339,11 +343,20 @@ class TestBuildProxy(IntegrationTestCase):
 		proxy_vm = _proxy_vm("blr1")
 		# Short SSH calls: mkdir staging dirs, then (after the detached build) the
 		# region-write + restart. The long build.sh goes through run_detached.
-		with _mock_build_ssh([("", "", 0), ("built", "", 0)]) as (run_ssh, run_scp, run_detached):
+		with _mock_build_ssh([("", "", 0), ("built", "", 0)]) as (
+			run_ssh,
+			run_scp,
+			run_detached,
+			forget_host,
+		):
 			proxy.build_proxy(proxy_vm.name)
 		# Every committed proxy file was scp'd up.
 		self.assertEqual(run_scp.call_count, len(proxy._proxy_tree_uploads()))
 		self.assertGreater(run_scp.call_count, 5)
+		# A stale pinned host key for a recycled IP is dropped before the first scp,
+		# or build_proxy hard-fails "REMOTE HOST IDENTIFICATION HAS CHANGED" — the
+		# real failure that aborted the first self_serve_site host run on a recycled e003.
+		forget_host.assert_called_once_with("2400::beef")
 		# First SSH is the mkdir.
 		self.assertIn("mkdir -p", run_ssh.call_args_list[0].args[2])
 		# The long build runs DETACHED (survives a dropped SSH mid-compile).

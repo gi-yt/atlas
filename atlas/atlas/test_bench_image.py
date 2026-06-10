@@ -34,6 +34,7 @@ def _mock_build_ssh(build_result):
 	run_ssh = MagicMock(return_value=("", "", 0))
 	run_scp = MagicMock(return_value=None)
 	run_detached = MagicMock(return_value=build_result)
+	forget_host = MagicMock(return_value=None)
 	key_cm = MagicMock()
 	key_cm.__enter__ = MagicMock(return_value="/tmp/fake.key")
 	key_cm.__exit__ = MagicMock(return_value=False)
@@ -41,10 +42,15 @@ def _mock_build_ssh(build_result):
 		patch.object(bench_image, "run_ssh", run_ssh),
 		patch.object(bench_image, "run_scp", run_scp),
 		patch.object(bench_image, "run_detached", run_detached),
+		patch.object(bench_image, "forget_host", forget_host),
 		patch.object(bench_image, "ssh_key_file", return_value=key_cm),
-		patch.object(bench_image, "connection_for_guest", return_value=MagicMock(ssh_private_key="KEY")),
+		patch.object(
+			bench_image,
+			"connection_for_guest",
+			return_value=MagicMock(ssh_private_key="KEY", host="2400::dead"),
+		),
 	):
-		yield run_ssh, run_scp, run_detached
+		yield run_ssh, run_scp, run_detached, forget_host
 
 
 class TestBenchTreeUploads(IntegrationTestCase):
@@ -76,7 +82,7 @@ class TestBuildBench(IntegrationTestCase):
 
 	def test_uploads_tree_then_runs_build(self) -> None:
 		vm = _new_vm()
-		with _mock_build_ssh(("baked", "", 0)) as (run_ssh, run_scp, run_detached):
+		with _mock_build_ssh(("baked", "", 0)) as (run_ssh, run_scp, run_detached, _forget_host):
 			bench_image.build_bench(vm.name)
 		# Every committed bench/ file was scp'd up.
 		self.assertEqual(run_scp.call_count, len(bench_image._bench_tree_uploads()))
@@ -88,6 +94,15 @@ class TestBuildBench(IntegrationTestCase):
 		self.assertIn("build.sh", run_detached.call_args.args[2])
 		self.assertEqual(run_detached.call_args.kwargs["log_path"], bench_image._BUILD_LOG)
 		self.assertEqual(run_detached.call_args.kwargs["done_path"], bench_image._BUILD_DONE)
+
+	def test_forgets_recycled_host_key_before_uploading(self) -> None:
+		# build_bench reaches a fresh VM via run_scp directly (no wait_for_ssh in this
+		# path), so it must drop any stale pinned key for the address first or the
+		# first scp hard-fails on a recycled IP (real-provision-traps #1).
+		vm = _new_vm()
+		with _mock_build_ssh(("baked", "", 0)) as (_ssh, _scp, _det, forget_host):
+			bench_image.build_bench(vm.name)
+		forget_host.assert_called_once_with("2400::dead")
 
 	def test_records_a_task_row(self) -> None:
 		vm = _new_vm()

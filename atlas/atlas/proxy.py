@@ -21,7 +21,7 @@ from pathlib import Path
 
 import frappe
 
-from atlas.atlas._ssh.transport import run_detached, run_scp, run_ssh, ssh_key_file
+from atlas.atlas._ssh.transport import forget_host, run_detached, run_scp, run_ssh, ssh_key_file
 from atlas.atlas.doctype.subdomain.subdomain import map_for_region
 from atlas.atlas.ssh import connection_for_guest
 
@@ -173,6 +173,11 @@ def build_proxy(virtual_machine: str) -> None:
 		frappe.throw(f"Virtual Machine {virtual_machine} has no region; not a proxy")
 	connection = connection_for_guest(vm)
 	uploads = _proxy_tree_uploads()
+	# Freshly-provisioned VM, possibly on a recycled IP whose old host key we pinned.
+	# This path goes straight to run_scp/run_ssh (no wait_for_ssh), so accept-new
+	# never re-pins a CHANGED key — drop the stale entry first or the first scp
+	# hard-fails "REMOTE HOST IDENTIFICATION HAS CHANGED" (real-provision-traps #1).
+	forget_host(connection.host)
 	with ssh_key_file(connection.ssh_private_key) as key_path:
 		# Stage the whole tree under one dir so build.sh finds its sibling
 		# conf/lua/html/guest (it reads from its own directory).
