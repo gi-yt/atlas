@@ -180,10 +180,18 @@ def restore_credentials() -> None:
 
 	Idempotent; safe to re-run. Fails loud (`require_config`) if a key is missing,
 	since a half-restored credential set is worse than a clean error."""
+	# Store the EXPANDED absolute path. Config often holds `~/.ssh/id_rsa`; the
+	# production reader (get_ssh_key_from_disk) expanduser()s it, but a stored raw
+	# `~` is a trap for any path that reads the field literally and a confusing
+	# "invalid format / file not found" if the tilde survives — expand once here so
+	# the Single always holds a real absolute path that points at an existing key.
+	key_path = os.path.expanduser(require_config("atlas_ssh_private_key_path"))
+	if not os.path.isfile(key_path):
+		frappe.throw(f"atlas_ssh_private_key_path expands to {key_path!r}, which is not a file")
 	frappe.db.set_single_value(
 		"Atlas Settings",
 		"ssh_private_key_path",
-		require_config("atlas_ssh_private_key_path"),
+		key_path,
 		update_modified=False,
 	)
 	frappe.db.set_single_value(
