@@ -141,6 +141,49 @@ behavior; they just keep doors open.
   don't hit sub-5s (boot + RQ-pickup are the only residuals they can't remove) —
   explicitly deferred, not built here.
 
+- **Reverse-proxy gaps** ([12-proxy.md](./12-proxy.md)). The proxy itself is
+  built and e2e-proven; these are the gaps around it, the first a security gate:
+  1. **South-side firewall — scope site `:80` to the proxies** *(security gate)*.
+     A site's `:80` is reachable by **anyone** on the v6 internet today (proxies
+     are dedicated, not co-located — *Accepted limitations* in 12-proxy). The
+     `proxy_vm` e2e proves the proxy *can* reach the site's `:80`; it does **not**
+     prove only the proxies can. A per-VM guest firewall scoping inbound `:80` to
+     the proxy source addresses — without dropping the proxy hop — does not exist
+     yet. This is a release gate, not just a TODO.
+  2. **Withdraw an unhealthy proxy from the wildcard.** `upsert_wildcard`
+     publishes round-robin A/AAAA over the regional proxy fleet, but there is no
+     health signal that *removes* a record when a proxy is down — a dead proxy
+     still takes 1/N of the traffic until an operator reconciles by hand.
+  3. **Schedule the reconcile loop.** `reconcile_proxy` / `reconcile_region` run
+     on demand, but the *periodic* diff (re-`/sync` every proxy on a timer, so a
+     rebuilt/drifted proxy self-heals without operator action) is **not wired**:
+     `scheduler_events` in [`atlas/hooks.py`](../atlas/hooks.py) carries only the
+     daily cert-renewal job. Adding `reconcile_region` there is a trivial step.
+  4. **TLS grade (A+) is not automated.** The one image-gate row the compose
+     harness can't assert (needs a real cert + `testssl.sh`/`sslyze`). The TLS
+     layer now produces a real cert, so this is gradeable — just not yet wired.
+  5. **404-only vs 404/503 tombstones.** Shipping 404-only; the known-down `503`
+     ("site suspended/preparing") path — a tombstone value in the map — is a small
+     additive follow-up for the signup UX.
+  6. **Proxy VM sizing.** Per-VM cgroup caps (`vcpus`, `memory_megabytes`) and
+     `LimitNOFILE` are at sensible defaults; tune once real load is observed.
+  7. **`ssl_certificate_by_lua` / per-subdomain custom-domain certs.** Confirmed
+     to work in the self-assembled build; the hook is left in place but unbuilt —
+     one wildcard covers everything this iteration. (See also **General tenant
+     inbound v4** below, the same shape on the v4 side.)
+  8. **Proxy terminate-guard.** A proxy is a terminable VM like any other
+     (accepted risk, mitigated by 2–3/region). `Virtual Machine` already carries a
+     `termination_protection` flag and guard; *setting* it on proxies is operator
+     discipline, not yet automated. A stronger guard (tag / naming convention /
+     confirm-dialog) is the additive follow-up if it bites.
+  All additive except #1, which is a release gate.
+
+- **General tenant inbound v4.** The v4-attach primitive (`Reserved IP`,
+  [06-networking.md](./06-networking.md#ipv4-ingress-reserved-ip)) is gated to
+  Atlas-owned VMs; the reverse proxy is its first and only user. Letting a
+  dashboard user attach a public v4 to their own VM is a deliberate later step.
+  Additive.
+
 - **Server lock doctype**. A single-row lock keyed by `(server, resource)`
   that long-running mutating Tasks (sync-image, provision) take before
   doing work. Today two concurrent syncs of the same image-on-server are

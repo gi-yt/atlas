@@ -260,7 +260,8 @@ with the fleet key), recording the op as a `deploy-site` Task row.
 **edge proxy** (12-proxy.md) routes `Host: acme.blr1.frappe.dev` → `[<vm-v6>]:80`,
 where that nginx matches the site by `server_name`. **TLS terminates at the edge
 proxy, not in the guest** — there is no in-guest certbot; the south hop is
-plaintext `:80` over public v6 (the accepted proxy-design limitation). Baking the
+plaintext `:80` over public v6 (the accepted limitation under
+[12-proxy.md § Accepted limitations](./12-proxy.md)). Baking the
 site past the wizard, the rename, and `setup production` *remove* the manual
 TLS/certbot steps a stand-alone bench would need.
 

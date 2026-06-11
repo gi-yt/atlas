@@ -89,7 +89,7 @@ class Subdomain(Document):
 def map_for_region(region: str) -> dict[str, str]:
 	"""The desired subdomain→address map for a region: every ACTIVE subdomain in
 	the region. This is the full map every proxy VM in the region serves (the
-	design's "each proxy holds the whole regional map", proxy-design.md §7.1).
+	design's "each proxy holds the whole regional map", spec/12-proxy.md).
 
 	The proxy reconcile (atlas.atlas.proxy) compares this, serialized canonically,
 	against each proxy guest's live `/map` and bulk-`/sync`s on drift."""

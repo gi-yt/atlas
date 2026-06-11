@@ -6,10 +6,6 @@ to exactly one site VM, dialed over public IPv6 on port 80 (plaintext). The map
 changes constantly and must update **without reloading nginx**. Atlas is the
 source of truth and reconciles each proxy's live map over SSH.
 
-The full architecture, rationale, and the locked design interviews live in
-[`llm/proxy-design.md`](../llm/proxy-design.md). This chapter is the durable
-spec: what exists, what each piece does, and what is still pending.
-
 ## The shape
 
 - **The proxy is an ordinary Atlas Virtual Machine** — operator-owned, marked
@@ -71,7 +67,8 @@ and the socket's file permissions are the gate.
   upload the committed [`proxy/`](../proxy) tree over the same guest-SSH path and
   run [`proxy/build.sh`](../proxy/build.sh) **inside** the guest (compiling nginx +
   Lua from pinned sources), then write the VM's `region` and start the unit. This
-  is the controller side of "build inside the guest" (§3.1 below) and the same
+  is the controller side of "build inside the guest" (*Build & roll = VM
+  lifecycle* below) and the same
   byte-identical stack the compose release gate exercises (the gate's Dockerfile
   runs the same `build.sh`). Idempotent, so it doubles as the re-bake verb. The
   operator snapshots the built VM; that snapshot is the rollable proxy image.
@@ -105,8 +102,7 @@ dev host.
 These prove what only a real droplet can. They are wired as a single e2e use
 case, [`atlas/tests/e2e/use_cases/proxy_vm.py`](../atlas/tests/e2e/use_cases/proxy_vm.py),
 registered in `run_all` / `run_all_smoke` and run on the shared bootstrapped
-droplet (the design's Phase D, [`llm/proxy-design.md`](../llm/proxy-design.md)
-§9.2). The controller logic underneath each is unit-covered in milliseconds
+droplet. The controller logic underneath each is unit-covered in milliseconds
 (`atlas/atlas/test_proxy.py`: canonical JSON, the reconcile diff, the proxy-tree
 enumeration; `scripts/lib/atlas/test_reserved_ip_nat.py`: the host NAT math). The
 e2e itself needs a billable droplet + a real reserved IP, so it is run on the
@@ -124,7 +120,8 @@ atlas.tests.e2e.use_cases.proxy_vm.run_smoke`), not in the unit suite.
   desired map byte-for-byte.
 - **inbound-:80 to a site from the proxy's vantage** — the public-v6 south-side
   release gate that had never been tested
-  ([06-networking.md](./06-networking.md), `proxy-design.md` §2.1): from inside
+  ([06-networking.md](./06-networking.md), and the public-v6 hop under
+  *Accepted limitations* below): from inside
   the proxy guest, reach a stand-in site VM's `[v6]:80` (the exact
   `proxy_pass http://[<site-v6>]:80` hop). A site's `:80` is reachable by anyone
   on the v6 internet; a future per-VM firewall must scope it to the proxies and
@@ -142,3 +139,60 @@ atlas.tests.e2e.use_cases.proxy_vm.run_smoke`), not in the unit suite.
 
 TLS **grade** (A+) is the one image-gate row not automated (needs a real cert /
 `testssl.sh`), so it is a manual/D check.
+
+## Why these decisions
+
+The spec records *what* is true; these are the structural choices and the
+alternatives they beat, kept so a future change knows what it is overturning.
+
+1. **The proxy runs inside an Atlas VM, not a host service.** An earlier draft
+   ran it as a host-level service on a dedicated proxy *node* (its own exported
+   rootfs, `RootDirectory=` chroot, systemd hardening drop-ins). Superseded: the
+   VM is the universal building block, so the proxy inherits Atlas's lifecycle,
+   jailer, cgroup, image/rebuild, and snapshot machinery for free. The VM **is**
+   the sandbox; there is no bespoke hardening stack. (The old host-service
+   `systemd/` + `install.py`/`update.py` were never built.)
+2. **2–3 proxy VMs per region — dedicated, not co-located per host.** Drivers:
+   resiliency, rollover, rolling update. The rejected alternative — co-locating a
+   proxy with the sites it fronts to make the south hop host-local — would have
+   retired the public-v6 caveat (*Accepted limitations* below) but lost the
+   dedicated-fleet resiliency. We took the caveat.
+3. **Inbound is the real goal — a VM can attach one public IPv4.** This is the
+   inbound mirror of the existing egress NAT44, gated to Atlas-owned VMs today.
+   On DO it is a reserved IP attached to the *droplet* and host-side 1:1-NATed to
+   the guest (DNAT in, SNAT out, same `inet atlas` table) — *not* routed the way
+   v6 is, because DO delivers the reserved IP via an **anchor IP** and never ARPs
+   for the reserved IP on the link, so the v6 proxy-NDP + `/32`-route recipe has
+   nothing to bind to ([06-networking.md](./06-networking.md#ipv4-ingress-reserved-ip)).
+   The proxy is the primitive's first user; general tenant inbound v4 is a
+   deliberate later step ([09-roadmap.md](./09-roadmap.md)).
+4. **No infrastructure-VM tier.** The proxy holds the wildcard private key and
+   terminates TLS for the region — a higher trust tier than a tenant site — but
+   we deliberately do **not** model that as a new DocType. It is an ordinary
+   operator-owned `Virtual Machine`, invisible to the user SPA by ownership.
+   Accepted risk: it can be Terminated from Desk like any VM (mitigated by
+   running 2–3; a terminate-guard is an additive follow-up, see
+   [09-roadmap.md](./09-roadmap.md)).
+5. **Atlas SSHes into the guest.** A second SSH target type (guest, reaching the
+   VM's `/128`) alongside the existing host-root path, used for both map sync and
+   cert push. The guest admin API is a unix socket only — SSH-to-the-guest is the
+   only way to reach it; socket file perms are the gate. No agent on the guest.
+6. **The map is bulk-declarative reconcile, not event sourcing.** Atlas is the
+   source of truth; each proxy's dict is a cache. Both sides emit the *same*
+   canonical JSON (sorted keys, 2-space indent), so "in sync?" is a byte compare.
+   Per-entry PUT/DELETE exist for low-latency single changes; the periodic full
+   `/sync` is the backstop.
+
+## Accepted limitations
+
+Carried into the release gate, true today:
+
+- **The proxy→site south hop is over the public IPv6 internet** (proxies and
+  sites are generally on different hosts; there is no private fabric). A site's
+  `:80` is therefore reachable by anyone on the v6 internet, not just the proxy.
+  Scoping that exposure is an active security gap — the south-side firewall in
+  [09-roadmap.md](./09-roadmap.md). The proxy is path-agnostic, so a future
+  private fabric (ULA `fc00::/7`) changes only the address in the map.
+- **One reserved IP per host, for now** — the DO anchor is per-droplet, so the L3
+  DNAT can't distinguish two reserved IPs on one host. Fine at one proxy VM per
+  host; multi-reserved-IP is a later step.
