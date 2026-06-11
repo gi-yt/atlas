@@ -66,13 +66,25 @@ class SiteRequest(Document):
 		  2. insert the `Site` AS that user so Frappe stamps `owner = user`,
 		  3. mark the request Verified → Fulfilled and link the produced Site.
 
-		Returns the created `Site`. Idempotent-ish: a request already Fulfilled
-		returns its existing Site rather than provisioning a second one. Throws on
-		an expired token or a subdomain that got taken since the request — the
-		caller (the verify route) renders that as a clean message."""
+		Returns the created `Site`. Idempotent: a request already Fulfilled returns
+		its existing Site rather than provisioning a second one. Throws on an expired
+		token or a subdomain that got taken since the request — the caller (the verify
+		route) renders that as a clean message.
+
+		Concurrency: a verification link is routinely fetched twice near-simultaneously
+		(a mail scanner prefetches it, then the user clicks). Without serialization both
+		fetches read `Pending`, both insert the `User`, and both queue `create_contact`
+		— which then race on `tabContact` (InnoDB 1020 "Record has changed"). So we take
+		a row lock on this request FOR UPDATE and re-read its status under the lock: the
+		second fetch blocks until the first commits, then sees `Fulfilled` and returns
+		the same Site instead of fulfilling twice."""
+		# SELECT ... FOR UPDATE on this row; the second concurrent verify() blocks here
+		# until the first commits. Re-read status from the DB (not stale self.status) so
+		# the loser observes the winner's Fulfilled and short-circuits below.
+		self.status = frappe.db.get_value("Site Request", self.name, "status", for_update=True)
 		if self.status == "Fulfilled":
-			# A double-click on the link, or a retry: don't provision twice.
-			return frappe.get_doc("Site", self.site)
+			# The other fetch already fulfilled this request: don't provision twice.
+			return frappe.get_doc("Site", frappe.db.get_value("Site Request", self.name, "site"))
 		if self.status == "Expired" or self.is_expired():
 			self._mark_expired()
 			frappe.throw("This verification link has expired — please sign up again.")
@@ -105,20 +117,40 @@ class SiteRequest(Document):
 		account, more Sites later via the SPA) — we just make sure they hold the
 		role so the SPA scoping admits them."""
 		email = (self.email or "").strip()
-		if frappe.db.exists("User", email):
-			user = frappe.get_doc("User", email)
-		else:
-			user = frappe.get_doc(
-				{
-					"doctype": "User",
-					"email": email,
-					"first_name": email.split("@")[0],
-					"user_type": "Website User",
-					"send_welcome_email": 0,
-				}
-			).insert(ignore_permissions=True)
-		# append_roles is idempotent (skips a role already held); save with
-		# ignore_permissions because fulfilment may run as Guest (the web flow).
+		if not frappe.db.exists("User", email):
+			# Build the role into the doc BEFORE insert so a fresh user is a single
+			# write. Inserting and *then* .save()ing to add the role enqueues two
+			# `create_contact` jobs at the same commit (User.on_update, after_commit),
+			# which race on `tabContact` (InnoDB 1020 "Record has changed"). One write
+			# = one enqueue.
+			#
+			# The verify() row lock serializes two fetches of the SAME request, but an
+			# email may hold up to MAX_PENDING_PER_EMAIL requests; verifying two
+			# DIFFERENT ones at once would have both reach this insert. `User.name` is
+			# the email (primary key), so the loser gets a clean DuplicateEntryError —
+			# fall through and reuse the now-existing user rather than 500.
+			try:
+				return (
+					frappe.get_doc(
+						{
+							"doctype": "User",
+							"email": email,
+							"first_name": email.split("@")[0],
+							"user_type": "Website User",
+							"send_welcome_email": 0,
+							"roles": [{"role": ATLAS_USER_ROLE}],
+						}
+					)
+					.insert(ignore_permissions=True)
+					.name
+				)
+			except frappe.DuplicateEntryError:
+				pass
+		# Existing user: reused (account-light model). Grant the role only if it's
+		# missing — a no-op .save() otherwise. This user already has a Contact, so
+		# the resulting create_contact run takes the update branch, not the INSERT
+		# that races. ignore_permissions because fulfilment may run as Guest.
+		user = frappe.get_doc("User", email)
 		if ATLAS_USER_ROLE not in {row.role for row in user.get("roles")}:
 			user.append_roles(ATLAS_USER_ROLE)
 			user.save(ignore_permissions=True)
