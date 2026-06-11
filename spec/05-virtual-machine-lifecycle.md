@@ -231,20 +231,21 @@ Each is a single Task:
   decides cold boot vs. memory restore on its own — see
   [Memory snapshots](#memory-snapshots-fast-stop--start)), plus a one-shot
   cold retry when a restore attempt failed mid-start.
-- `snapshot-stop-vm.py` (the default stop, `memory_snapshot_on_stop` on):
+- `stop-vm.py` (the default): `systemctl stop firecracker-vm@<name>.service`
+- `snapshot-stop-vm.py` (opt-in: the VM's `memory_snapshot_on_stop` is
+  checked, or the caller passed `stop(memory_snapshot=True)`):
   pause → `PUT /snapshot/create` → marker → `systemctl stop`; any snapshot
   failure falls back to the plain stop inside the same Task.
-- `stop-vm.py` (`memory_snapshot_on_stop` off, or `stop(memory_snapshot=False)`):
-  `systemctl stop firecracker-vm@<name>.service`
 - `terminate-vm.py`: see below
 
 Restart is stop then start, as the Python method's choice — we do not add a
 `restart-vm.py`, because the only thing `systemctl restart` adds is one fewer
-network round-trip and we already paid for both. **With memory snapshots on
-(the default), a restart is a state-preserving power cycle, not a guest
-reboot** — the stop saves the guest's RAM and the start resumes it, so a
-wedged guest stays wedged. `restart(cold=True)` is the true-reboot escape
-hatch (plain stop, full cold boot).
+network round-trip and we already paid for both. **On a VM opted into memory
+snapshots, a restart is a state-preserving power cycle, not a guest reboot** —
+the stop saves the guest's RAM and the start resumes it, so a wedged guest
+stays wedged. `restart(cold=True)` is the true-reboot escape hatch (plain
+stop, full cold boot); a VM that never opted in restarts cold as it always
+did.
 
 Status updates happen after the Task succeeds. We do not poll the server
 to verify; the source of truth is the Task. If the operator wants ground
@@ -253,12 +254,14 @@ truth, they click `Run Task` with `script=systemctl status ...`.
 ## Memory snapshots: fast stop / start
 
 A cold boot takes 60–120s to a usable guest; loading a saved memory state
-takes milliseconds. So `stop()` captures the VM's **full memory state**
-(vmstate + guest RAM, Firecracker's `/snapshot/create`) before shutting the
-unit down, and the next `start()` resumes the guest exactly where it paused
-instead of booting it. Per-VM `memory_snapshot_on_stop` (default **on**)
-selects the fast stop; `has_memory_snapshot` (read-only) records whether the
-last stop actually captured one.
+takes milliseconds. So an **opted-in** `stop()` captures the VM's **full
+memory state** (vmstate + guest RAM, Firecracker's `/snapshot/create`) before
+shutting the unit down, and the next `start()` resumes the guest exactly
+where it paused instead of booting it. Per-VM `memory_snapshot_on_stop`
+(default **off** — the plain stop and cold boot remain the default path)
+selects the fast stop, as does a one-off `stop(memory_snapshot=True)`;
+`has_memory_snapshot` (read-only) records whether the last stop actually
+captured one.
 
 **The fast path runs only when the last working state was fully snapshotted;
 everything else takes the default path.** Concretely, the contract is one

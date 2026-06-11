@@ -320,7 +320,7 @@ isn't blocked in Desk.
 | `sync-image.py`       | Queued (`execute_task`)  | Minutes; downloads ~600MB.                                          |
 | `provision-vm.py`     | Sync                     | ~3s; operator waits.                                                |
 | `start-vm.py` / `stop-vm.py` / `terminate-vm.py` | Sync | <1s.                                                  |
-| `snapshot-stop-vm.py`  | Sync                    | The default stop; pause + RAM dump + stop. Seconds, bounded by RAM size / disk write speed. |
+| `snapshot-stop-vm.py`  | Sync                    | The opt-in memory-capturing stop; pause + RAM dump + stop. Seconds, bounded by RAM size / disk write speed. |
 | `vm-reserved-ip.py`   | Sync (via `Reserved IP.attach()`/`detach()`) | <1s; applies/removes the inbound-v4 1:1-NAT live. |
 | `reboot-server.sh`    | Sync (via `run_task_dialog`) | The SSH drops mid-Task; the operator confirms by reconnecting. |
 | Ad-hoc via Run Task   | Sync                     | The dialog is the operator's "I want to see this finish" path.      |

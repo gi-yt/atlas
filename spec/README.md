@@ -42,9 +42,9 @@ keep it the source of truth.
   PID namespace per VM, custom seccomp filters.
 - No image build pipeline. We download Ubuntu cloud images and use them.
 - No live migration, no high availability. Firecracker memory-state
-  snapshots exist for exactly one internal purpose — the fast stop/start
-  path on the same host (stop captures RAM, the next start resumes it in
-  milliseconds; see
+  snapshots exist for exactly one internal purpose — the opt-in fast
+  stop/start path on the same host (an opted-in stop captures RAM, the next
+  start resumes it in milliseconds; see
   [05-virtual-machine-lifecycle.md](./05-virtual-machine-lifecycle.md)) —
   and are never operator-facing artifacts or transportable between hosts.
   (Disk snapshots — instant copy-on-write LVM thin snapshots of the VM's
