@@ -135,3 +135,26 @@ cert.
 > `let's_encrypt_settings` — an apostrophe in a module path is unimportable. The
 > issuer's `provider_type` Select value keeps the apostrophe (`Let's Encrypt`)
 > since that is data, not a module.
+
+## Verification
+
+The split follows the project's host-facts-vs-unit-logic rule
+([README.md § Testing](./README.md#testing)):
+
+- **Unit (no host, the bulk of coverage):** the registries resolve and reject
+  archived rows (`for_domain_provider`/`for_tls_provider`, twins of
+  `providers/test_registry.py`); `Route53DnsProvider.credential_env()` /
+  `certbot_authenticator()` and the `LetsEncryptProvider` certbot argv compose
+  correctly against a mocked local runner (**no real certbot**); `Root Domain`
+  autoname/immutability and `*.<domain>` derivation; the `TLS Certificate` status
+  machine, `renew_expiring` window, and `_push_to_proxies` fan-out to the right
+  region's proxy VMs (mock `push_cert`); `scripts/lib/atlas/certs.py` argv +
+  `ATLAS_RESULT` parse. Run: `bench --site atlas.tests.local run-tests --app atlas`.
+- **E2E (host fact, real ACME):** `tls_issuance` is the only e2e that drives the
+  real producer chain — Let's Encrypt **staging** → DNS-01 → certbot →
+  `_push_to_proxies` → off-droplet HTTPS — on top of the proxy infra. It needs a
+  live Route 53 zone and the controller-host deps, and skips cleanly
+  (`MissingConfig`, before any billable provision) on a site without the
+  `atlas_tls_*` config keys. `proxy_vm` uses a self-signed stand-in cert, not this
+  chain. The new desk buttons (Issue/Renew, Push to Proxies, Test Connection,
+  Archive) are exercised through the HTTP layer in `desk_buttons`.
