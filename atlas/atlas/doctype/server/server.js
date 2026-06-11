@@ -20,6 +20,7 @@ function add_buttons(frm) {
 	}
 	if (status === "Active") {
 		frappe.atlas.add_action(frm, "Sync Image", () => open_sync_image_dialog(frm));
+		frappe.atlas.add_action(frm, "Bake Image", () => open_bake_image_dialog(frm));
 		frappe.atlas.add_action(frm, "Sync Scripts", () => sync_scripts(frm));
 		frappe.atlas.add_action(frm, "Allocate Reserved IP", () => confirm_allocate_reserved_ip(frm));
 		frappe.atlas.add_action(frm, "Discover Reserved IPs", () => discover_reserved_ips(frm));
@@ -139,6 +140,68 @@ function open_sync_image_dialog(frm) {
 				dialog.hide();
 				frappe.atlas.task_started(frm, "Sync Image", task_name);
 			});
+		},
+	});
+	dialog.show();
+}
+
+// Bake a golden bench / proxy image: insert an Image Build row on this server.
+// The row's after_insert enqueues the provision->build->snapshot job; we route
+// to its form, whose live checklist shows the bake progress. Recipe choices come
+// from atlas.atlas.image_recipes.RECIPES; region is only relevant to the proxy
+// recipe (which fixes a region).
+function open_bake_image_dialog(frm) {
+	const dialog = new frappe.ui.Dialog({
+		title: __("Bake Image"),
+		fields: [
+			{
+				fieldname: "recipe",
+				label: __("Recipe"),
+				fieldtype: "Select",
+				options: ["bench", "proxy"],
+				default: "bench",
+				reqd: 1,
+			},
+			{
+				fieldname: "region",
+				label: __("Region"),
+				fieldtype: "Data",
+				depends_on: "eval:doc.recipe=='proxy'",
+				mandatory_depends_on: "eval:doc.recipe=='proxy'",
+				description: __("Required for the proxy recipe."),
+			},
+			{
+				fieldname: "base_image",
+				label: __("Base Image"),
+				fieldtype: "Link",
+				options: "Virtual Machine Image",
+				only_select: 1,
+				get_query: () => ({filters: {is_active: 1}}),
+				description: __("Defaults to the active image if left blank."),
+			},
+			{
+				fieldname: "terminate_build_vm",
+				label: __("Terminate build VM after snapshot"),
+				fieldtype: "Check",
+				default: 0,
+			},
+		],
+		primary_action_label: __("Bake"),
+		primary_action(values) {
+			frappe.db
+				.insert({
+					doctype: "Image Build",
+					recipe: values.recipe,
+					server: frm.doc.name,
+					region: values.region || null,
+					base_image: values.base_image || null,
+					terminate_build_vm: values.terminate_build_vm ? 1 : 0,
+				})
+				.then((doc) => {
+					dialog.hide();
+					frappe.show_alert({message: __("Bake started."), indicator: "blue"});
+					frappe.set_route("Form", "Image Build", doc.name);
+				});
 		},
 	});
 	dialog.show();

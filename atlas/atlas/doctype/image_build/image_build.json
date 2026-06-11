@@ -1,0 +1,211 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:IMG-BUILD-{#####}",
+ "creation": "2026-06-11 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "tab_overview",
+  "recipe",
+  "title",
+  "server",
+  "region",
+  "column_break_header",
+  "status",
+  "base_image",
+  "section_break_options",
+  "auto_register",
+  "terminate_build_vm",
+  "section_break_artifacts",
+  "build_virtual_machine",
+  "snapshot",
+  "column_break_artifacts",
+  "build_task",
+  "error"
+ ],
+ "fields": [
+  {
+   "fieldname": "tab_overview",
+   "fieldtype": "Tab Break",
+   "label": "Overview"
+  },
+  {
+   "description": "Which image to bake. The recipe names the committed source tree, the build entrypoint, and the build-VM sizing (atlas.atlas.image_recipes).",
+   "fieldname": "recipe",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Recipe",
+   "options": "bench\nproxy",
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "description": "Denormalized from the recipe for the list view.",
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title",
+   "read_only": 1
+  },
+  {
+   "description": "The Active server the scratch build VM is provisioned on. For a proxy recipe this also fixes the region.",
+   "fieldname": "server",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Server",
+   "options": "Server",
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "depends_on": "eval:doc.recipe==\"proxy\"",
+   "description": "Proxy builds only — the region the proxy image serves. Required for a proxy recipe.",
+   "fieldname": "region",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Region",
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "column_break_header",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Draft",
+   "description": "Draft → Provisioning → Building → Snapshotting → Available / Failed.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nProvisioning\nBuilding\nSnapshotting\nAvailable\nFailed",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "description": "The stock Ubuntu base image the build VM boots. Defaults to Atlas Settings' default user image.",
+   "fieldname": "base_image",
+   "fieldtype": "Link",
+   "label": "Base Image",
+   "options": "Virtual Machine Image",
+   "set_only_once": 1
+  },
+  {
+   "fieldname": "section_break_options",
+   "fieldtype": "Section Break",
+   "label": "Options"
+  },
+  {
+   "default": "1",
+   "description": "If set and the recipe supports it, wire the produced snapshot into Atlas Settings on success (bench → default_bench_snapshot). Ignored by recipes with nothing to register (proxy).",
+   "fieldname": "auto_register",
+   "fieldtype": "Check",
+   "label": "Auto-register snapshot"
+  },
+  {
+   "default": "0",
+   "description": "If set, terminate the scratch build VM after a successful snapshot. The snapshot is durable and outlives the build VM. Off keeps it Stopped for re-bake / inspection.",
+   "fieldname": "terminate_build_vm",
+   "fieldtype": "Check",
+   "label": "Terminate build VM after snapshot"
+  },
+  {
+   "fieldname": "section_break_artifacts",
+   "fieldtype": "Section Break",
+   "label": "Artifacts"
+  },
+  {
+   "description": "The scratch VM this build provisioned and baked.",
+   "fieldname": "build_virtual_machine",
+   "fieldtype": "Link",
+   "label": "Build VM",
+   "options": "Virtual Machine",
+   "read_only": 1
+  },
+  {
+   "description": "The output: the snapshot site/proxy VMs clone from.",
+   "fieldname": "snapshot",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Snapshot",
+   "options": "Virtual Machine Snapshot",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_artifacts",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The Task row recording the in-guest build.sh run (stdout/stderr/exit).",
+   "fieldname": "build_task",
+   "fieldtype": "Link",
+   "label": "Build Task",
+   "options": "Task",
+   "read_only": 1
+  },
+  {
+   "description": "The failure tail on Failed (full log in the Build Task).",
+   "fieldname": "error",
+   "fieldtype": "Small Text",
+   "label": "Error",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-06-11 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Atlas",
+ "name": "Image Build",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 0,
+   "cancel": 0,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "import": 0,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 0,
+   "write": 1
+  }
+ ],
+ "search_fields": "recipe,status,snapshot",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [
+  {
+   "title": "Draft",
+   "color": "Gray"
+  },
+  {
+   "title": "Provisioning",
+   "color": "Blue"
+  },
+  {
+   "title": "Building",
+   "color": "Blue"
+  },
+  {
+   "title": "Snapshotting",
+   "color": "Blue"
+  },
+  {
+   "title": "Available",
+   "color": "Green"
+  },
+  {
+   "title": "Failed",
+   "color": "Red"
+  }
+ ],
+ "title_field": "title",
+ "track_changes": 1
+}
