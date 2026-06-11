@@ -133,7 +133,7 @@ Steps in Python (one DocType method, `Virtual Machine.provision`):
    and visible as its own Task. The remaining steps (thin-snapshot the base
    image LV into the VM's disk LV, resize,
    SSH key injection, per-VM hostname `atlas-<first-8-of-uuid>` written to
-   `/etc/hostname` and `/etc/hosts`, 512 MiB `/swapfile`, fresh per-VM
+   `/etc/hostname` and `/etc/hosts`, fresh per-VM
    `/etc/ssh/ssh_host_*` keypairs, per-VM `/etc/machine-id`, config
    write, systemd enable+start) happen inside the same SSH session.
    The per-VM identity writes share the rootfs mount with the SSH-key
@@ -186,8 +186,6 @@ asserts on every run:
   per-VM 127.0.1.1 line, and the ip6-* aliases.
 - Root password locked (`root:!:` in `/etc/shadow`). `sshd -T` reports
   `passwordauthentication no` — key-only by contract.
-- `/swapfile` is active swap (512 MiB by default), referenced by the
-  `/etc/fstab` installed at image-sync time.
 
 This list is short for a reason: it is the operator-visible delta
 between a stock Ubuntu cloud image and a VM that looks like the
@@ -437,7 +435,7 @@ One controller method, `Virtual Machine.rebuild(source_type, source)`, on a
 Both run [`rebuild-vm.py`](../scripts/rebuild-vm.py): `lvremove` the old disk
 LV, recreate it as a fresh CoW snapshot of the source LV (a snapshot LV for
 Restore, the base image LV for Rebuild), grow it to the VM's disk size, then
-re-inject this VM's identity (SSH authorized key, network env, hostname, swap,
+re-inject this VM's identity (SSH authorized key, network env, hostname,
 machine-id) via the shared `atlas.rootfs` module (the Python successor to the
 `prepare-rootfs.sh` library), and re-`mknod` the jail's `rootfs.ext4` block node
 (the new LV's dev_t can differ). The VM stays `Stopped`; the operator starts it

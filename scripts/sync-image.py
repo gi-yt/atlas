@@ -62,7 +62,6 @@ PermitRootLogin prohibit-password
 # LABEL mkfs sets in step 4 (atlas-root), stable across copies (see step 3a.8).
 _FSTAB = """\
 LABEL=atlas-root  /  ext4  defaults,errors=remount-ro  0  1
-/swapfile         none swap sw                         0  0
 """
 
 # Boot-blocking units to mask. The cloud image boots into cloud-init +

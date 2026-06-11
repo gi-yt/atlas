@@ -143,8 +143,7 @@ before building the per-server ext4:
   boot, which we've masked). Atlas SSHes in as root, so the `ubuntu` user is
   irrelevant; this is a guarded no-op on the cloud image.
 - motd: `50-motd-news` and `60-unminimize` removed (no-op if absent).
-- `/etc/fstab` replaced with a real entry (`LABEL=atlas-root /` plus the
-  swapfile from provision-time).
+- `/etc/fstab` replaced with a real entry (`LABEL=atlas-root /`).
 - `fcnet.service` + `/usr/local/bin/fcnet-setup.sh` removed. **No-op on the
   Ubuntu cloud image** (those are Firecracker-CI artifacts). Kept as harmless
   `rm -f` calls so the step documents the contract and survives a future
@@ -157,7 +156,7 @@ dropped. The cloud-init/networkd/snapd masks are the load-bearing items for
 and now a documented no-op.
 
 The per-VM half of the contract (hostname, machine-id, ssh host keys,
-swapfile, /etc/hosts 127.0.1.1 line) is written at provision time. See
+/etc/hosts 127.0.1.1 line) is written at provision time. See
 [05-virtual-machine-lifecycle.md → Guest-side identity contract](./05-virtual-machine-lifecycle.md#guest-side-identity-contract).
 
 ### Why we convert squashfs → ext4 server-side
@@ -206,8 +205,7 @@ When `provision-vm.py` runs, it:
    is UUID-agnostic — this is purely host-side hygiene, done while unmounted.
 4. `mount` the LV **device** (no `-o loop` — it is a real block device) to
    write `/root/.ssh/authorized_keys`, `/etc/atlas-network.env`,
-   `/etc/hostname` + a matching `127.0.1.1` line in `/etc/hosts`, a 512 MiB
-   `/swapfile` (referenced by the fstab installed at image-sync time), fresh
+   `/etc/hostname` + a matching `127.0.1.1` line in `/etc/hosts`, fresh
    `/etc/ssh/ssh_host_*` keypairs, and a derived `/etc/machine-id`. The
    `atlas-network.service` is already in the pristine image and already wanted
    by `multi-user.target`, so we don't touch systemd inside the rootfs.
