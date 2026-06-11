@@ -9,7 +9,6 @@
 #   - no leftover fcnet IPv4
 #   - /etc/hosts cleaned (no Docker bridge entry; 127.0.1.1 line present)
 #   - root password locked, sshd password-auth off
-#   - /swapfile mounted as swap
 #
 # Inputs:
 #   VIRTUAL_MACHINE_NAME  - UUID; first 8 chars must match the hostname.
@@ -135,17 +134,11 @@ pwauth="$(sshd -T 2>/dev/null \
 [ "$pwauth" = "no" ] \
     || fail "sshd PasswordAuthentication is '$pwauth', want 'no'"
 
-# 10. Swap on /swapfile. Capture first (a bare `... | grep -q` would let grep
-#     exit on match and SIGPIPE the producer under pipefail, as in check 9).
-swap_names="$(swapon --show=NAME --noheadings)"
-printf '%s\n' "$swap_names" | grep -qx /swapfile \
-    || fail "swap on /swapfile not active"
-
-# 11. This is the Ubuntu cloud image (the source we cut over to).
+# 10. This is the Ubuntu cloud image (the source we cut over to).
 grep -q 'VERSION_ID="24.04"' /etc/os-release \
     || fail "/etc/os-release is not Ubuntu 24.04"
 
-# 12. cloud-init is neutralized (sync-image.sh masks it). If it were live it
+# 11. cloud-init is neutralized (sync-image.sh masks it). If it were live it
 #     would race Atlas's mount-time identity injection. A masked unit reports
 #     as 'masked'; reaching this prompt at all already proves the boot-blocking
 #     waits (networkd-wait-online, snapd.seeded) are not hanging.
@@ -155,7 +148,7 @@ case "$ci_state" in
     *) fail "cloud-init.service is '${ci_state}', want masked/disabled" ;;
 esac
 
-# 13. systemd-networkd-wait-online masked (Phase 0 caught it hanging boot).
+# 12. systemd-networkd-wait-online masked (Phase 0 caught it hanging boot).
 wait_state="$(systemctl is-enabled systemd-networkd-wait-online.service 2>/dev/null || true)"
 case "$wait_state" in
     masked|disabled|"") : ;;

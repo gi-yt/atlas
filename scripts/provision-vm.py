@@ -165,7 +165,7 @@ def main() -> None:
 		)
 		prepare_data_lv(pool, data_disk, inputs.data_disk_gb, bool(inputs.data_disk_format), origin=data_origin)
 
-	# 2. Inject this VM's identity (SSH key, network env, hostname, swap, host
+	# 2. Inject this VM's identity (SSH key, network env, hostname, host
 	#    keys, machine-id, data-disk fstab) into the disk. Mounts the LV device
 	#    directly (no loop). The v4 egress link goes into the guest's network env
 	#    here too, so clone/rebuild get it for free. Done outside the jail, before

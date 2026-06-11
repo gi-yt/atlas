@@ -3,7 +3,7 @@
 Shared by provision and rebuild: create a per-VM rootfs LV from a source (the
 read-only base image LV, or a snapshot LV for clone/restore), grow it, give it a
 fresh ext4 UUID, and inject this VM's identity (SSH key, network env, hostname,
-swap, fresh host keys, machine-id). Each VM gets unique identity even when the
+fresh host keys, machine-id). Each VM gets unique identity even when the
 source blocks came from another VM's snapshot, because host keys and machine-id
 are rewritten here from this VM's UUID.
 
@@ -115,8 +115,8 @@ def prepare_data_lv(
 def inject_identity(device: str, identity: Identity, *, regenerate_host_keys: bool = False) -> None:
 	"""Mount `device` and write this VM's identity into it: authorized_keys, the
 	network env (IPv6 + the private IPv4 egress link), hostname + hosts entry, a
-	512 MiB swapfile, a UUID-derived machine-id, and the data-disk fstab line.
-	Unmounts on return and on error (the context manager guarantees it).
+	UUID-derived machine-id, and the data-disk fstab line. Unmounts on return and
+	on error (the context manager guarantees it).
 
 	SSH **host keys** are PRESERVED by default — they are the VM's SSH identity,
 	and silently changing them on a rebuild/restore breaks every client's
@@ -129,7 +129,6 @@ def inject_identity(device: str, identity: Identity, *, regenerate_host_keys: bo
 		_write_authorized_keys(mount_point, identity.ssh_public_key)
 		_write_network_env(mount_point, identity)
 		_write_hostname(mount_point, identity.hostname)
-		_write_swapfile(mount_point)
 		_ensure_host_keys(mount_point, identity.hostname, force=regenerate_host_keys)
 		_write_machine_id(mount_point, identity.machine_id)
 		if identity.data_disk_mount_at:
@@ -189,15 +188,6 @@ def _write_hostname(mount_point: str, hostname: str) -> None:
 
 def hostname_hosts_path(mount_point: str) -> str:
 	return f"{mount_point}/etc/hosts"
-
-
-def _write_swapfile(mount_point: str) -> None:
-	# 512 MiB keeps small apt installs from OOMing; lands at /swapfile, picked up
-	# by the fstab from sync-image.
-	swapfile = f"{mount_point}/swapfile"
-	run("sudo", "dd", "if=/dev/zero", f"of={swapfile}", "bs=1M", "count=512", "status=none")
-	run("sudo", "chmod", "0600", swapfile)
-	run("sudo", "mkswap", swapfile, quiet=True)
 
 
 def _ensure_host_keys(mount_point: str, hostname: str, *, force: bool) -> None:

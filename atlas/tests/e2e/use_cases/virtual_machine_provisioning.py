@@ -184,7 +184,7 @@ def _check_provision_happy_path(server_name: str, image: str, public_key: str) -
 	# SSH into the guest over its IPv6 and assert the fit-and-finish
 	# guarantees from llm/plan/real-vm-fitfinish.md: per-VM hostname,
 	# regenerated machine-id and ssh host keys, no fcnet IPv4 leftover,
-	# clean /etc/hosts, locked root, sshd password-auth off, swap on.
+	# clean /etc/hosts, locked root, sshd password-auth off.
 	assert_probe(
 		server_name,
 		"phase5-guest-identity.sh",

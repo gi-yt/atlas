@@ -297,12 +297,14 @@ behavior; they just keep doors open.
       hosts at once; it wants the **Server lock doctype** and **stuck-task
       reaper** (above) before real load.
 
-    Aside (snapshot security, independent of transfer): the guest's 512 MiB
-    `/swapfile` lives *inside* `rootfs.ext4`, so every disk snapshot captures
-    guest swap contents — a data-remanence concern when a snapshot is cloned
-    across a tenant boundary. The Firecracker prod-host rec to disable swap is
-    about *host* swap; this is the in-guest analogue and belongs in the
-    snapshot-security discussion when tenancy lands.
+    Aside (snapshot security, independent of transfer): guests currently ship
+    **no swap** — the per-VM `/swapfile` was dropped from provision. If in-guest
+    swap is reintroduced as a `/swapfile` inside `rootfs.ext4`, every disk
+    snapshot would capture guest swap contents — a data-remanence concern when a
+    snapshot is cloned across a tenant boundary. (The Firecracker prod-host rec
+    to disable swap is about *host* swap; this would be the in-guest analogue.)
+    Put swap on a separate, non-snapshotted volume, or keep guests swapless, when
+    tenancy lands.
 
 - **Health checks**: a scheduled job that runs `systemctl is-active …` per
   VM and reconciles `Virtual Machine.status`. Additive.
