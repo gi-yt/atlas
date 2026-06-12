@@ -16,6 +16,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from atlas.atlas.doctype.site import site as site_module
+from atlas.atlas.doctype.virtual_machine_snapshot.virtual_machine_snapshot import VirtualMachineSnapshot
 from atlas.tests.fixtures import make_provider, make_server
 
 ROOT_DOMAIN = "blr1.frappe.dev"
@@ -109,10 +110,9 @@ def _ensure_golden_snapshot() -> str:
 
 		image = make_image("site-test-image")
 		source_vm = make_virtual_machine(server, image, title="golden-source")
-		frappe.get_doc(
+		doc = frappe.get_doc(
 			{
 				"doctype": "Virtual Machine Snapshot",
-				"__newname": SNAPSHOT_NAME,
 				"title": "golden bench",
 				"virtual_machine": source_vm.name,
 				"server": server.name,
@@ -121,7 +121,14 @@ def _ensure_golden_snapshot() -> str:
 				"disk_gigabytes": 12,
 				"rootfs_path": "/dev/atlas/atlas-snap-golden",
 			}
-		).insert(ignore_permissions=True)
+		)
+		# Virtual Machine Snapshot autonames `hash` (Random), which ignores
+		# __newname — so pin the name explicitly (flags.name_set bypasses autoname)
+		# to the stable SNAPSHOT_NAME that Atlas Settings.default_bench_snapshot and
+		# the warm-provision tests resolve against.
+		doc.name = SNAPSHOT_NAME
+		doc.flags.name_set = True
+		doc.insert(ignore_permissions=True)
 	frappe.db.set_single_value("Atlas Settings", "default_bench_snapshot", SNAPSHOT_NAME)
 	frappe.db.set_single_value("Atlas Settings", "ssh_public_key", "ssh-ed25519 AAAAFLEET")
 	return SNAPSHOT_NAME
@@ -386,6 +393,103 @@ class TestSiteOrchestration(IntegrationTestCase):
 		self.assertEqual(subdomain.subdomain, "acme")
 		self.assertEqual(subdomain.region, REGION)
 		self.assertEqual(subdomain.virtual_machine, vm.name)
+
+
+class TestSiteWarmFirstProvision(IntegrationTestCase):
+	"""The warm-first backing-VM selection (spec/14-self-serve.md § Warm-first
+	provisioning). `_provision_backing_vm` resolves the cold golden, then — when
+	its server carries an Available kind=Warm golden — RESUMES the warm one
+	instead of cold-booting. This is the only place `clone_to_new_vm` is invoked
+	from the Site layer, so the warm-vs-cold dispatch and the captured-size
+	discipline are asserted here (host facts — a real restore — are in the
+	`warm_restore` e2e). The clone itself is mocked: this is the pure selection
+	logic, no host."""
+
+	def setUp(self) -> None:
+		_ensure_root_domain()
+		_ensure_golden_snapshot()
+		# Clear leftover Sites/Subdomains (same as the other Site test classes) so the
+		# "acme" label is free. Warm Snapshot rows are NOT cleaned up here: per-test
+		# rollback drops them, and deleting one would fire its real on_trash SSH
+		# teardown.
+		for name in frappe.get_all("Site", pluck="name"):
+			frappe.delete_doc("Site", name, force=1, ignore_permissions=True)
+		for name in frappe.get_all("Subdomain", pluck="name"):
+			frappe.delete_doc("Subdomain", name, force=1, ignore_permissions=True)
+
+	def _make_warm_snapshot(self) -> str:
+		"""A kind=Warm Available snapshot on the SAME server as the cold golden, so
+		placement.warm_bench_snapshot_for_server (per-server) finds it. It mirrors
+		the cold golden's server/source-VM/image so it is a valid sibling row.
+		Returns the (hash-autonamed) row name the warm lookup will resolve to."""
+		cold = frappe.get_doc("Virtual Machine Snapshot", SNAPSHOT_NAME)
+		warm = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine Snapshot",
+				"title": "golden bench (warm)",
+				"kind": "Warm",
+				"virtual_machine": cold.virtual_machine,
+				"server": cold.server,
+				"status": "Available",
+				"source_image": cold.source_image,
+				"disk_gigabytes": cold.disk_gigabytes,
+				"rootfs_path": "/dev/atlas/atlas-snap-warm",
+			}
+		).insert(ignore_permissions=True)
+		return warm.name
+
+	def _record_clone(self, return_value: str):
+		"""Patch clone_to_new_vm to record which snapshot it was called on (self.name)
+		and with what kwargs, without doing the real host clone. Returns the patch
+		context manager and a one-element list the recorded call lands in."""
+		recorded: list[dict] = []
+
+		def fake_clone(snapshot_self, **kwargs):
+			recorded.append({"snapshot": snapshot_self.name, "kwargs": kwargs})
+			return return_value
+
+		ctx = patch.object(VirtualMachineSnapshot, "clone_to_new_vm", autospec=True, side_effect=fake_clone)
+		return ctx, recorded
+
+	def test_cold_path_clones_cold_golden_with_explicit_tier_size(self) -> None:
+		"""No warm row on the server → today's exact cold path: clone the cold
+		golden, passing the full explicit tier size (vcpus + cpu cap + memory)."""
+		site = _new_site("acme")
+		ctx, recorded = self._record_clone("cold-clone")
+		with ctx:
+			vm_name = site_module._provision_backing_vm(site)
+		self.assertEqual(vm_name, "cold-clone")
+		# Clone was the COLD golden, at the explicit Shared 4x tier.
+		self.assertEqual(recorded[0]["snapshot"], SNAPSHOT_NAME)
+		kw = recorded[0]["kwargs"]
+		self.assertEqual(kw["vcpus"], site_module.SITE_VM_SIZE["vcpus"])
+		self.assertEqual(kw["memory_megabytes"], site_module.SITE_VM_SIZE["memory_megabytes"])
+		self.assertEqual(kw["cpu_max_cores"], site_module.SITE_VM_SIZE["cpu_max_cores"])
+
+	def test_warm_path_resumes_warm_golden(self) -> None:
+		"""An Available warm golden on the server → resume it (clone the WARM
+		snapshot, not the cold one)."""
+		warm = self._make_warm_snapshot()
+		site = _new_site("acme")
+		ctx, recorded = self._record_clone("warm-clone")
+		with ctx:
+			vm_name = site_module._provision_backing_vm(site)
+		self.assertEqual(vm_name, "warm-clone")
+		self.assertEqual(recorded[0]["snapshot"], warm)
+
+	def test_warm_clone_passes_only_cpu_cap_not_frozen_size(self) -> None:
+		"""A warm restore comes up at the CAPTURED vcpus/memory (the frozen vmstate
+		pins them — clone_to_new_vm rejects overrides), so only the host-side cgroup
+		cpu_max_cores is passed; vcpus and memory_megabytes are NOT."""
+		self._make_warm_snapshot()
+		site = _new_site("acme")
+		ctx, recorded = self._record_clone("warm-clone")
+		with ctx:
+			site_module._provision_backing_vm(site)
+		kw = recorded[0]["kwargs"]
+		self.assertEqual(kw["cpu_max_cores"], site_module.SITE_VM_SIZE["cpu_max_cores"])
+		self.assertNotIn("vcpus", kw)
+		self.assertNotIn("memory_megabytes", kw)
 
 
 class TestSiteTerminate(IntegrationTestCase):
