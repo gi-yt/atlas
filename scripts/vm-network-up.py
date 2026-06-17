@@ -30,7 +30,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from atlas._run import run, run_ok
 from atlas.network_env import default_route_device, read_network_env
 from atlas.paths import VirtualMachinePaths
-from atlas.reserved_ip_nat import apply_reserved_ip_nat, discover_reserved_ip_anchor
+from atlas.reserved_ip_nat import (
+	apply_reserved_ip_nat,
+	apply_routed_reserved_ip_nat,
+	discover_reserved_ip_anchor,
+)
 
 
 def main() -> None:
@@ -340,18 +344,23 @@ def main() -> None:
 		"accept",
 	)
 
-	# 8. Inbound v4: if a Reserved IP is attached, 1:1-NAT the droplet's ANCHOR IP
-	#    (the destination DO actually delivers reserved-IP traffic to — NOT the
-	#    reserved IP, which never appears on the droplet) to the guest's /30: DNAT
-	#    in, SNAT out as the anchor + a policy route via the anchor gateway so DO
-	#    maps it back to the reserved IP. The anchor is discovered fresh from DO
-	#    metadata (authoritative; it can change across a droplet rebuild), keyed off
-	#    the RESERVED_IPV4 flag. Idempotent, rebuilt on every cold boot like the
-	#    scaffold above; the guest stays unaware (sees only its private v4). See
-	#    reserved_ip_nat.py and the atlas-reserved-ip-anchor-dnat finding.
+	# 8. Inbound v4: if a Reserved IP is attached, 1:1-NAT it to the guest's /30,
+	#    rebuilt on every cold boot from the RESERVED_IPV4 flag like the scaffold
+	#    above. Two delivery models, discovered fresh on the host:
+	#    - DigitalOcean binds the IP via an ANCHOR (the destination DO actually
+	#      delivers reserved-IP traffic to — NOT the reserved IP, which never appears
+	#      on the droplet): DNAT the anchor in, SNAT out as the anchor + a policy
+	#      route via the anchor gateway so DO maps it back to the reserved IP.
+	#    - A routed flexible IP (Self-Managed / Scaleway Elastic Metal) arrives at
+	#      the host destined to the reserved IP itself: DNAT it directly, no anchor.
+	#    The guest stays unaware (sees only its private v4). See reserved_ip_nat.py
+	#    and the atlas-reserved-ip-anchor-dnat finding.
 	if reserved_ipv4:
 		anchor = discover_reserved_ip_anchor()
-		apply_reserved_ip_nat(anchor, ipv4_guest_address, host_veth)
+		if anchor is not None:
+			apply_reserved_ip_nat(anchor, ipv4_guest_address, host_veth)
+		else:
+			apply_routed_reserved_ip_nat(reserved_ipv4, ipv4_guest_address, host_veth)
 
 
 if __name__ == "__main__":

@@ -31,6 +31,7 @@ from atlas.network_env import read_network_env, remove_network_env, upsert_netwo
 from atlas.paths import VirtualMachinePaths
 from atlas.reserved_ip_nat import (
 	apply_reserved_ip_nat,
+	apply_routed_reserved_ip_nat,
 	discover_reserved_ip_anchor,
 	remove_reserved_ip_nat,
 )
@@ -64,16 +65,25 @@ def main() -> None:
 
 	if inputs.action == "attach":
 		# RESERVED_IPV4 in network.env is the durable "this VM has inbound v4" flag
-		# (the public identity); the on-droplet handle is the anchor, discovered
-		# fresh from DO metadata here and at every cold boot (vm-network-up).
+		# (the public identity), re-applied at every cold boot (vm-network-up).
+		# Delivery model is discovered fresh on the host: DigitalOcean hands the IP
+		# over via an anchor (DNAT the anchor, egress via its gateway); a routed
+		# flexible IP (Self-Managed / Scaleway Elastic Metal) arrives at the host
+		# destined to the reserved IP itself, so DNAT it directly with no anchor.
 		anchor = discover_reserved_ip_anchor()
 		updated = upsert_network_env(current, "RESERVED_IPV4", inputs.reserved_ipv4)
 		install_file(updated, paths.network_env, mode="0644")
-		apply_reserved_ip_nat(anchor, guest_ipv4, host_veth)
-		print(
-			f"Attached {inputs.reserved_ipv4} (anchor {anchor.address} via {anchor.gateway}) "
-			f"-> {guest_ipv4} on {inputs.virtual_machine_name}."
-		)
+		if anchor is not None:
+			apply_reserved_ip_nat(anchor, guest_ipv4, host_veth)
+			print(
+				f"Attached {inputs.reserved_ipv4} (anchor {anchor.address} via {anchor.gateway}) "
+				f"-> {guest_ipv4} on {inputs.virtual_machine_name}."
+			)
+		else:
+			apply_routed_reserved_ip_nat(inputs.reserved_ipv4, guest_ipv4, host_veth)
+			print(
+				f"Attached {inputs.reserved_ipv4} (routed) -> {guest_ipv4} on {inputs.virtual_machine_name}."
+			)
 	else:
 		updated = remove_network_env(current, "RESERVED_IPV4")
 		install_file(updated, paths.network_env, mode="0644")

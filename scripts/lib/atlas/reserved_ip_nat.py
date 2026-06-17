@@ -74,20 +74,24 @@ class Anchor:
 	gateway: str
 
 
-def discover_reserved_ip_anchor() -> Anchor:
-	"""Read the droplet's anchor IPv4 (address + gateway) from DO metadata.
+def discover_reserved_ip_anchor() -> Anchor | None:
+	"""Read the droplet's anchor IPv4 (address + gateway) from DO metadata, or
+	return None when there is no anchor (a host with no DO metadata service).
 
 	The anchor is per-droplet, not in Frappe, not derivable — so it is discovered
 	here on the host at attach time and written into network.env so a cold-boot
-	reconcile re-applies the same rules. Raises if metadata is unreachable (a
-	non-DO host has no anchor; reserved-IP attach is DO-only today)."""
+	reconcile re-applies the same rules. DigitalOcean delivers a reserved IP via an
+	anchor; a Self-Managed host (e.g. a Scaleway Elastic Metal box) is handed a
+	**routed** flexible IP instead — packets arrive with destination = the reserved
+	IP itself, no anchor — so metadata is absent and the caller falls back to the
+	routed path (`apply_routed_reserved_ip_nat`). Returning None (not raising) is
+	what lets the one `vm-reserved-ip` script serve both delivery models."""
+	if not run_ok("curl", "-s", "--max-time", "3", "-o", "/dev/null", f"{_METADATA}/address"):
+		return None
 	address = run("curl", "-s", "--max-time", "5", f"{_METADATA}/address", check=True).strip()
 	gateway = run("curl", "-s", "--max-time", "5", f"{_METADATA}/gateway", check=True).strip()
 	if not address or not gateway:
-		raise SystemExit(
-			"could not read DO anchor IPv4 from metadata "
-			f"({_METADATA}/{{address,gateway}}); reserved-IP attach is DO-only"
-		)
+		return None
 	return Anchor(address=address, gateway=gateway)
 
 
@@ -170,6 +174,42 @@ def apply_reserved_ip_nat(anchor: Anchor, guest_ipv4: str, host_veth: str) -> No
 		run("sudo", "nft", *forward_rule_argv(guest_ipv4, host_veth))
 
 	_apply_egress_route(anchor, guest_ipv4)
+
+
+def apply_routed_reserved_ip_nat(reserved_ipv4: str, guest_ipv4: str, host_veth: str) -> None:
+	"""Idempotently install the inbound DNAT, the egress SNAT, and the forward
+	accept for a **routed** reserved IP (the Self-Managed / Scaleway-Elastic-Metal
+	model), where there is no anchor.
+
+	Unlike the DO anchor path, the vendor routes the flexible IP straight to the
+	host's uplink, so inbound packets arrive with destination = the reserved IP
+	itself: DNAT *that* to the guest's /30. Egress is symmetric and needs no policy
+	route — the guest's traffic leaves over the host's normal default route, SNAT'd
+	to the reserved IP, and the vendor accepts it because the IP is genuinely routed
+	to this host (proven: pinging the IP reaches the host once it owns the route).
+	The reserved IP must NOT be a local address on the host (no `ip addr add`):
+	the prerouting DNAT fires before the input/forward decision, so leaving it
+	off-link is what lets the packet be forwarded to the guest instead of consumed
+	by the host's own services.
+
+	Same substring-match idempotency as `apply_reserved_ip_nat`; the reserved IP and
+	the guest /30 are unique per guest, so a re-run (cold boot, reconcile, double
+	attach) is a no-op. `remove_reserved_ip_nat` (keyed on the guest v4) tears both
+	models down — the routed path simply has no egress policy route to drop."""
+	if not run_ok("sudo", "nft", "list", "chain", *TABLE, PREROUTING):
+		run("sudo", "nft", *prerouting_chain_argv())
+
+	prerouting = run("sudo", "nft", "list", "chain", *TABLE, PREROUTING)
+	if not _has_dnat(prerouting, reserved_ipv4, guest_ipv4):
+		run("sudo", "nft", *dnat_rule_argv(reserved_ipv4, guest_ipv4))
+
+	postrouting = run("sudo", "nft", "list", "chain", *TABLE, POSTROUTING)
+	if not _has_snat(postrouting, reserved_ipv4, guest_ipv4):
+		run("sudo", "nft", *snat_rule_argv(reserved_ipv4, guest_ipv4))
+
+	forward = run("sudo", "nft", "list", "chain", *TABLE, FORWARD)
+	if not _has_forward(forward, guest_ipv4, host_veth):
+		run("sudo", "nft", *forward_rule_argv(guest_ipv4, host_veth))
 
 
 def remove_reserved_ip_nat(guest_ipv4: str) -> None:

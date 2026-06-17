@@ -51,6 +51,45 @@ class TestRuleArgv(unittest.TestCase):
 		)
 
 
+class TestRoutedReservedIp(unittest.TestCase):
+	"""A routed flexible IP (Self-Managed / Scaleway Elastic Metal) arrives at the
+	host destined to the reserved IP itself — no anchor. The same rule builders are
+	reused with the reserved IP where the DO path passes the anchor: DNAT the
+	reserved IP in, SNAT the guest out as the reserved IP, no egress policy route."""
+
+	RESERVED = "62.210.142.186"
+
+	def test_routed_dnat_matches_the_reserved_ip_itself(self):
+		self.assertEqual(
+			nat.dnat_rule_argv(self.RESERVED, GUEST),
+			["add", "rule", "inet", "atlas", "prerouting", "ip", "daddr", self.RESERVED, "dnat", "to", GUEST],
+		)
+
+	def test_routed_snat_sources_the_reserved_ip(self):
+		self.assertEqual(
+			nat.snat_rule_argv(self.RESERVED, GUEST),
+			[
+				"insert",
+				"rule",
+				"inet",
+				"atlas",
+				"postrouting",
+				"ip",
+				"saddr",
+				GUEST,
+				"snat",
+				"to",
+				self.RESERVED,
+			],
+		)
+
+	def test_routed_fingerprints_key_on_reserved_ip(self):
+		dnat = f"\t\tip daddr {self.RESERVED} dnat to {GUEST}\n"
+		snat = f"\t\tip saddr {GUEST} snat to {self.RESERVED}\n"
+		self.assertTrue(nat._has_dnat(dnat, self.RESERVED, GUEST))
+		self.assertTrue(nat._has_snat(snat, self.RESERVED, GUEST))
+
+
 class TestAnchorDataclass(unittest.TestCase):
 	def test_anchor_holds_address_and_gateway(self):
 		a = nat.Anchor(address=ANCHOR, gateway="10.47.0.1")
