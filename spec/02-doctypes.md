@@ -425,7 +425,8 @@ deletion.
 | `image`            | Link → Virtual Machine Image  | Y    |           |         | `set_only_once` (in addition to the controller's `_validate_immutability`). |
 | `status`           | Select                        | Y    | Y         | Pending | `Pending`, `Running`, `Paused`, `Stopped`, `Failed`, `Terminated`. Driven by lifecycle methods only. |
 | `vcpus`            | Int                           | Y    |           | 1       | Guest `vcpu_count` — the number of vCPU threads Firecracker boots. Whole number ≥ 1 (a guest can't boot on a fractional thread count); it is also what server-capacity accounting sums for the thread budget. CPU *bandwidth* below or at one core is set by `cpu_max_cores`, not here. Frozen on ordinary saves; mutable via `resize()` on a Stopped VM. No `set_only_once` (the controller is the gate). |
-| `cpu_max_cores`    | Float                         | Y    |           | 1       | cgroup `cpu.max` bandwidth cap in whole-core units (see [networking.cgroup_args](../atlas/atlas/networking.py)). Fractional for sub-1 sizes: `0.0625` is 1/16 of a core. Defaults to `vcpus` (whole-core behavior) when a caller sets only `vcpus` — the operator desk path, the bootstrap seed, direct API. The size presets ([sizes.py](../atlas/atlas/sizes.py)) set both. Same resize rule as `vcpus`; the bandwidth cap is baked into the per-VM jailer launcher at provision time, so a changed cap takes effect on re-provision (see [05 § Resize](./05-virtual-machine-lifecycle.md#resize)). |
+| `cpu_max_cores`    | Float                         | Y    |           | 1       | The VM's guaranteed CPU bandwidth in whole-core units (see [networking.cgroup_args](../atlas/atlas/networking.py)). Fractional for sub-1 sizes: `0.0625` is 1/16 of a core. Defaults to `vcpus` (whole-core behavior) when a caller sets only `vcpus` — the operator desk path, the bootstrap seed, direct API. The size presets ([sizes.py](../atlas/atlas/sizes.py)) set both. How it is *enforced* depends on `cpu_mode`. It is also the *bandwidth cost* server-capacity accounting sums for oversubscription (unchanged by the mode — see [09 § overprovision](./09-roadmap.md)). Same resize rule as `vcpus`; baked into the per-VM jailer launcher at provision time, so a changed value takes effect on re-provision (see [05 § Resize](./05-virtual-machine-lifecycle.md#resize)). |
+| `cpu_mode`         | Select                        | Y    |           | Hard cap | How `cpu_max_cores` is enforced. `Hard cap` (default, the original behavior): `cpu_max_cores` is a hard cgroup `cpu.max` ceiling — the VM never exceeds its share, even on an idle host. `Relaxed`: `cpu_max_cores` becomes a guaranteed share via cgroup `cpu.weight` (the proportional floor *under contention*) and `cpu.max` is loosened to `vcpus` whole cores, so the VM **bursts into spare host CPU when the host is idle** and degrades to its share when busy. The loose ceiling keeps a single busy VM from monopolizing the host and keeps capacity accounting honest (it still bills the `cpu_max_cores` share). Same resize rule as `vcpus`; takes effect on re-provision. This is the spec's earlier "hybrid (model 2)" CPU-burst plan, now shipped — see [09 § CPU bursting](./09-roadmap.md). |
 | `memory_megabytes` | Int                           | Y    |           | 512     | Same resize rule as `vcpus`.                                     |
 | `disk_gigabytes`   | Int                           | Y    |           | 4       | Same resize rule. Resize may only grow it.                       |
 | `data_disk_gigabytes` | Int                        |      |           | 0       | Optional second writable disk (the guest's `/dev/vdb`). `0` = none. Set at create; resize may only **grow** it (0→N is not a resize — recreate the VM). A first-class peer of the root disk: snapshotted, restored, cloned, terminated alongside it. |
@@ -485,6 +486,7 @@ image
 ── Resources ──
 vcpus
 cpu_max_cores
+cpu_mode
 | memory_megabytes
 | disk_gigabytes
 data_disk_gigabytes
@@ -641,8 +643,9 @@ memory_bytes
   disk_gigabytes?)` — create a new VM seeded from this snapshot (fresh
   identity). Disk defaults to the snapshot's size and can only grow. On a
   `Warm` snapshot the clone *restores* instead: vcpus/memory/disk are pinned
-  to the captured values (mismatched overrides are rejected; only the cgroup
-  `cpu_max_cores` cap is free), and the clone carries `warm_snapshot` +
+  to the captured values (mismatched overrides are rejected; the host-side
+  cgroup CPU settings — `cpu_max_cores`, `cpu_mode` — are free), and the clone
+  carries `warm_snapshot` +
   the golden's `tap_device` so provision stages the memory pair + MMDS
   identity.
 - `on_trash` — runs [`delete-snapshot-vm.py`](../scripts/delete-snapshot-vm.py)

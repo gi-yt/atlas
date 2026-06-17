@@ -332,6 +332,24 @@ class TestVirtualMachineLifecycle(IntegrationTestCase):
 		self.assertEqual(vm.cpu_max_cores, 0.5)
 		self.assertEqual(vm.vcpus, 1, "vcpus unchanged when only the cap is resized")
 
+	def test_resize_switches_cpu_mode(self) -> None:
+		# resize() may flip a Stopped VM into the relaxed/burst model. The mode is
+		# persisted (re-provision applies it, same as the cap); cpu_mode is left
+		# untouched when the caller doesn't pass it.
+		from atlas.atlas.doctype.virtual_machine import virtual_machine as module
+
+		vm = _vm_with_status("Stopped")  # defaults to Hard cap
+		self.assertEqual(vm.cpu_mode, "Hard cap")
+		with patch.object(module, "run_task", return_value=fake_task()):
+			vm.resize(cpu_mode="Relaxed")
+		vm.reload()
+		self.assertEqual(vm.cpu_mode, "Relaxed")
+		# A later resize that omits cpu_mode keeps Relaxed.
+		with patch.object(module, "run_task", return_value=fake_task()):
+			vm.resize(vcpus=2)
+		vm.reload()
+		self.assertEqual(vm.cpu_mode, "Relaxed", "cpu_mode is untouched unless passed")
+
 	def test_snapshot_defaults_title_when_omitted(self) -> None:
 		from atlas.atlas.doctype.virtual_machine import virtual_machine as module
 

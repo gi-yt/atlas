@@ -105,6 +105,99 @@ behavior; they just keep doors open.
   gesture (it already has the new values) so a resize applies the bandwidth cap
   immediately. Additive; see [05 § Resize](./05-virtual-machine-lifecycle.md#resize).
 
+- **CPU bursting — let an idle host's spare cycles go to whoever wants them.**
+  **Model 2 (hybrid) is now SHIPPED** as the per-VM `cpu_mode` toggle
+  ([02 § Virtual Machine](./02-doctypes.md), [`networking.cgroup_args`](../atlas/atlas/networking.py)):
+  a `Relaxed` VM gets a `cpu.weight` floor (its `cpu_max_cores` share under
+  contention) plus a loose `cpu.max` ceiling at `vcpus` whole cores, so it bursts
+  into idle host CPU; `Hard cap` (the default) keeps the original hard ceiling.
+  The analysis below is retained for the *remaining* work — model 3 (Fly-style
+  accruing balance) and the live-apply follow-up.
+
+  In `Hard cap` mode a VM's `cpu.max` is a *hard* bandwidth ceiling: a `Shared
+  1x` (`cpu_max_cores=0.0625` → `cpu.max=6250 100000`) is throttled to 6.25% of a
+  core *even when the host is otherwise idle*. CFS bandwidth control is not
+  work-conserving — unused cycles are left on the floor, not lent out. This is
+  the documented root cause of the slow sub-core boots and the warm-deploy floor
+  (throttled boots run minutes; the same clone at full CPU boots in ~11s). The
+  shipped `Relaxed` mode fixes exactly this for VMs that opt in.
+
+  The goal: a small VM should be able to **burst into spare host CPU when no one
+  else needs it**, while still degrading to its guaranteed share under
+  contention. Three models, in increasing fidelity:
+
+  1. **`cpu.weight` (proportional shares).** Drop the quota, or keep it loose,
+     and add `--cgroup cpu.weight=<w>` with `w` proportional to the tier
+     (`Shared 1x`≈6 … `Dedicated 1x`≈100, basis = `cpu_max_cores`). Now CFS *is*
+     work-conserving: a VM gets *at least* its proportional share when the host
+     is busy and *all* the idle CPU when it isn't. Cheapest change, but it
+     removes the hard ceiling — a single busy VM on an idle host runs flat-out,
+     which breaks the "you bought 1/16 of a core" billing story and is the
+     opposite of a predictable shared tier.
+
+  2. **Hybrid: `cpu.weight` for fairness + a loose `cpu.max` burst ceiling.**
+     ✅ **SHIPPED** as `cpu_mode="Relaxed"`. Weight sets the floor under
+     contention; a loose `cpu.max` (here `vcpus` whole cores) caps the burst so
+     no VM monopolizes the host or invalidates capacity accounting (which still
+     bills the `cpu_max_cores` share). The right default for a multi-tenant
+     self-serve product, but the burst is *unconditional* — a VM that has been
+     pinned at its ceiling for an hour still bursts, so "burst" becomes "a higher
+     hard cap," not "spare cycles you earned by being idle." That last gap is
+     what model 3 closes.
+
+  3. **Fly.io's model — quota + an accruing burst balance** (the one the
+     operator pointed at: <https://fly.io/docs/machines/cpu-performance/>).
+     Fly stays *quota-based* — their "shared CPU = 5ms / 80ms = 6.25%" baseline
+     is exactly our `Shared 1x` — but lets a VM **bank unused quota while idle
+     and spend it in bursts** (their docs: a 500s balance bursts for ~533s),
+     throttling back to baseline only once the balance drains. This is the model
+     that matches the operator's actual ask: *"use available CPU if nobody else
+     is using it,"* with idleness as the currency.
+
+     The catch is that **cgroup v2 cannot do this on its own.** CFS *does* have
+     an accruing-balance knob — `cpu.cfs_burst_us` (v2: `cpu.max.burst`),
+     defined as "the maximum accumulated run-time (in microseconds)"
+     ([sched-bwc](https://www.kernel.org/doc/Documentation/scheduler/sched-bwc.rst)) —
+     but the kernel hard-caps it at **≤ one period's quota** ("any positive value
+     no larger than `cpu.cfs_quota_us`"). For `Shared 1x` that buffer is
+     `quota = 6250µs` — **6.25ms**: after idling, the VM may spend at most one
+     extra period's worth (≈12.5% of a core for a single 100ms window), then it
+     is back at the 6.25% wall. Fly's currency is **500 seconds** of balance —
+     five orders of magnitude larger. So the kernel buffer smooths a momentary
+     spike; it does *not* implement "bank an idle minute, spend it later." Fly's
+     balance lives in **their own userspace scheduler on top of CFS**, not in
+     the cgroup. To match it Atlas would need an equivalent: a host-side loop
+     that watches each VM's `cpu.stat` (`usage_usec` vs. its baseline),
+     accumulates a per-VM credit balance, and live-rewrites `cpu.max` between
+     "baseline" and "burst ceiling" as the balance fills and drains. That is a
+     real on-host agent — squarely against operating principle #5 ("no agent
+     runs on the server") — so it is a deliberate, heavier step, not a
+     cgroup-flag tweak.
+
+  Two facts constrain all three: (a) the live-apply mechanism already exists —
+  the **launcher-regeneration follow-up above** rewrites `--cgroup cpu.max=…` on
+  a running jailer, and the H1 warm-unlock work proved a running VM's cgroup file
+  can be live-written (see `llm/references/warm-provision-cpu-unlock.md`); (b)
+  **a sub-1 tier boots `vcpus=1`**, so it can burst to at most *one* core no
+  matter the cgroup setting — multi-core burst would also need `vcpus>1`, which
+  changes guest topology and the thread-budget half of capacity accounting
+  ([`server_capacity.py`](../atlas/atlas/api/server_capacity.py),
+  [`placement.py`](../atlas/atlas/placement.py)). That accounting is the subtle
+  blast radius, not the cgroup flag: it sums `cpu_max_cores` as a *bandwidth
+  cost* for oversubscription, and any model where VMs routinely exceed that cost
+  changes what `overprovision_factor` means.
+
+  Status: the **hybrid (model 2)** is shipped as the `cpu_mode` toggle — it
+  delivers "burst into idle CPU" with one additive `cgroup_args` change, no host
+  agent, and a ceiling that keeps capacity accounting honest. It defaults to
+  `Hard cap` (off), so it is opt-in per VM and capacity accounting is unchanged.
+  Remaining work: (i) treat Fly's accruing-balance (model 3) as a later
+  refinement only if an *unconditional* burst on an idle host turns out to hurt;
+  (ii) regenerate the launcher on resize so a mode/share change applies on the
+  next Start, not only on re-provision (the named follow-up above). See
+  [02 § Virtual Machine `cpu_mode`](./02-doctypes.md) and
+  [05 § Resize](./05-virtual-machine-lifecycle.md#resize).
+
 - **Stuck-task reaper**. A scheduled job that looks at Tasks in `Running`
   state older than 2× their declared timeout and marks them `Failure` with
   a synthetic "worker presumed dead" note. The e2e harness already does

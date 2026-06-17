@@ -5,6 +5,7 @@ import frappe
 from frappe.model.document import Document
 
 from atlas.atlas.networking import (
+	CPU_MODE_HARD,
 	allocate_ipv6,
 	cgroup_args,
 	derive_ipv4_link,
@@ -34,6 +35,7 @@ IMMUTABLE_AFTER_INSERT = (
 RESIZE_MUTABLE = (
 	"vcpus",
 	"cpu_max_cores",
+	"cpu_mode",
 	"memory_megabytes",
 	"disk_gigabytes",
 	"data_disk_gigabytes",
@@ -81,18 +83,24 @@ class VirtualMachine(Document):
 	def before_validate(self) -> None:
 		if not self.is_new():
 			return
-		self.set_cpu_max_cores_default()
+		self.set_cpu_defaults()
 		self.set_mac_address()
 		self.set_tap_device()
 
-	def set_cpu_max_cores_default(self) -> None:
-		# cpu_max_cores is the cgroup cpu.max bandwidth cap; vcpus is the guest
-		# thread count. A caller who sets only vcpus (the operator desk path, the
-		# bootstrap seed, direct API) wants whole-core bandwidth — default the cap
-		# to vcpus so those VMs behave exactly as before this field existed. The
-		# size presets set both explicitly (fractional caps for sub-1 sizes).
+	def set_cpu_defaults(self) -> None:
+		# cpu_max_cores is the VM's guaranteed CPU bandwidth share; vcpus is the
+		# guest thread count. A caller who sets only vcpus (the operator desk path,
+		# the bootstrap seed, direct API) wants whole-core bandwidth — default the
+		# share to vcpus so those VMs behave exactly as before this field existed.
+		# The size presets set it explicitly (fractional shares for sub-1 sizes).
 		if not self.cpu_max_cores:
 			self.cpu_max_cores = float(self.vcpus or 1)
+		# cpu_mode picks how that share is enforced. Default to the hard cgroup
+		# cpu.max ceiling — the original, predictable behavior — for any caller
+		# that does not opt into the relaxed/burst model. The JSON default covers
+		# the form path; this covers direct API/test construction.
+		if not self.cpu_mode:
+			self.cpu_mode = CPU_MODE_HARD
 
 	def set_status_default(self) -> None:
 		if not self.status:
@@ -520,6 +528,7 @@ class VirtualMachine(Document):
 		self,
 		vcpus: int | None = None,
 		cpu_max_cores: float | None = None,
+		cpu_mode: str | None = None,
 		memory_megabytes: int | None = None,
 		disk_gigabytes: int | None = None,
 		data_disk_gigabytes: int | None = None,
@@ -532,16 +541,17 @@ class VirtualMachine(Document):
 		are persisted, then resize-vm.py rewrites the firecracker config and
 		grows the rootfs to match. The VM stays Stopped.
 
-		`cpu_max_cores` is the cgroup cpu.max bandwidth cap (distinct from
-		`vcpus`, the guest vcpu_count). resize-vm.py rewrites firecracker.json
-		(vcpu_count/mem) and grows the disk, but does NOT regenerate the per-VM
-		jailer launcher — so a new cpu.max cap takes effect on the next
-		re-provision, not on the next Start (the same pre-existing behavior the
-		whole-core cpu.max cap already has). We still persist the new cap so the
-		doc stays the source of truth and capacity accounting is correct. When
-		the caller changes vcpus but leaves cpu_max_cores unset, keep the cap in
-		step for a whole-core VM (cap == old vcpus); otherwise the explicit cap
-		(or the unchanged fractional one) stands."""
+		`cpu_max_cores` is the VM's guaranteed CPU bandwidth share and `cpu_mode`
+		is how it is enforced (hard cgroup cpu.max ceiling vs. cpu.weight floor +
+		burst). resize-vm.py rewrites firecracker.json (vcpu_count/mem) and grows
+		the disk, but does NOT regenerate the per-VM jailer launcher — so a new
+		share, mode, or burst ceiling takes effect on the next re-provision, not on
+		the next Start (the same pre-existing behavior the whole-core cpu.max cap
+		already has). We still persist the new values so the doc stays the source
+		of truth and capacity accounting is correct. When the caller changes vcpus
+		but leaves cpu_max_cores unset, keep the share in step for a whole-core VM
+		(share == old vcpus); otherwise the explicit share (or the unchanged
+		fractional one) stands. cpu_mode is left untouched unless passed."""
 		if self.status != "Stopped":
 			frappe.throw(f"Stop the VM before resizing (status is {self.status})")
 		new_vcpus = int(vcpus) if vcpus else self.vcpus
@@ -549,6 +559,7 @@ class VirtualMachine(Document):
 		new_disk = int(disk_gigabytes) if disk_gigabytes else self.disk_gigabytes
 		new_data_disk = int(data_disk_gigabytes) if data_disk_gigabytes else self.data_disk_gigabytes
 		new_cpu_max = self._resolve_resize_cpu_max(cpu_max_cores, new_vcpus)
+		new_cpu_mode = cpu_mode or self.cpu_mode
 		if new_disk < self.disk_gigabytes:
 			frappe.throw(f"Disk can only grow: {self.disk_gigabytes} GB → {new_disk} GB is a shrink")
 		# The data disk grows like the root disk, with one extra rule: resize only
@@ -585,6 +596,7 @@ class VirtualMachine(Document):
 		)
 		self.vcpus = new_vcpus
 		self.cpu_max_cores = new_cpu_max
+		self.cpu_mode = new_cpu_mode
 		self.memory_megabytes = new_memory
 		self.disk_gigabytes = new_disk
 		self.data_disk_gigabytes = new_data_disk
@@ -749,7 +761,13 @@ class VirtualMachine(Document):
 			# <period>") is one argv token end to end — no systemd word-splitting,
 			# so the shell's newline-join + mapfile workaround is gone.
 			"CGROUP_ARG": _cgroup_values(
-				cgroup_args(self.cpu_max_cores, self.memory_megabytes, self.disk_gigabytes)
+				cgroup_args(
+					self.cpu_max_cores,
+					self.memory_megabytes,
+					self.disk_gigabytes,
+					self.cpu_mode,
+					self.vcpus,
+				)
 			),
 			"RESOURCE_ARG": _cgroup_values(resource_limit_args(self.disk_gigabytes)),
 			# Per-VM NAT44 v4 egress link (host/guest /30 + gateway).

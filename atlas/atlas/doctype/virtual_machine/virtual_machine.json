@@ -18,6 +18,7 @@
   "column_break_resources_0",
   "vcpus",
   "cpu_max_cores",
+  "cpu_mode",
   "column_break_resources_1",
   "memory_megabytes",
   "column_break_resources_2",
@@ -128,11 +129,20 @@
    "reqd": 1
   },
   {
-   "description": "Host CPU bandwidth cap in whole-core units (cgroup cpu.max). Fractional for sub-1 sizes (e.g. 0.0625 = 1/16 of a core). Defaults to vcpus (set in the controller's before_validate — a JSON default here would mask that and pin every whole-core VM to 1).",
+   "description": "The VM's guaranteed CPU bandwidth in whole-core units. Fractional for sub-1 sizes (e.g. 0.0625 = 1/16 of a core). Defaults to vcpus (set in the controller's before_validate — a JSON default here would mask that and pin every whole-core VM to 1). In Hard cap mode this is also the hard ceiling (cgroup cpu.max); in Relaxed mode it sets the cpu.weight floor and the VM may burst above it.",
    "fieldname": "cpu_max_cores",
    "fieldtype": "Float",
    "label": "CPU bandwidth (cores)",
    "precision": "4",
+   "reqd": 1
+  },
+  {
+   "default": "Hard cap",
+   "description": "How cpu_max_cores is enforced. Hard cap (default): cpu_max_cores is a hard cgroup cpu.max ceiling — the VM never exceeds its share, even on an idle host. Relaxed: cpu_max_cores becomes a guaranteed share via cpu.weight (the floor under contention) and cpu.max is loosened to vcpus whole cores, so the VM bursts into spare host CPU when the host is idle.",
+   "fieldname": "cpu_mode",
+   "fieldtype": "Select",
+   "label": "CPU mode",
+   "options": "Hard cap\nRelaxed",
    "reqd": 1
   },
   {

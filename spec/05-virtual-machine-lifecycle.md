@@ -361,8 +361,8 @@ diverges from the cold path in exactly four ways:
   kernel's ext4 caches (bitmaps, inodes, dentries) must keep matching the
   device underneath. This is also why a warm clone restores at the captured
   disk/vcpus/memory exactly (`clone_to_new_vm` rejects mismatched overrides;
-  the cgroup `cpu_max_cores` cap stays free — it is host-side, invisible to
-  the guest).
+  the cgroup CPU settings — `cpu_max_cores` and `cpu_mode` — stay free, being
+  host-side and invisible to the guest).
 - **The identity travels over MMDS, not the disk.** Every VM's
   `firecracker.json` now carries `mmds-config` (V1, eth0 — inert unless data
   is staged). Provision writes the clone's identity payload (uuid, hostname,
@@ -640,7 +640,7 @@ none.
 
 ## Resize
 
-`Virtual Machine.resize(vcpus, cpu_max_cores, memory_megabytes, disk_gigabytes)`
+`Virtual Machine.resize(vcpus, cpu_max_cores, cpu_mode, memory_megabytes, disk_gigabytes)`
 on a **Stopped** VM. Firecracker reads `/machine-config` only at boot, so resize
 is stop-required; the next Start picks up the new config. Runs
 [`resize-vm.py`](../scripts/resize-vm.py): `jq`-edit `vcpu_count` /
@@ -656,19 +656,22 @@ values are persisted on the row through a guarded path (see
 adding one to a VM that never had one (0→N) would also need a new Firecracker
 drive and fstab line, so the controller rejects it — recreate the VM instead.
 
-**`cpu_max_cores` and the re-provision gap.** `cpu_max_cores` is the cgroup
-`cpu.max` bandwidth cap (distinct from `vcpus`, the guest `vcpu_count`). It is
-baked into the per-VM jailer launcher at provision time — `resize-vm.py` rewrites
-`firecracker.json` and grows the disk but does **not** regenerate the launcher,
-so a changed bandwidth cap takes effect on the next **re-provision**, not the
-next Start. This is the pre-existing behavior the whole-core `cpu.max` cap
-already has (a `vcpus` resize never rewrote the launcher either); `cpu_max_cores`
-just makes it explicit. `resize()` still persists the new cap so the doc stays
-the source of truth and capacity accounting is correct, and keeps a whole-core
-VM whole-core when `vcpus` changes without an explicit cap. Regenerating the
+**`cpu_max_cores` / `cpu_mode` and the re-provision gap.** `cpu_max_cores` is the
+VM's guaranteed CPU bandwidth (distinct from `vcpus`, the guest `vcpu_count`), and
+`cpu_mode` ([02 § Virtual Machine](./02-doctypes.md)) picks how it is enforced — a
+hard cgroup `cpu.max` ceiling (`Hard cap`, the default) or a `cpu.weight` floor
+plus a loose `cpu.max` burst ceiling (`Relaxed`). Both are baked into the per-VM
+jailer launcher at provision time — `resize-vm.py` rewrites `firecracker.json` and
+grows the disk but does **not** regenerate the launcher, so a changed share, mode,
+or burst ceiling takes effect on the next **re-provision**, not the next Start.
+This is the pre-existing behavior the whole-core `cpu.max` cap already has (a
+`vcpus` resize never rewrote the launcher either). `resize()` still persists the
+new values so the doc stays the source of truth and capacity accounting is
+correct; it keeps a whole-core VM whole-core when `vcpus` changes without an
+explicit share, and leaves `cpu_mode` untouched unless passed. Regenerating the
 launcher on resize is a named follow-up (see [09-roadmap.md](./09-roadmap.md)).
 The dashboard's Resize dialog stays vCPU / memory / disk; `cpu_max_cores` is set
-from a size preset at create.
+from a size preset at create and `cpu_mode` from the desk form / API.
 
 ## Terminate
 
@@ -725,7 +728,8 @@ canonical artifact. Highlights:
   `ExecStart` — because `--cgroup cpu.max=<quota> <period>` carries a value with
   an internal space, and systemd word-splits an unquoted `$VAR` in `ExecStart`
   on *every* space, which would shatter that value into a stray positional the
-  jailer rejects. The per-VM uid, netns name and cgroup/rlimit flags are baked
+  jailer rejects. (A `Relaxed`-mode VM additionally emits `--cgroup cpu.weight=<w>`
+  alongside a loosened `cpu.max`; the launcher carries both the same way.) The per-VM uid, netns name and cgroup/rlimit flags are baked
   into the launcher at provision time: `provision-vm.py` receives the cgroup and
   resource limits as repeatable `--cgroup-arg` / `--resource-arg` flags (one argv
   token per value, `shlex.quote`'d, so `cpu.max`'s internal space survives) and

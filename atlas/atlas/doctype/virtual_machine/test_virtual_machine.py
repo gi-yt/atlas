@@ -128,6 +128,37 @@ class TestVirtualMachine(IntegrationTestCase):
 		cpu_max = next(v for v in variables["CGROUP_ARG"] if v.startswith("cpu.max="))
 		self.assertEqual(cpu_max, "cpu.max=6250 100000")
 
+	def test_cpu_mode_defaults_to_hard_cap(self) -> None:
+		# A caller who sets no cpu_mode (operator desk path, bootstrap, direct API)
+		# gets the original hard ceiling: cpu.max == cpu_max_cores, no cpu.weight.
+		vm = _new_vm(vcpus=1, cpu_max_cores=0.0625)
+		self.assertEqual(vm.cpu_mode, "Hard cap")
+		values = vm._provision_variables()["CGROUP_ARG"]
+		self.assertIn("cpu.max=6250 100000", values)
+		self.assertFalse(
+			any(v.startswith("cpu.weight=") for v in values),
+			"hard-cap mode emits no cpu.weight",
+		)
+
+	def test_relaxed_mode_emits_weight_and_loose_ceiling(self) -> None:
+		# Relaxed mode: cpu_max_cores becomes the guaranteed share carried by
+		# cpu.weight (proportional, 1/16 core -> ~6), and cpu.max is loosened to
+		# the whole-vcpu burst ceiling so the VM bursts into idle host CPU.
+		vm = _new_vm(vcpus=1, cpu_max_cores=0.0625, cpu_mode="Relaxed")
+		self.assertEqual(vm.cpu_mode, "Relaxed")
+		values = vm._provision_variables()["CGROUP_ARG"]
+		self.assertIn("cpu.weight=6", values)
+		# vcpus=1 -> a one-core ceiling, not the 6.25% hard wall.
+		self.assertIn("cpu.max=100000 100000", values)
+
+	def test_relaxed_mode_ceiling_tracks_vcpus(self) -> None:
+		# The burst ceiling is vcpus whole cores: a 2-vCPU relaxed VM may burst to
+		# two cores. Its guaranteed weight reflects the (here whole-core) share.
+		vm = _new_vm(vcpus=2, cpu_max_cores=2, cpu_mode="Relaxed")
+		values = vm._provision_variables()["CGROUP_ARG"]
+		self.assertIn("cpu.weight=200", values)
+		self.assertIn("cpu.max=200000 100000", values)
+
 	def test_provision_failure_flips_status_to_failed(self) -> None:
 		"""On failure the Task is saved with `Failure`; the Task controller
 		hook then flips the linked VM's status to `Failed` so the form makes

@@ -4,6 +4,9 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from atlas.atlas.networking import (
+	CPU_MODE_RELAXED,
+	CPU_WEIGHT_MAX,
+	CPU_WEIGHT_MIN,
 	MAX_OPEN_FILES,
 	MEMORY_HEADROOM_MIB,
 	UID_BASE,
@@ -11,6 +14,7 @@ from atlas.atlas.networking import (
 	allocate_ipv6,
 	carve_virtual_machine_range,
 	cgroup_args,
+	cpu_weight,
 	derive_mac,
 	derive_netns,
 	derive_tap,
@@ -205,6 +209,47 @@ class TestNetworking(IntegrationTestCase):
 		# A 1/8 cap rounds to 12500.
 		eighth = cgroup_args(cpu_max_cores=0.125, memory_megabytes=512, disk_gigabytes=6)
 		self.assertIn("cpu.max=12500 100000", eighth)
+
+	def test_cpu_weight_scales_and_clamps(self) -> None:
+		# A full core is the cgroup default weight (100); shares scale linearly and
+		# clamp into the kernel's [1, 10000] range so the smallest tier never
+		# rounds to 0 and a huge VM never overflows.
+		self.assertEqual(cpu_weight(1), 100)
+		self.assertEqual(cpu_weight(0.0625), 6)  # 1/16 core
+		self.assertEqual(cpu_weight(2), 200)
+		self.assertEqual(cpu_weight(0.001), CPU_WEIGHT_MIN)  # rounds below 1 → clamped up
+		self.assertEqual(cpu_weight(1000), CPU_WEIGHT_MAX)  # 100000 → clamped down
+
+	def test_cgroup_args_relaxed_mode_weight_and_burst_ceiling(self) -> None:
+		# Relaxed mode trades the hard cap for a cpu.weight floor (the guaranteed
+		# share under contention) plus a loose cpu.max ceiling at vcpus whole
+		# cores, so the VM bursts into idle host CPU. A 1/16 share, one vcpu:
+		# weight 6, ceiling one core.
+		args = cgroup_args(
+			cpu_max_cores=0.0625,
+			memory_megabytes=256,
+			disk_gigabytes=4,
+			cpu_mode=CPU_MODE_RELAXED,
+			vcpus=1,
+		)
+		self.assertIn("cpu.weight=6", args)
+		self.assertIn("cpu.max=100000 100000", args)
+		# Memory caps are unchanged by the CPU model.
+		expected_mem = (256 + MEMORY_HEADROOM_MIB) * 1024 * 1024
+		self.assertIn(f"memory.max={expected_mem}", args)
+
+	def test_cgroup_args_relaxed_ceiling_tracks_vcpus(self) -> None:
+		# The burst ceiling is vcpus whole cores: a 4-vcpu relaxed VM may burst to
+		# four cores, with its weight reflecting the (whole-core) share.
+		args = cgroup_args(
+			cpu_max_cores=4,
+			memory_megabytes=1024,
+			disk_gigabytes=8,
+			cpu_mode=CPU_MODE_RELAXED,
+			vcpus=4,
+		)
+		self.assertIn("cpu.weight=400", args)
+		self.assertIn("cpu.max=400000 100000", args)
 
 	def test_resource_limit_args_omits_fsize_for_lv_disk(self) -> None:
 		# The VM disk is an LVM thin volume (a block device), not a regular file

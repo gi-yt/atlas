@@ -25,6 +25,22 @@ UID_SPAN = 60000
 # OOM-killing a healthy VM. Too tight surfaces loudly as a failed-to-start unit.
 MEMORY_HEADROOM_MIB = 256
 
+# CPU bandwidth models (Virtual Machine.cpu_mode). Both share `cpu_max_cores` as
+# the VM's guaranteed share; they differ in whether that share is also a hard
+# ceiling. See `cgroup_args`.
+CPU_MODE_HARD = "Hard cap"  # cpu.max == cpu_max_cores; the bandwidth cap is a wall.
+CPU_MODE_RELAXED = "Relaxed"  # cpu.weight floor + a loose cpu.max burst ceiling.
+
+# In relaxed mode `cpu.weight` carries the guaranteed proportional share. cgroup
+# v2 weights live in [1, 10000] (100 = default); we scale `cpu_max_cores` by this
+# so a full core is the default weight and a sub-core tier is proportionally
+# lighter (1/16 core -> ~6, one core -> 100, two cores -> 200), then clamp into
+# range. Capacity accounting stays keyed on `cpu_max_cores`, so the weights sum
+# to the same proportions placement already reasons about.
+CPU_WEIGHT_PER_CORE = 100
+CPU_WEIGHT_MIN = 1
+CPU_WEIGHT_MAX = 10000
+
 # rlimit on open file descriptors for the jailed process. The jailer defaults to
 # 2048 when unset; 1024 is ample for one Firecracker (a handful of fds: kvm,
 # tap, drives, socket) and bounds a runaway.
@@ -139,18 +155,45 @@ def derive_veth_pair(virtual_machine_name: str) -> tuple[str, str]:
 	return f"atlas-h{short}", f"atlas-n{short}"
 
 
-def cgroup_args(cpu_max_cores: float, memory_megabytes: int, disk_gigabytes: int) -> list[str]:
+def cpu_weight(cpu_max_cores: float) -> int:
+	"""The cgroup v2 `cpu.weight` carrying `cpu_max_cores` as a proportional share.
+
+	Scales the bandwidth share by `CPU_WEIGHT_PER_CORE` (a full core -> the cgroup
+	default 100, 1/16 core -> ~6) and clamps into the kernel's [1, 10000] range, so
+	the weights of co-resident VMs sum to the same proportions placement reasons
+	about in `cpu_max_cores` units."""
+	scaled = round(cpu_max_cores * CPU_WEIGHT_PER_CORE)
+	return max(CPU_WEIGHT_MIN, min(CPU_WEIGHT_MAX, scaled))
+
+
+def cgroup_args(
+	cpu_max_cores: float,
+	memory_megabytes: int,
+	disk_gigabytes: int,
+	cpu_mode: str = CPU_MODE_HARD,
+	vcpus: int = 1,
+) -> list[str]:
 	"""Jailer `--cgroup` flags bounding the VM's memory and CPU (cgroup v2).
 
 	- `memory.max` = guest RAM + headroom (whole-process ceiling).
 	- `memory.swap.max` = 0 — never swap guest RAM to host disk (also the
 	  per-VM form of Firecracker's "disable swap / data-remanence" guidance).
-	- `cpu.max` = `<cpu_max_cores * period> <period>` — `cpu_max_cores` cores'
-	  worth of CPU bandwidth per 100 ms period (bandwidth cap, not cpuset
-	  pinning). Fractional for sub-1 sizes: 1/16 core is `6250 100000`. This is
-	  the *bandwidth* cap, distinct from the guest's `vcpu_count` (the thread
-	  count Firecracker boots) — a 1/16 VM still has one vCPU thread, throttled
-	  to 6.25% of a core.
+	- CPU depends on `cpu_mode`. Both treat `cpu_max_cores` as the VM's share —
+	  `cpu_max_cores` cores' worth of bandwidth per 100 ms period (a *bandwidth*
+	  share, not cpuset pinning; distinct from `vcpus`, the guest `vcpu_count`).
+	  Fractional for sub-1 sizes: 1/16 core is `6250 100000`.
+
+	  - `CPU_MODE_HARD` (the default): `cpu.max = <cpu_max_cores * period>
+	    <period>` and no `cpu.weight`. The share is also a hard ceiling — a 1/16
+	    VM is throttled to 6.25% of a core *even on an idle host*. This is the
+	    pre-existing behavior, emitted byte-for-byte.
+	  - `CPU_MODE_RELAXED`: `cpu.weight = cpu_weight(cpu_max_cores)` (the
+	    guaranteed proportional floor *under contention*) plus a loose `cpu.max =
+	    <vcpus * period> <period>` burst ceiling. CFS is work-conserving for
+	    weights, so the VM gets at least its share when the host is busy and
+	    bursts into spare host CPU when it isn't — up to `vcpus` whole cores (a
+	    sub-1 tier boots one vCPU thread, so it bursts to at most one core). The
+	    ceiling keeps a single busy VM from monopolizing an idle host.
 
 	`disk_gigabytes` is unused here — the VM disk is a thin LV bounded by
 	pool-space accounting (the pool's `data_percent`, monitored at the host),
@@ -160,15 +203,29 @@ def cgroup_args(cpu_max_cores: float, memory_megabytes: int, disk_gigabytes: int
 	_ = disk_gigabytes
 	period_us = 100000
 	memory_max_bytes = (memory_megabytes + MEMORY_HEADROOM_MIB) * 1024 * 1024
-	cpu_quota_us = round(cpu_max_cores * period_us)
-	return [
+	args = [
 		"--cgroup",
 		f"memory.max={memory_max_bytes}",
 		"--cgroup",
 		"memory.swap.max=0",
-		"--cgroup",
-		f"cpu.max={cpu_quota_us} {period_us}",
 	]
+	if cpu_mode == CPU_MODE_RELAXED:
+		# Weight = the guaranteed share under contention; cpu.max = a loose
+		# whole-vcpu ceiling the VM may burst up to on an idle host.
+		ceiling_us = round(vcpus * period_us)
+		args += [
+			"--cgroup",
+			f"cpu.weight={cpu_weight(cpu_max_cores)}",
+			"--cgroup",
+			f"cpu.max={ceiling_us} {period_us}",
+		]
+	else:
+		cpu_quota_us = round(cpu_max_cores * period_us)
+		args += [
+			"--cgroup",
+			f"cpu.max={cpu_quota_us} {period_us}",
+		]
+	return args
 
 
 def resource_limit_args(disk_gigabytes: int) -> list[str]:
