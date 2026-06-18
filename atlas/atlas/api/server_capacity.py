@@ -77,3 +77,38 @@ def capacity_for_server(server: str) -> dict:
 		"used_vcpus": used,
 		"virtual_machine_count": len(used_rows),
 	}
+
+
+@frappe.whitelist()
+def cluster_capacity() -> dict:
+	"""Aggregate `capacity_for_server` across every Active Server.
+
+	The fleet-wide view behind the per-server one: "how much room does the whole
+	cluster have, regardless of which host a VM lands on?" — the same question
+	placement asks (atlas/placement.py), summed instead of walked one server at a
+	time.
+
+	`total_vcpus`/`effective_vcpus` sum only the servers with a *known* total;
+	`uncatalogued_servers` counts the rest (self-managed hosts, or sizes not in
+	the static dict) whose effective budget is None and which placement treats as
+	unlimited — so the totals are a floor, not a ceiling. `used_vcpus` and
+	`virtual_machine_count` sum across all Active servers regardless. `servers`
+	carries the per-server breakdown for a drill-down.
+	"""
+	names = frappe.get_all(
+		"Server",
+		filters={"status": "Active"},
+		pluck="name",
+		order_by="creation asc",
+	)
+	servers = [capacity_for_server(name) for name in names]
+	catalogued = [s for s in servers if s["effective_vcpus"] is not None]
+	return {
+		"server_count": len(servers),
+		"uncatalogued_servers": len(servers) - len(catalogued),
+		"total_vcpus": sum(s["total_vcpus"] for s in catalogued),
+		"effective_vcpus": sum(s["effective_vcpus"] for s in catalogued),
+		"used_vcpus": sum(s["used_vcpus"] for s in servers),
+		"virtual_machine_count": sum(s["virtual_machine_count"] for s in servers),
+		"servers": servers,
+	}
