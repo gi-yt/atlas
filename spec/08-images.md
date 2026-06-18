@@ -236,35 +236,44 @@ and disk creation is **instant** (a CoW snapshot, not a multi-second copy).
 
 Self-serve site VMs don't boot the plain `ubuntu-24.04` image — they boot a
 **golden bench image**: the same Ubuntu rootfs with bench-cli, its uv venv, the
-Frappe clone **plus ERPNext (version-16)**, MariaDB + Redis (the bench code and
-MariaDB datadir on ZFS datasets), nginx + supervisor configured and enabled, **a
-fully-created Frappe + ERPNext site baked under the fixed name `site.local`**, and
-the production stack left **running and serving** — so a snapshot-booted clone
-comes up answering on
-`:80` (IPv4 *and* IPv6) with no deploy step. Baking all of that once means
-`deploy-site.py` (the in-guest deploy) does only the per-VM work — **rename** the
-baked `site.local` dir to the FQDN + `bench setup nginx` (regenerate the vhost as
-`server_name <fqdn>` + reload), no admin reset (cold clones also `setup production`
-first) — not a multi-minute `bench new-site` + `install-app erpnext` per signup.
+Frappe clone (**plus ERPNext (version-16)** in site mode), MariaDB + Redis (the
+bench code and MariaDB datadir on ZFS datasets), nginx + the production stack
+configured and **running and serving** — so a snapshot-booted clone comes up
+answering on `:80` (IPv4 *and* IPv6) with no deploy step. `build.sh` is the
+**proven recipe** ([`../llm/references/bench-setup.md`](../llm/references/bench-setup.md))
+and nothing more — its key move is that `bench.toml` sets `process_manager =
+"systemd"`, so **bench-cli itself stands up and manages the whole stack** as
+lingering `systemctl --user` units that survive reboot. There is no hand-rolled
+supervisord unit, ZFS boot drop-in, or nginx surgery; that is all bench-cli's job.
 
-**ZFS is opt-in** in the current bench-cli (the optional-zfs merge): `bench init`
-sets up a pool only when `[volume].enabled` is true, which `bench.toml` sets. The
-build VM is a single-disk droplet with no spare block device, so the pool is a
-preallocated **file vdev** (`backing = "image"`, a 7 GB image at
-`/var/lib/bench-zfs/bench-pool.img`) — not `auto` (which would overwrite the
-explicit `benches`/`mariadb` quotas with 75%-of-free sizing). `bench init` mounts
-`bench-pool/benches` at `/root/bench-cli/benches` and `bench-pool/mariadb` at
-`/var/lib/mysql`, so BOTH the bench code and the MariaDB data live on ZFS. The
-Firecracker `vmlinux` ships no ZFS module, so `build.sh` DKMS-builds `zfs.ko`
-against the running kernel (`linux-headers-$(uname -r)` + `zfs-dkms`) before
-init's volume step; the built `.ko` travels in the snapshot. On a cold boot the
-pool must auto-import + mount before MariaDB and the bench, so `build.sh` enables
-`zfs-import-cache`/`zfs-mount`, orders MariaDB + nginx `After=zfs-mount.service`,
-and runs the bench-owned supervisord as a systemd unit (`atlas-bench.service`,
-ordered `After=` the ZFS mount + MariaDB, waiting in `ExecStartPre` for the
-benches mount + MariaDB socket) so a cold boot brings the stack up unattended —
-bench-cli's supervisord is otherwise launched by hand by `bench start`, with no
-boot persistence.
+**Two modes** (`build.sh`'s first arg → two golden snapshots): **`site`** bakes a
+fully-created Frappe + ERPNext site under the fixed name `site.local`, so a clone's
+domain maps to the **site URL** (`deploy-site.py` renames `sites/site.local` → the
+FQDN + `bench setup nginx`); **`admin`** bakes only the bench + the admin app, so a
+clone's domain maps to the **admin URL** (`deploy-site.py` sets `[admin].domain =
+<fqdn>` + `bench setup nginx`). Either way the per-VM deploy is a directory move /
+config-gen, never a multi-minute `bench new-site` + `install-app erpnext`.
+
+The bake runs as an unprivileged **`frappe` user** (uid 1000, passwordless sudo),
+not root: bench-cli's systemd boot persistence is per-user (`loginctl
+enable-linger frappe` + enabled `systemctl --user` units), so it needs a real
+lingering non-root user. The controller SSHes in as root; `build.sh` creates
+`frappe` and runs every bench step as it.
+
+**MariaDB** is a **dedicated per-bench instance** (`[mariadb].instance = "atlas"`):
+`bench init` provisions `mariadb@atlas` with its own socket + datadir and
+`systemctl enable --now`s it, so it auto-starts at boot as an ordinary system
+service. Atlas never touches MariaDB auth — bench-cli secures it.
+
+**ZFS.** `bench init` creates the pool + `benches`/`mariadb` datasets from
+`[volume]` in `bench.toml` (a preallocated **file vdev**, since the build VM is
+single-disk) and mounts them, so BOTH the bench code and the MariaDB data live on
+ZFS. At the pinned bench-cli the mere presence of a `[volume]` table enables ZFS.
+The Firecracker `vmlinux` ships no ZFS module, so the **one** ZFS thing `build.sh`
+does itself is DKMS-build `zfs.ko` against the running kernel (`zfs-dkms` +
+`linux-headers-$(uname -r)` + `modprobe zfs`); the built `.ko` travels in the
+snapshot. (Cold-boot ZFS auto-import/mount-ordering is not yet wired — to be
+verified on a host.)
 
 The golden image is a **`Virtual Machine Snapshot`, not a from-URL
 `Virtual Machine Image`** — it is built *inside* a VM and snapshotted, the same
@@ -273,22 +282,21 @@ build-in-guest pattern the proxy uses ([12-proxy.md](./12-proxy.md)):
 1. Provision a plain `ubuntu-24.04` VM on a server in the region.
 2. `atlas.atlas.bench_image.build_bench(<vm>)` uploads the committed
    [`bench/`](../bench/) tree and runs `bench/build.sh` over guest-SSH — the
-   sibling of `proxy.build_proxy`. `build.sh` installs bench-cli at a pinned
-   commit, drops the committed [`bench/bench.toml`](../bench/bench.toml), and
-   runs `bench init` (the heavy, per-site-invariant step: apt MariaDB + Redis,
-   uv venv, Frappe clone, Node + npm deps, admin frontend, and — because
-   `[production].nginx = true` — the supervisor + nginx bring-up; and — because
-   `[volume].enabled = true` — the ZFS pool on a file vdev, after a DKMS
-   `zfs.ko` build). It then installs **ERPNext (version-16)**, bakes a `site.local`
-   site (`bench new-site` + `install-app erpnext`, past the setup-wizard gate),
-   runs `bench setup production` (adding IPv6 listeners and the boot-ordering
-   units), and leaves the production stack **running and serving** the baked site
-   on `:80` over both IPv4 and IPv6.
-3. Stop the VM and `Virtual Machine.snapshot(...)` it. The systemd boot wiring
-   (`atlas-bench.service`, ordered `After=` the system MariaDB) makes a cold boot
-   of the snapshot come up serving without a deploy step. That snapshot **is** the
-   golden image; site VMs clone from it via
-   `Virtual Machine Snapshot.clone_to_new_vm`.
+   sibling of `proxy.build_proxy`. `build.sh` fixes setuid bits, DKMS-installs the
+   ZFS module, creates the `frappe` user, runs bench-cli's `install.sh` (at a
+   pinned commit), drops the committed [`bench/bench.toml`](../bench/bench.toml),
+   and runs `bench init` + `bench start` as `frappe`. `bench init` is the heavy,
+   per-site-invariant step (the dedicated MariaDB instance + Redis, the ZFS pool,
+   the uv venv, the Frappe clone, Node deps, the admin frontend, and — because
+   `[production].nginx = true` + `process_manager = "systemd"` — the production
+   process units + nginx config + `dns_multitenant = 1`). In **site** mode it then
+   installs ERPNext (version-16) and bakes a `site.local` site (`bench new-site` +
+   `install-app erpnext`). The stack is left **running and serving** on `:80` over
+   both IPv4 and IPv6 (bench-cli emits the v6 listeners).
+3. Stop the VM and `Virtual Machine.snapshot(...)` it. bench-cli's lingering
+   `systemctl --user` units make a cold boot of the snapshot come up serving
+   without a deploy step. That snapshot **is** the golden image; site VMs clone
+   from it via `Virtual Machine Snapshot.clone_to_new_vm`.
 
 We deliberately do **not** chroot-bake the rootfs at sync time: apt's
 MariaDB/Redis postinst maintainer scripts expect a running init, which a bare
@@ -315,15 +323,18 @@ dir to the FQDN + `bench setup nginx` — never that multi-minute path, and neve
 `set-admin-password` (the owner is handed the shared baked password and rotates it);
 see [14-self-serve.md](./14-self-serve.md).
 
-**Per-VM identity is the rename (Contract A).** The bake leaves the site as
-`site.local` on disk; the per-VM `deploy-site.py` renames `sites/site.local` →
-`sites/<fqdn>` and runs `bench setup nginx`, which regenerates the bench's vhost
-with `server_name <fqdn>` so the bench serves the FQDN the proxy forwards. The
-on-disk name, the proxy `Host`, and the `Site` key are then **one string** — there
-is no `default_site`/`default_server` indirection. The bake still marks the vhost
-`default_server` so a **pre-rename** probe (the warm resume, before the deploy runs)
-answers off the baked `site.local`; the deploy's `bench setup nginx` replaces that
-with the `server_name <fqdn>` vhost. A site VM is single-tenant (one site per VM).
+**Per-VM identity is the rename (Contract A, site mode).** The bake leaves the
+site as `site.local` on disk; the per-VM `deploy-site.py` renames `sites/site.local`
+→ `sites/<fqdn>` and runs `bench setup nginx`, which regenerates the bench's vhost
+with `server_name <fqdn>` (on `listen 80;` + `listen [::]:80;`, both emitted by
+bench-cli) so the bench serves the FQDN the proxy forwards. The on-disk name, the
+proxy `Host`, and the `Site` key are then **one string** — no `default_site` /
+`default_server` indirection. The controller's FQDN readiness probe runs *after*
+the deploy's rename + `setup nginx`, so the post-rename `server_name <fqdn>` vhost
+matches it directly — there is no pre-rename catch-all to bake. A site VM is
+single-tenant (one site per VM). In **admin** mode the equivalent identity step is
+setting `[admin].domain = <fqdn>` + `bench setup nginx`, mapping the FQDN to the
+admin app's vhost.
 
 Versions are pinned (bench-cli commit in `build.sh`, Frappe branch in
 `bench.toml`); bumping any is a deliberate update rolled as a new golden
