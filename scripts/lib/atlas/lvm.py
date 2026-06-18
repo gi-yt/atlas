@@ -190,48 +190,70 @@ _MIN_POOL_DISK_BYTES = 1 << 30
 
 
 def discover_pool_disks(lsblk_json: str) -> list[str]:
-	"""Pick the whole-disk block devices that may back the pool PV, parsed from
+	"""Pick the block devices that may back the pool PV, parsed from
 	`lsblk -J -b -o NAME,TYPE,MOUNTPOINT,FSTYPE,PKNAME,SIZE,RM` output.
 
-	A device qualifies only if it is a top-level `disk` (not a partition,
-	loop, or device-mapper node) that carries NO partitions, NO filesystem, and
-	NO mountpoint — i.e. a raw, unused disk — AND is a real fixed disk of usable
-	size: NOT removable (`rm`) and at least `_MIN_POOL_DISK_BYTES`. The
-	size/removable guard is load-bearing on bare metal: a Scaleway Elastic Metal
-	box exposes an empty card-reader slot as a 0-byte removable `disk` (/dev/sda)
-	that otherwise looks "unused", and feeding it to pvcreate fails ("Device open
-	8:0 has no path names. Cannot use /dev/sda: device not found"). Skipping it
-	lets a box whose only real disks are already in the root RAID fall through to
-	the loopback backing instead of wedging bootstrap.
+	Two shapes qualify, both "a raw, unused block device of usable size":
 
-	This is exactly what a box's genuine spare NVMe drives look like (the OS lives
-	elsewhere), and exactly what a stock single-disk droplet does NOT have (its
-	only disk is partitioned + mounted as root) — so the same probe yields the
-	spare devices on bare metal and the empty list on a droplet, with no
-	per-provider branch. Pure: text in, sorted device-path list out, so it
+	- A top-level `disk` that carries NO partitions (children), NO filesystem, and
+	  NO mountpoint, AND is a real fixed disk: NOT removable (`rm`) and at least
+	  `_MIN_POOL_DISK_BYTES`. This is a box's genuine spare NVMe drive (the OS
+	  lives elsewhere) — and exactly what a stock single-disk droplet does NOT
+	  have (its only disk is partitioned + mounted as root).
+	- A software-RAID array (`type` raid0/1/5/6/10), nested under its member
+	  partitions, that is itself unused (no fstype/mountpoint/children). This is
+	  the `data` RAID-1 (`/dev/md2`) the Scaleway partitioning schema leaves raw
+	  for the pool: boot/root md arrays carry an ext4 fstype + mountpoint and are
+	  correctly skipped. An md array appears once under EACH member partition in
+	  the lsblk tree, so the recursion dedups by name.
+
+	The size/removable guard is load-bearing on bare metal: a Scaleway Elastic
+	Metal box exposes an empty card-reader slot as a 0-byte removable `disk`
+	(/dev/sda) that otherwise looks "unused", and feeding it to pvcreate fails
+	("Device open 8:0 has no path names. Cannot use /dev/sda: device not found").
+
+	So the same probe yields the data RAID array on a RAID-partitioned box, the
+	spare devices on a box with free NVMe, and the empty list on a stock droplet,
+	with no per-provider branch. Pure: text in, sorted device-path list out, so it
 	unit-tests with fixture JSON and no host.
 	"""
 	tree = json.loads(lsblk_json) if lsblk_json.strip() else {}
-	disks = []
+	found: set[str] = set()
 	for node in tree.get("blockdevices", []):
-		if node.get("type") != "disk":
-			continue
-		# A disk with children is partitioned; with an fstype it is formatted
-		# whole-disk; with a mountpoint it is in use. Any of those → not ours.
-		if node.get("children"):
-			continue
-		if node.get("fstype") or node.get("mountpoint"):
-			continue
-		# Removable media (card reader / USB) is never pool backing, and a phantom
-		# empty slot reports 0 bytes — reject both. `rm`/`size` come back as bools/
-		# ints with `-J -b`; tolerate string forms ("1"/"0") from older lsblk.
-		if str(node.get("rm")).lower() in ("1", "true"):
-			continue
-		size = node.get("size")
-		if size is None or int(size) < _MIN_POOL_DISK_BYTES:
-			continue
-		disks.append(f"/dev/{node['name']}")
-	return sorted(disks)
+		_collect_pool_candidates(node, found)
+	return sorted(found)
+
+
+def _collect_pool_candidates(node: dict, found: set[str]) -> None:
+	"""Walk one lsblk node + its children, adding any device that qualifies as
+	pool backing to `found`. Recurses so a software-RAID array — which lsblk nests
+	UNDER its member partitions, not at the top level — is reachable."""
+	node_type = node.get("type")
+	# A `disk` with children is partitioned (in use); a RAID array (raid0/1/…)
+	# with children already carries a filesystem/LVM. Either way children → skip
+	# this node as a candidate, but still descend (an md array hangs off a part).
+	is_disk = node_type == "disk"
+	is_raid = isinstance(node_type, str) and node_type.startswith("raid")
+	if (is_disk or is_raid) and _is_unused_block(node):
+		found.add(f"/dev/{node['name']}")
+	for child in node.get("children", []):
+		_collect_pool_candidates(child, found)
+
+
+def _is_unused_block(node: dict) -> bool:
+	"""True if a disk/RAID node is a raw, unused, real fixed device of usable
+	size — no partitions/filesystem/mount, not removable, ≥ the size floor."""
+	if node.get("children"):
+		return False
+	if node.get("fstype") or node.get("mountpoint"):
+		return False
+	# Removable media (card reader / USB) is never pool backing, and a phantom
+	# empty slot reports 0 bytes — reject both. `rm`/`size` come back as bools/
+	# ints with `-J -b`; tolerate string forms ("1"/"0") from older lsblk.
+	if str(node.get("rm")).lower() in ("1", "true"):
+		return False
+	size = node.get("size")
+	return size is not None and int(size) >= _MIN_POOL_DISK_BYTES
 
 
 class PoolBacking:

@@ -149,6 +149,78 @@ def _lsblk(*devices) -> str:
 	return json.dumps({"blockdevices": nodes})
 
 
+def _raid_box(data_children=None) -> str:
+	"""lsblk -J fixture for the Scaleway RAID-partitioned box: two NVMe disks,
+	each p1(uefi)/p2(boot)/p3(root)/p4(data). The md0/md1/md2 arrays are nested
+	under their FIRST member partition (md2 also appears under nvme1n1p4 — lsblk
+	lists an array under every member, which exercises the dedup). md0/md1 carry a
+	mounted ext4; md2 (data) is raw unless `data_children` is given.
+
+	The md array carries SIZE/RM like any block node so the size floor applies.
+	"""
+
+	def part(name, raid_child=None):
+		node = {"name": name, "type": "part", "fstype": "linux_raid_member", "mountpoint": None}
+		if raid_child is not None:
+			node["children"] = [raid_child]
+		return node
+
+	def md(name, fstype, mountpoint, children=None):
+		node = {
+			"name": name,
+			"type": "raid1",
+			"fstype": fstype,
+			"mountpoint": mountpoint,
+			"size": _DEFAULT_DISK_BYTES,
+			"rm": False,
+		}
+		if children:
+			node["children"] = children
+		return node
+
+	md0 = md("md0", "ext4", "/boot")
+	md1 = md("md1", "ext4", "/")
+	md2 = md("md2", None, None, children=data_children)
+	nvme0 = _lsblk_node(
+		"nvme0n1",
+		"disk",
+		None,
+		None,
+		children=[
+			{"name": "nvme0n1p1", "type": "part", "fstype": "vfat", "mountpoint": "/boot/efi"},
+			part("nvme0n1p2", md0),
+			part("nvme0n1p3", md1),
+			part("nvme0n1p4", md2),
+		],
+	)
+	# Second disk: md arrays are listed again under its members (same nodes).
+	nvme1 = _lsblk_node(
+		"nvme1n1",
+		"disk",
+		None,
+		None,
+		children=[
+			{"name": "nvme1n1p1", "type": "part", "fstype": "vfat", "mountpoint": None},
+			part("nvme1n1p2", md0),
+			part("nvme1n1p3", md1),
+			part("nvme1n1p4", md2),
+		],
+	)
+	return json.dumps({"blockdevices": [nvme0, nvme1]})
+
+
+def _lsblk_node(name, dtype, fstype, mountpoint, children=None) -> dict:
+	"""A single lsblk node dict (the building block _lsblk wraps). A disk defaults
+	to a real fixed disk (1 TiB, non-removable) like _lsblk's tuples do."""
+	node = {"name": name, "type": dtype, "fstype": fstype, "mountpoint": mountpoint}
+	if children is not None:
+		node["children"] = children
+	if dtype == "disk":
+		node.setdefault("size", _DEFAULT_DISK_BYTES)
+		node.setdefault("rm", False)
+	return node
+
+
 class TestDiscoverPoolDisks(unittest.TestCase):
 	def test_two_blank_nvme_disks_are_picked(self):
 		# A Scaleway Elastic Metal box: OS on sda (partitioned + mounted), two
@@ -227,6 +299,34 @@ class TestDiscoverPoolDisks(unittest.TestCase):
 	def test_empty_input_is_empty(self):
 		self.assertEqual(discover_pool_disks(""), [])
 		self.assertEqual(discover_pool_disks('{"blockdevices": []}'), [])
+
+	def test_raw_data_raid_array_is_picked(self):
+		# The Scaleway RAID partitioning schema leaves the `data` RAID-1 (/dev/md2)
+		# raw for the pool. lsblk nests the md array UNDER a member partition; an
+		# unused array (no fstype/mount/children) of usable size qualifies.
+		out = _raid_box()
+		self.assertEqual(discover_pool_disks(out), ["/dev/md2"])
+
+	def test_data_raid_array_with_lvm_already_on_it_is_skipped(self):
+		# Once the pool is built, md2 carries an LVM child — it is no longer a raw
+		# candidate (a re-run must not try to re-pvcreate it; ThinPool.ensure guards
+		# anyway, but the probe shouldn't surface it).
+		out = _raid_box(data_children=[{"name": "atlas-pool0_tdata", "type": "lvm"}])
+		self.assertEqual(discover_pool_disks(out), [])
+
+	def test_boot_and_root_raid_arrays_are_skipped(self):
+		# md0 (/boot) and md1 (/) carry an ext4 fstype + mountpoint — never pool
+		# backing. Only the raw data array (md2) is selected.
+		out = _raid_box()
+		picked = discover_pool_disks(out)
+		self.assertNotIn("/dev/md0", picked)
+		self.assertNotIn("/dev/md1", picked)
+
+	def test_raid_array_deduped_across_both_members(self):
+		# An md array appears once under EACH member partition in the lsblk tree;
+		# the recursion must dedup it to a single device path.
+		out = _raid_box()
+		self.assertEqual(discover_pool_disks(out).count("/dev/md2"), 1)
 
 
 class TestPoolBackingSelection(unittest.TestCase):
