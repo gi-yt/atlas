@@ -107,20 +107,24 @@ def wait_for_ssh(connection, timeout_seconds: int = 300) -> None:
   - `-o BatchMode=yes` — never prompt.
   - `-o ConnectTimeout=30`.
   - `-o ControlMaster=auto -o ControlPath=~/.atlas/cm/%C -o ControlPersist=60s`
-    — connection multiplexing. A Task opens 2+ connections to the same host
-    back-to-back (stage any sidecar, then run the script); the first does the
-    TCP+SSH handshake and the rest ride the shared master socket. `%C` (a hash
-    of user/host/port) keeps concurrent Tasks to different servers on distinct
-    sockets. This is the dominant latency win for a remote provision — each
-    avoided handshake is ~1.5s+ over a real droplet.
+    — connection multiplexing. A Task that stages a sidecar opens 2+ connections
+    to the same host back-to-back (stage, then run the script); the first does
+    the TCP+SSH handshake and the rest ride the shared master socket. A durable,
+    sidecar-free Task is a single run, and back-to-back Tasks reuse the master
+    too (`ControlPersist`). `%C` (a hash of user/host/port) keeps concurrent
+    Tasks to different servers on distinct sockets. This is a dominant latency
+    win for a remote provision — each avoided handshake is ~1.5s+ over a real
+    droplet.
 - Variables: how they reach the script depends on the script's language
   (see [§ Tasks are Python](#tasks-are-python-the-zx-slice-we-built)):
   - **`.py` task** —
-    `ssh ... PYTHONPATH=/var/lib/atlas/bin python3 /tmp/atlas/script.py --kebab-flag val …`.
+    `ssh ... PYTHONPATH=/var/lib/atlas/bin python3 /var/lib/atlas/bin/script.py --kebab-flag val …`.
     The `variables` dict keys (`UPPER_SNAKE`) become `--kebab-case` CLI flags;
     a list value becomes a repeated flag. Quoted with `shlex.quote()`. The
-    `PYTHONPATH` points `import atlas` at the durable package (next section).
-  - **`.sh` task** — `ssh ... env VAR=val VAR2=val2 bash -x /tmp/atlas/script.sh`.
+    `PYTHONPATH` points `import atlas` at the durable package, and the script
+    itself is durable too, so the common case runs it **in place** (next section).
+    A *staged* script — a sidecar or an e2e probe — runs from `/tmp/atlas/script.py`.
+  - **`.sh` task** — `ssh ... env VAR=val VAR2=val2 bash -x /var/lib/atlas/bin/script.sh`.
     The legacy form, kept for the few remaining shell tasks (`reboot-server.sh`).
   Both are built in `_ssh/runner.py::_remote_command()`, dispatched on the
   `.py`/`.sh` suffix.
@@ -276,6 +280,18 @@ with no host. A Task script imports it from **one durable copy** on the host:
   `sys.path.insert(<staging>/lib)` shim; it is now a harmless no-op (that dir is
   unpopulated) and `PYTHONPATH` wins because it sits ahead of it on `sys.path`.
 
+- **The entry scripts are durable too.** Bootstrap / `sync_scripts` ship every
+  host Task entry script (`scripts_catalog.host_task_scripts()` — provision-vm.py,
+  start/stop/snapshot-stop, …) to `/var/lib/atlas/bin/` beside the package, and
+  `_run_remote_script` invokes the durable copy **in place** when the script
+  needs no sidecar: no per-Task `mkdir`+`scp`, just the one run. The scp was the
+  dominant latency of an otherwise sub-second op — dropping it took a live stop
+  from ~2.2s to ~0.6s, start ~2.8s→~1.1s, and provision ~5.7s→~3.0s on a real
+  droplet. Same staleness contract as the package (re-bootstrap / `sync_scripts`
+  to refresh). Two kinds of script keep the staging path and its stale-lib
+  purge: **e2e probes** (resolved from the test-only directory, never shipped
+  durably) and **sidecar scripts** (`sync-image.py`).
+
 ### Systemd hooks are Python too, but not Tasks
 
 `vm-disk-up.py`, `vm-network-up.py`, `vm-network-down.py`, `vm-restore.py`
@@ -376,8 +392,9 @@ extra files a specific task needs — beside the script. The shared `atlas`
 package is **not** among them: it lives durably at `/var/lib/atlas/bin/atlas/`
 (placed by `Server.bootstrap()`) and Tasks reach it via
 `PYTHONPATH=/var/lib/atlas/bin` (see [§ the shared `atlas` package and how it is
-staged](#the-shared-atlas-package-and-how-it-is-staged)). So a Python Task with
-no sidecar uploads **zero** files — it stages the script and runs it.
+staged](#the-shared-atlas-package-and-how-it-is-staged)). So a durable Python
+Task with no sidecar uploads **zero** files and stages nothing — it runs the
+durable script in place. A sidecar Task stages only its sidecar(s).
 
 The canonical sidecar is `sync-image.py`, which needs the guest
 `atlas-network.service` unit staged so it can be embedded into the ext4 it
