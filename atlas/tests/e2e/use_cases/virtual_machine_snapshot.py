@@ -63,7 +63,11 @@ def run_against_shared(reuse: bool = True, keep: bool = True) -> None:
 		_check_resize(server.name, vm)
 		_check_rebuild_from_image(server.name, vm)
 		clone = _check_clone(server.name, vm)
-		_check_pause_resume(server.name, vm)
+		_check_pause_resume(server.name, vm)  # leaves vm Stopped
+		# Promote runs against the shared `vm` (which has a data disk) only to assert
+		# the data-disk reject; the positive promote path provisions its own data-less
+		# source VM inside the helper. Returns (source_vm, promoted_vm) to terminate.
+		promote_source_vm, promoted_vm = _check_promote_to_image(server.name, vm)
 
 		# Terminate both VMs; assert the snapshot files are gone with the VM dir.
 		snapshot_paths = frappe.get_all(
@@ -81,6 +85,13 @@ def run_against_shared(reuse: bool = True, keep: bool = True) -> None:
 
 		clone.reload()
 		clone.terminate()
+		if promoted_vm is not None:
+			promoted_vm.reload()
+			promoted_vm.terminate()
+			_cleanup_promoted_image(server.name, promoted_vm.image)
+		if promote_source_vm is not None:
+			promote_source_vm.reload()
+			promote_source_vm.terminate()
 
 
 # Every snapshot/restore/resize/rebuild/clone/pause/resume step is probed
@@ -277,6 +288,123 @@ def _check_pause_resume(server_name: str, vm) -> None:
 	# Stop it so the terminate at the end is from a quiet state.
 	vm.stop()
 	vm.reload()
+
+
+def _check_promote_to_image(server_name: str, data_disk_vm):
+	"""Promote a cold snapshot into a first-class base image, then provision a NEW
+	VM that selects it via the ordinary `image` field and boot it (spec/08-images.md
+	§ Two origins for a base image, spec/15-image-builder.md § Promoting a bake).
+
+	The host facts only a droplet can prove: the dd'd rootfs LV is a read-only,
+	sized block device; the image dir carries the reused kernel (hard-linked from
+	the source image) + the rootfs sentinel; and a VM provisioned from the promoted
+	image actually boots to a working guest with its own fresh identity.
+
+	Promote is **root-only** — a base image has no data-disk fields — so we first
+	assert the loud reject on `data_disk_vm` (the shared VM, which carries a data
+	disk and is Stopped on entry), then provision a dedicated **data-less** source
+	VM for the positive path. Returns (source_vm, promoted_vm) for teardown (either
+	may be None if skipped)."""
+	# 1. Negative: a snapshot with a data disk cannot be promoted (would drop data).
+	assert data_disk_vm.status == "Stopped", data_disk_vm.status
+	data_snapshot = frappe.get_doc(
+		"Virtual Machine Snapshot", data_disk_vm.snapshot("vm-snapshot data for promote-reject")
+	)
+	assert data_snapshot.data_disk_gigabytes, "fixture VM should carry a data disk"
+	try:
+		data_snapshot.promote_to_image(image_name="should-reject-data")
+		raise AssertionError("promote_to_image accepted a data-disk snapshot")
+	except frappe.ValidationError as error:
+		assert "data disk" in str(error), str(error)
+	assert not frappe.db.exists("Virtual Machine Image", "should-reject-data")
+
+	# 2. Positive: a data-less source VM, snapshotted Stopped, then promoted.
+	source_vm = frappe.get_doc(
+		{
+			"doctype": "Virtual Machine",
+			"title": "vm-promote-source",
+			"server": server_name,
+			"image": data_disk_vm.image,
+			"vcpus": 1,
+			"memory_megabytes": 512,
+			"disk_gigabytes": 4,
+			"ssh_public_key": ephemeral_public_key(),
+		}
+	).insert(ignore_permissions=True)
+	frappe.db.commit()
+	wait_for_vm_running(source_vm.name, timeout_seconds=120)
+	source_vm.reload()
+	source_vm.stop()
+	source_vm.reload()
+	assert source_vm.status == "Stopped", source_vm.status
+
+	snapshot = frappe.get_doc("Virtual Machine Snapshot", source_vm.snapshot("vm-snapshot for promote"))
+	assert snapshot.kind == "Cold", snapshot.kind
+
+	# A unique image name per run (the row name is the image name; reuse would clash
+	# across re-runs of the shared-server e2e). Derive it from the snapshot UUID.
+	image_name = f"promoted-{snapshot.name}".lower()
+	source_image = frappe.get_doc("Virtual Machine Image", snapshot.source_image)
+	returned = snapshot.promote_to_image(image_name=image_name, title="promoted by e2e")
+	assert returned == image_name, returned
+
+	image = frappe.get_doc("Virtual Machine Image", image_name)
+	# A local image: URL-less, kernel inherited, non-syncable.
+	assert image.is_local, "promoted image should be local (no rootfs URL)"
+	assert not image.kernel_url and not image.rootfs_url, "promoted image has URLs"
+	assert image.kernel_filename == source_image.kernel_filename
+	assert image.default_disk_gigabytes == snapshot.disk_gigabytes
+
+	# Host: the base image LV is a read-only sized block device; the image dir holds
+	# the reused kernel + the rootfs sentinel — i.e. it looks like a synced image.
+	assert_probe(
+		server_name,
+		"phase-promoted-image.sh",
+		IMAGE_NAME=image_name,
+		ROOTFS_FILENAME=image.rootfs_filename,
+		KERNEL_FILENAME=image.kernel_filename,
+	)
+
+	# Provision a brand-new VM that selects the promoted image via `image`. No
+	# snapshot/clone path here — this is the ordinary base-image origin, proving the
+	# promoted image is a first-class image new VMs boot from.
+	promoted_vm = frappe.get_doc(
+		{
+			"doctype": "Virtual Machine",
+			"title": "vm-from-promoted-image",
+			"server": server_name,
+			"image": image_name,
+			"vcpus": 1,
+			"memory_megabytes": 512,
+			"disk_gigabytes": snapshot.disk_gigabytes,
+			"ssh_public_key": ephemeral_public_key(),
+		}
+	).insert(ignore_permissions=True)
+	frappe.db.commit()
+
+	wait_for_vm_running(promoted_vm.name, timeout_seconds=120)
+	promoted_vm.reload()
+	# It boots to a working guest with its own fresh, UUID-derived identity.
+	assert_probe(
+		server_name,
+		"phase5-guest-identity.sh",
+		timeout_seconds=180,
+		VIRTUAL_MACHINE_NAME=promoted_vm.name,
+		VIRTUAL_MACHINE_IPV6=promoted_vm.ipv6_address,
+		SSH_PRIVATE_KEY=ephemeral_private_key(),
+	)
+	return source_vm, promoted_vm
+
+
+def _cleanup_promoted_image(server_name: str, image_name: str) -> None:
+	"""e2e hygiene: drop the promoted base image LV + dir + row so a re-run of the
+	shared-server suite doesn't accumulate atlas-image-promoted-* artifacts. A base
+	image LV is PROTECTED (the lifecycle never removes it), so this uses a dedicated
+	force probe — fine here because this image was minted by the e2e, not synced."""
+	image_lv = f"atlas-image-{image_name}"
+	assert_probe(server_name, "phase-remove-image.sh", IMAGE_NAME=image_name, IMAGE_LV=image_lv)
+	if frappe.db.exists("Virtual Machine Image", image_name):
+		frappe.delete_doc("Virtual Machine Image", image_name, force=1, ignore_permissions=True)
 
 
 def _write_data_marker(server_name: str, vm, marker: str) -> None:

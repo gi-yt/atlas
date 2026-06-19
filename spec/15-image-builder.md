@@ -228,6 +228,34 @@ the snapshot's own row, not the (possibly-gone) build VM (see
   item on an Active server, parity with **Sync Image**) — opens a dialog that
   inserts an `Image Build` on that server and routes to its live-checklist form.
 - **`Image Build` → Re-bake** on an Available/Failed row.
+- **`Image Build` → Promote to image** on an Available row that has a snapshot —
+  see below.
+
+## Promoting a bake into a base image
+
+A bake's output is a `Virtual Machine Snapshot`; new VMs already clone from it via
+`clone_to_new_vm`. **Promote** turns that snapshot into a first-class
+**base image** new VMs select with the ordinary `image` field — a named thing in
+the image picker rather than a one-off snapshot you hand-locate. The mechanics and
+the **warm-reject** rule live in
+[08-images.md § Two origins for a base image](./08-images.md#two-origins-for-a-base-image-a-url-or-a-snapshot-promote);
+this layer just exposes the button.
+
+- **`Virtual Machine Snapshot` → Promote to image** is the primary entry point
+  (`promote_to_image(image_name, title)`): on the snapshot's server,
+  `promote-snapshot-image.py` `dd`s the snapshot LV into a read-only
+  `atlas-image-<name>` LV and materializes the image dir (kernel hard-linked from
+  the snapshot's `source_image`, rootfs presence sentinel), then registers a local
+  (URL-less) `Virtual Machine Image` row. Same-server scope: the bytes never leave
+  the host.
+- **`Image Build` → Promote to image** is a thin delegate to the build's
+  snapshot's `promote_to_image`, defaulting the image name to `<recipe>-<build
+  name>`. Both entry points funnel through the one snapshot method, so the
+  warm-reject and every guard (not-Available, duplicate/invalid name, missing
+  source kernel) live once.
+- A **warm** bake's snapshot cannot be promoted (its value is the frozen memory
+  pair a cold-booting base image discards); the button surfaces the same clean
+  refusal from the snapshot method. Promote a cold bake; clone the warm one.
 
 ## Design decisions
 
@@ -270,6 +298,17 @@ A few choices that aren't obvious from the field list:
     `build_proxy`'s `is_proxy`/`region` guards
     ([`test_proxy.py`](../atlas/atlas/test_proxy.py)) and `build_bench`'s
     delegation ([`test_bench_image.py`](../atlas/atlas/test_bench_image.py)).
+  - *Promote* — `promote_to_image` guards (not-Available, **warm-reject**,
+    invalid/duplicate name, missing source kernel), the local-image row shape
+    (URL-less, inherited kernel, `rootfs_filename` = LV name), the URL-less-image
+    sync skip + throw, and `Image Build.promote` delegation (Task seam mocked);
+    plus a `lib/atlas/lvm` unit for `import_base_image_from_lv` (the local-LV
+    import path). See the snapshot / image / image-build / lvm test modules.
+- **Host facts (e2e):** the promote host fact — promote a real *cold* snapshot,
+  assert the read-only base image LV + image dir on host, then provision a VM that
+  selects the promoted image via `image` and boot it — rides along in
+  [`virtual_machine_snapshot.py`](../atlas/tests/e2e/use_cases/virtual_machine_snapshot.py)'s
+  `run_smoke` (`_check_promote_to_image`), since promote is a snapshot operation.
 - **Host facts (e2e):** the bake's host facts — a baked VM has a working `bench`
   over guest-SSH ([`bench_image.py`](../atlas/tests/e2e/use_cases/bench_image.py)),
   the proxy compiles and serves ([`proxy_vm.py`](../atlas/tests/e2e/use_cases/proxy_vm.py)) —

@@ -558,6 +558,61 @@ class ThinPool:
 		run("sudo", "lvchange", "--permission", "r", f"{self.volume_group}/{lv.name}")
 		return lv
 
+	def import_base_image_from_lv(
+		self, source: LogicalVolume, image_name: str, disk_gigabytes: int
+	) -> LogicalVolume:
+		"""Promote a snapshot LV into a read-only base image LV — the same shape as
+		import_base_image, but the source is a LOCAL LV device, not a downloaded
+		ext4 file. This is how a baked `Virtual Machine Snapshot` becomes a
+		first-class base image new VMs select with the ordinary `image` field
+		(spec/08-images.md, spec/15-image-builder.md): a thin volume of
+		disk_gigabytes, dd the snapshot's bytes into it, mark it read-only.
+
+		Created with -V (a thin volume, not a snapshot), so the promoted base has no
+		origin and can never be orphaned — it outlives the snapshot it was dd'd from
+		(deleting the snapshot LV leaves the image untouched, exactly like a base
+		image dd'd from a file). Idempotent — no-op if the LV already exists. On a
+		mid-build failure (dd) the half-populated writable LV is removed.
+
+		Pre-flight: the source LV must exist and be activated, so `dd` reads a live
+		block device rather than a missing/skip-flagged node."""
+		lv = self.base_image(image_name)
+		if lv.exists:
+			return lv
+		if not source.exists:
+			raise FileNotFoundError(f"source LV {source.name} not found; cannot promote to {lv.name}")
+		source.activate()
+		run(
+			"sudo",
+			"lvcreate",
+			"--type",
+			"thin",
+			"--thinpool",
+			self.pool_name,
+			"-V",
+			f"{disk_gigabytes}G",
+			"-n",
+			lv.name,
+			self.volume_group,
+			quiet=True,
+		)
+		lv.activate()
+		try:
+			run(
+				"sudo",
+				"dd",
+				f"if={source.device_path}",
+				f"of={lv.device_path}",
+				"bs=4M",
+				"conv=fsync",
+				"status=none",
+			)
+		except Exception:
+			run("sudo", "lvremove", "-f", f"{self.volume_group}/{lv.name}", check=False, quiet=True)
+			raise
+		run("sudo", "lvchange", "--permission", "r", f"{self.volume_group}/{lv.name}")
+		return lv
+
 	@property
 	def usage(self) -> PoolUsage:
 		"""Current data/metadata fill, read from the pool LV."""

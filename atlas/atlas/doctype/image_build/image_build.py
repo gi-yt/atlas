@@ -92,6 +92,25 @@ class ImageBuild(Document):
 		frappe.db.commit()
 		self.after_insert()
 
+	@frappe.whitelist()
+	def promote(self, image_name: str | None = None, title: str | None = None) -> str:
+		"""Promote this build's snapshot into a first-class same-server base image,
+		so new VMs provision from it via the ordinary `image` field instead of
+		cloning the one-off snapshot (spec/08-images.md, spec/15-image-builder.md).
+
+		A thin delegate to `Virtual Machine Snapshot.promote_to_image`: the warm
+		reject and every guard live once, in the snapshot method, so a warm bake's
+		Image Build surfaces the same clean error. Defaults the image name to a slug
+		derived from this build (`<recipe>-<build name>`, lowercased) — unique
+		because build names are. Returns the new image's name."""
+		if self.status != "Available":
+			frappe.throw(f"Can only promote an Available build (status is {self.status})")
+		if not self.snapshot:
+			frappe.throw("This build has no snapshot to promote.")
+		image_name = (image_name or "").strip() or f"{self.recipe}-{self.name}".lower()
+		snapshot = frappe.get_doc("Virtual Machine Snapshot", self.snapshot)
+		return snapshot.promote_to_image(image_name=image_name, title=title or self.title)
+
 
 def run(image_build_name: str) -> None:
 	"""Background-job entrypoint (enqueued by after_insert / rebake). Bakes one

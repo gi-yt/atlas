@@ -89,10 +89,10 @@
    "label": "Kernel"
   },
   {
+   "description": "HTTPS URL of the packed kernel. Empty for a local image promoted from a snapshot (its kernel is reused from the snapshot's source image, already on the server).",
    "fieldname": "kernel_url",
    "fieldtype": "Data",
    "label": "Kernel URL",
-   "reqd": 1,
    "set_only_once": 1
   },
   {
@@ -107,10 +107,10 @@
    "fieldtype": "Column Break"
   },
   {
+   "description": "SHA-256 of the packed kernel download. Empty for a local image (no download to verify).",
    "fieldname": "kernel_sha256",
    "fieldtype": "Data",
    "label": "Kernel SHA-256",
-   "reqd": 1,
    "set_only_once": 1
   },
   {
@@ -119,10 +119,10 @@
    "label": "Rootfs"
   },
   {
+   "description": "HTTPS URL of the source squashfs. Empty for a local image promoted from a snapshot (its rootfs is the promoted LV, already on the server).",
    "fieldname": "rootfs_url",
    "fieldtype": "Data",
    "label": "Rootfs URL",
-   "reqd": 1,
    "set_only_once": 1
   },
   {
@@ -137,10 +137,10 @@
    "fieldtype": "Column Break"
   },
   {
+   "description": "SHA-256 of the source squashfs download. Empty for a local image (no download to verify).",
    "fieldname": "rootfs_sha256",
    "fieldtype": "Data",
    "label": "Rootfs SHA-256",
-   "reqd": 1,
    "set_only_once": 1
   }
  ],

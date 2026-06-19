@@ -227,6 +227,210 @@ class TestVirtualMachineSnapshot(IntegrationTestCase):
 			mocked.call_args.kwargs["variables"]["DATA_SNAPSHOT_ROOTFS_PATH"], snapshot.data_rootfs_path
 		)
 
+	def test_promote_to_image_creates_local_image_row(self) -> None:
+		from atlas.atlas.doctype.virtual_machine_snapshot import virtual_machine_snapshot as module
+
+		snapshot = _make_snapshot(_stopped_vm())
+		frappe.db.delete("Virtual Machine Image", {"image_name": "promoted-v1"})
+		with patch.object(
+			module,
+			"run_task",
+			return_value=fake_task(
+				stdout='ATLAS_RESULT={"image_lv": "atlas-image-promoted-v1", "size_bytes": 4096}'
+			),
+		) as mocked:
+			image_name = snapshot.promote_to_image("promoted-v1")
+
+		# The Task ran promote-snapshot-image.py on the snapshot's server with the
+		# snapshot's LV path as the dd source.
+		self.assertEqual(mocked.call_args.kwargs["script"], "promote-snapshot-image.py")
+		self.assertEqual(mocked.call_args.kwargs["server"], snapshot.server)
+		variables = mocked.call_args.kwargs["variables"]
+		self.assertEqual(variables["SNAPSHOT_ROOTFS_PATH"], snapshot.rootfs_path)
+		self.assertEqual(variables["IMAGE_NAME"], "promoted-v1")
+		self.assertEqual(variables["DISK_GIGABYTES"], str(snapshot.disk_gigabytes))
+		self.assertEqual(variables["ROOTFS_FILENAME"], "atlas-image-promoted-v1")
+		# Kernel is reused from the snapshot's source image (already on the server).
+		self.assertEqual(variables["SOURCE_IMAGE"], snapshot.source_image)
+		source = frappe.get_doc("Virtual Machine Image", snapshot.source_image)
+		self.assertEqual(variables["KERNEL_FILENAME"], source.kernel_filename)
+
+		# A local (URL-less) image row was registered, kernel inherited from the
+		# snapshot's source image, rootfs_filename = the promoted LV name.
+		image = frappe.get_doc("Virtual Machine Image", image_name)
+		self.assertEqual(image.name, "promoted-v1")
+		self.assertEqual(image.kernel_url, "")
+		self.assertEqual(image.rootfs_url, "")
+		self.assertEqual(image.rootfs_filename, "atlas-image-promoted-v1")
+		self.assertEqual(image.default_disk_gigabytes, snapshot.disk_gigabytes)
+		source = frappe.get_doc("Virtual Machine Image", snapshot.source_image)
+		self.assertEqual(image.kernel_filename, source.kernel_filename)
+		self.assertTrue(image.is_local)
+		self.assertEqual(image.is_active, 1)
+
+	def test_promote_skips_sync_fanout(self) -> None:
+		# A promoted (local) image must NOT enqueue a sync Task on after_insert —
+		# its bytes are an LV already on its server, nothing to download.
+		from atlas.atlas.doctype.virtual_machine_snapshot import virtual_machine_snapshot as module
+
+		# setUp's _ensure_test_server() already created an Active server, so a
+		# non-local image WOULD fan out here; the local image must not.
+		snapshot = _make_snapshot(_stopped_vm())
+		frappe.db.delete("Virtual Machine Image", {"image_name": "promoted-nosync"})
+		with patch.object(
+			module,
+			"run_task",
+			return_value=fake_task(stdout='ATLAS_RESULT={"image_lv": "x", "size_bytes": 1}'),
+		):
+			with patch("frappe.enqueue") as enqueue:
+				snapshot.promote_to_image("promoted-nosync")
+		enqueue.assert_not_called()
+
+	def test_promote_rejects_warm_snapshot(self) -> None:
+		# A warm snapshot's value is its frozen memory pair — promoting it would
+		# discard that. Rejected before any host work (no run_task call).
+		from atlas.atlas.doctype.virtual_machine_snapshot import virtual_machine_snapshot as module
+
+		vm = _stopped_vm()
+		warm = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine Snapshot",
+				"title": "warm-golden",
+				"virtual_machine": vm.name,
+				"server": vm.server,
+				"status": "Available",
+				"kind": "Warm",
+				"source_image": vm.image,
+				"disk_gigabytes": 2,
+				"rootfs_path": "/dev/atlas/atlas-snap-warm",
+				"memory_directory": "/var/lib/atlas/snapshots/warm-golden",
+			}
+		).insert(ignore_permissions=True)
+		with patch.object(module, "run_task") as mocked:
+			with self.assertRaises(frappe.ValidationError) as raised:
+				warm.promote_to_image("from-warm")
+		self.assertIn("warm snapshot cannot be promoted", str(raised.exception).lower())
+		mocked.assert_not_called()
+
+	def test_promote_rejects_data_disk_snapshot(self) -> None:
+		# Promote is root-only: a base image has no data-disk fields, so promoting a
+		# data-disk snapshot would silently drop the data. Reject loudly before any
+		# host work — clone instead to keep the data disk.
+		from atlas.atlas.doctype.virtual_machine import virtual_machine as vm_module
+		from atlas.atlas.doctype.virtual_machine_snapshot import virtual_machine_snapshot as module
+
+		source = _new_vm(data_disk_gigabytes=2)
+		source.db_set("status", "Stopped")
+		source.reload()
+		with patch.object(
+			vm_module,
+			"run_task",
+			return_value=fake_task(stdout='ATLAS_RESULT={"size_bytes": 1, "data_size_bytes": 2}'),
+		):
+			snapshot = frappe.get_doc("Virtual Machine Snapshot", source.snapshot("snap-with-data"))
+		with patch.object(module, "run_task") as mocked:
+			with self.assertRaises(frappe.ValidationError) as raised:
+				snapshot.promote_to_image("from-data-disk")
+		self.assertIn("data disk", str(raised.exception))
+		mocked.assert_not_called()
+
+	def test_promote_rejects_snapshot_without_source_image(self) -> None:
+		# source_image is how the promoted image inherits its kernel; a row without
+		# one (a malformed/legacy snapshot) can't be promoted.
+		from atlas.atlas.doctype.virtual_machine_snapshot import virtual_machine_snapshot as module
+
+		snapshot = _make_snapshot(_stopped_vm())
+		snapshot.db_set("source_image", None)
+		snapshot.reload()
+		with patch.object(module, "run_task") as mocked:
+			with self.assertRaises(frappe.ValidationError) as raised:
+				snapshot.promote_to_image("from-no-source")
+		self.assertIn("source image", str(raised.exception))
+		mocked.assert_not_called()
+
+	def test_promote_rejects_source_image_without_kernel(self) -> None:
+		# The promoted image reuses the source image's kernel; a source image with no
+		# kernel_filename has nothing to inherit. Use a DEDICATED kernel-less source
+		# image (not a mutation of the shared one) so this test can't leak into others.
+		from atlas.atlas.doctype.virtual_machine_snapshot import virtual_machine_snapshot as module
+
+		snapshot = _make_snapshot(_stopped_vm())
+		frappe.db.delete("Virtual Machine Image", {"image_name": "kernel-less-image"})
+		kernel_less = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine Image",
+				"image_name": "kernel-less-image",
+				"title": "kernel-less",
+				"kernel_filename": "",
+				"rootfs_filename": "atlas-image-kernel-less-image",
+				"default_disk_gigabytes": 4,
+				"is_active": 1,
+			}
+		)
+		kernel_less.flags.ignore_mandatory = True  # kernel_filename is reqd; we want it empty here
+		kernel_less.insert(ignore_permissions=True)
+		snapshot.db_set("source_image", kernel_less.name)
+		snapshot.reload()
+		with patch.object(module, "run_task") as mocked:
+			with self.assertRaises(frappe.ValidationError) as raised:
+				snapshot.promote_to_image("from-no-kernel")
+		self.assertIn("kernel_filename", str(raised.exception))
+		mocked.assert_not_called()
+
+	def test_promote_rejects_unavailable_snapshot(self) -> None:
+		vm = _stopped_vm()
+		pending = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine Snapshot",
+				"title": "pending-snap",
+				"virtual_machine": vm.name,
+				"server": vm.server,
+				"status": "Pending",
+				"source_image": vm.image,
+			}
+		).insert(ignore_permissions=True)
+		with self.assertRaises(frappe.ValidationError) as raised:
+			pending.promote_to_image("from-pending")
+		self.assertIn("not Available", str(raised.exception))
+
+	def test_promote_rejects_invalid_image_name(self) -> None:
+		from atlas.atlas.doctype.virtual_machine_snapshot import virtual_machine_snapshot as module
+
+		snapshot = _make_snapshot(_stopped_vm())
+		with patch.object(module, "run_task") as mocked:
+			with self.assertRaises(frappe.ValidationError) as raised:
+				snapshot.promote_to_image("Has Spaces!")
+		self.assertIn("invalid", str(raised.exception).lower())
+		mocked.assert_not_called()
+
+	def test_promote_rejects_duplicate_image_name(self) -> None:
+		from atlas.atlas.doctype.virtual_machine_snapshot import virtual_machine_snapshot as module
+		from atlas.tests.fixtures import make_image
+
+		make_image("already-taken")
+		snapshot = _make_snapshot(_stopped_vm())
+		with patch.object(module, "run_task") as mocked:
+			with self.assertRaises(frappe.ValidationError) as raised:
+				snapshot.promote_to_image("already-taken")
+		self.assertIn("already exists", str(raised.exception))
+		mocked.assert_not_called()
+
+	def test_promote_requires_typed_result_line(self) -> None:
+		# A truncated/failed Task with no ATLAS_RESULT line fails loud. The image row
+		# is inserted FIRST (the durable anchor), so it exists right up to the throw;
+		# in production the uncaught exception rolls the request back, undoing it —
+		# the rollback() here simulates that, and the row is then gone, so promote is
+		# all-or-nothing (no row pointing at an LV the failed Task never finished).
+		from atlas.atlas.doctype.virtual_machine_snapshot import virtual_machine_snapshot as module
+
+		snapshot = _make_snapshot(_stopped_vm())
+		frappe.db.delete("Virtual Machine Image", {"image_name": "promote-truncated"})
+		with patch.object(module, "run_task", return_value=fake_task(stdout="no marker here")):
+			with self.assertRaises(ValueError):
+				snapshot.promote_to_image("promote-truncated")
+		frappe.db.rollback()  # the request-layer rollback an uncaught throw triggers
+		self.assertFalse(frappe.db.exists("Virtual Machine Image", "promote-truncated"))
+
 	def test_on_trash_skips_when_no_rootfs_path(self) -> None:
 		from atlas.atlas.doctype.virtual_machine_snapshot import virtual_machine_snapshot as module
 

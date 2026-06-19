@@ -16,17 +16,56 @@ IMMUTABLE_AFTER_INSERT = (
 
 
 class VirtualMachineImage(Document):
+	# The four fields that describe a from-URL image's download. They used to be
+	# `reqd` in the JSON; now that a local (promoted-from-snapshot) image legitimately
+	# leaves them ALL empty, `reqd` is gone and validate() enforces the coherent
+	# shape instead: a URL image sets all four, a local image sets none. (Without
+	# this, an operator could insert a URL image missing only its sha256 — it would
+	# validate, classify as non-local, fan out a sync, and fail only later on the
+	# host where the digest is required. The old `reqd` flags caught that at insert.)
+	_URL_FIELDS = ("kernel_url", "rootfs_url", "kernel_sha256", "rootfs_sha256")
+
 	def validate(self) -> None:
 		for field in ("kernel_url", "rootfs_url"):
 			value = self.get(field) or ""
 			if value and not value.startswith("https://"):
 				frappe.throw(f"{field} must be an https:// URL, got: {value}")
+		self._validate_url_coherence()
 		self._validate_immutability()
+
+	def _validate_url_coherence(self) -> None:
+		"""All four download fields set (a from-URL image) or none set (a local image
+		promoted from a snapshot). A partial set — e.g. a URL with no checksum —
+		would pass `is_local` as non-local, fan out a `sync-image.py` Task, and only
+		then fail on the host (the script requires the digest), so reject it at insert
+		instead. Restores the insert-time gate the dropped `reqd` flags gave."""
+		present = {field: bool((self.get(field) or "").strip()) for field in self._URL_FIELDS}
+		if any(present.values()) and not all(present.values()):
+			missing = [field for field, is_set in present.items() if not is_set]
+			frappe.throw(
+				"A from-URL image must set kernel_url, rootfs_url, kernel_sha256 and "
+				"rootfs_sha256; a local image (promoted from a snapshot) sets none of them. "
+				f"Missing: {', '.join(missing)}."
+			)
+
+	@property
+	def is_local(self) -> bool:
+		"""A local image was promoted from a snapshot on one server: its rootfs is
+		an `atlas-image-<name>` LV already on that host, not a downloadable URL. With
+		no rootfs URL there is nothing for `sync-image.py` to fetch, so a local image
+		is non-syncable — it lives on exactly the server it was promoted on.
+		(`Virtual Machine Snapshot.promote_to_image`, spec/08-images.md.)"""
+		return not (self.rootfs_url or "").strip()
 
 	def after_insert(self) -> None:
 		"""Auto-sync: enqueue one Task per Active server so the operator never
-		has to click `Sync to All Servers` on a fresh image row."""
-		if not self.is_active:
+		has to click `Sync to All Servers` on a fresh image row.
+
+		A local image (promoted from a snapshot, no rootfs URL) is skipped: its
+		bytes are an LV already on its one server, and there is no download a sync
+		Task could run. Same-server scope is deliberate (no fleet distribution this
+		iteration); see spec/08-images.md § Promoting a snapshot."""
+		if not self.is_active or self.is_local:
 			return
 		for server in frappe.get_all("Server", filters={"status": "Active"}, pluck="name"):
 			self.sync_to_server(server)
@@ -107,7 +146,17 @@ class VirtualMachineImage(Document):
 
 	@frappe.whitelist()
 	def sync_to_server(self, server_name: str) -> str:
-		"""Insert a Pending Task row and enqueue execute_task. Returns Task name."""
+		"""Insert a Pending Task row and enqueue execute_task. Returns Task name.
+
+		A local image (promoted from a snapshot, no rootfs URL) cannot be synced —
+		`sync-image.py` has nothing to download, and the image lives only on the
+		server it was promoted on. Throw cleanly rather than enqueue a Task that
+		would fail on the host."""
+		if self.is_local:
+			frappe.throw(
+				f"{self.name} is a local image (promoted from a snapshot) and cannot be synced — "
+				"its rootfs LV lives only on the server it was promoted on."
+			)
 		variables = {
 			"IMAGE_NAME": self.image_name,
 			"KERNEL_URL": self.kernel_url,

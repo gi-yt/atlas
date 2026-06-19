@@ -177,6 +177,95 @@ class TestShippedImageConstants(IntegrationTestCase):
 		self.assertEqual(image.name, DEFAULT_IMAGE["image_name"])
 
 
+class TestLocalImage(IntegrationTestCase):
+	"""A local image — promoted from a snapshot, no rootfs URL — is non-syncable:
+	its bytes are an LV already on its one server. after_insert skips the fan-out
+	and sync_to_server throws cleanly (spec/08-images.md § Promoting a snapshot)."""
+
+	def _local_image(self, name: str = "local-image") -> "frappe.model.document.Document":
+		frappe.db.delete("Virtual Machine Image", {"image_name": name})
+		return frappe.get_doc(
+			{
+				"doctype": "Virtual Machine Image",
+				"image_name": name,
+				"title": "local image",
+				"kernel_url": "",
+				"kernel_filename": "vmlinux-6.1",
+				"kernel_sha256": "",
+				"rootfs_url": "",
+				"rootfs_filename": f"atlas-image-{name}",
+				"rootfs_sha256": "",
+				"default_disk_gigabytes": 4,
+				"is_active": 1,
+			}
+		)
+
+	def test_url_less_image_validates(self) -> None:
+		# The plan's claim: a row with empty kernel/rootfs URLs is legal (validate
+		# only enforces https when a value is present; the reqd flags are relaxed).
+		image = self._local_image().insert(ignore_permissions=True)
+		self.assertTrue(image.is_local)
+
+	def test_after_insert_skips_sync_fanout_for_local(self) -> None:
+		_provider_and_server("local-img-active-srv", "Active")
+		with patch("frappe.enqueue") as enqueue:
+			self._local_image("local-image-noinsert").insert(ignore_permissions=True)
+		enqueue.assert_not_called()
+
+	def test_sync_to_server_throws_for_local(self) -> None:
+		server_name = _provider_and_server("local-img-sync-srv", "Active")
+		image = self._local_image("local-image-nosync").insert(ignore_permissions=True)
+		with self.assertRaises(frappe.ValidationError) as raised:
+			image.sync_to_server(server_name)
+		self.assertIn("local image", str(raised.exception))
+
+	def test_partial_url_shape_rejected_at_insert(self) -> None:
+		# A URL image missing only its rootfs_sha256 used to be blocked by reqd=1;
+		# now validate()'s coherence check must reject it AT INSERT, not let it fan
+		# out a sync Task that fails later on the host (where the digest is required).
+		frappe.db.delete("Virtual Machine Image", {"image_name": "partial-url-image"})
+		bad = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine Image",
+				"image_name": "partial-url-image",
+				"title": "partial url image",
+				"kernel_url": "https://example.com/k",
+				"kernel_filename": "k",
+				"kernel_sha256": "a" * 64,
+				"rootfs_url": "https://example.com/r",
+				"rootfs_filename": "r",
+				"rootfs_sha256": "",  # the one missing piece
+				"default_disk_gigabytes": 4,
+				"is_active": 1,
+			}
+		)
+		with self.assertRaises(frappe.ValidationError) as raised:
+			bad.insert(ignore_permissions=True)
+		self.assertIn("rootfs_sha256", str(raised.exception))
+
+	def test_url_image_still_fans_out(self) -> None:
+		# Regression guard: an ordinary URL-backed image still auto-syncs.
+		_provider_and_server("url-img-active-srv", "Active")
+		frappe.db.delete("Virtual Machine Image", {"image_name": "url-image-fanout"})
+		with patch("frappe.enqueue") as enqueue:
+			frappe.get_doc(
+				{
+					"doctype": "Virtual Machine Image",
+					"image_name": "url-image-fanout",
+					"title": "url image",
+					"kernel_url": "https://example.com/k",
+					"kernel_filename": "k",
+					"kernel_sha256": "a" * 64,
+					"rootfs_url": "https://example.com/r",
+					"rootfs_filename": "r",
+					"rootfs_sha256": "b" * 64,
+					"default_disk_gigabytes": 4,
+					"is_active": 1,
+				}
+			).insert(ignore_permissions=True)
+		self.assertGreaterEqual(enqueue.call_count, 1)
+
+
 class TestVirtualMachineImageImmutability(IntegrationTestCase):
 	def setUp(self) -> None:
 		frappe.db.delete(

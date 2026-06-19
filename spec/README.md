@@ -195,9 +195,11 @@ controller (issuance runs there, not over SSH — see [13-tls.md](./13-tls.md)).
 
 ## Operator use cases
 
-Everything Atlas does for an operator falls into one of nine use cases.
-The list is the spec's index of operator-visible behavior; the e2e suite
-mirrors it exactly (one module per use case, see
+Everything Atlas does for an operator falls into one of the use cases
+below. The list is the spec's index of operator-visible behavior; the
+e2e suite mirrors it (one module per use case, though a closely-related
+operation may ride along in a sibling module — Promote rides along in
+the snapshot module — see
 [`atlas/tests/e2e/use_cases/`](../atlas/tests/e2e/use_cases)). New
 operator-facing features add to this list; new tests follow it.
 
@@ -209,6 +211,7 @@ operator-facing features add to this list; new tests follow it.
 | Provision a virtual machine    | `Virtual Machine` → **Provision**                       | [05-virtual-machine-lifecycle.md](./05-virtual-machine-lifecycle.md) |
 | Operate a virtual machine      | `Virtual Machine` → **Start / Stop / Restart / Pause / Resume / Terminate** | [05-virtual-machine-lifecycle.md](./05-virtual-machine-lifecycle.md) |
 | Manage a VM's disk and size    | `Virtual Machine` → **Snapshot / Rebuild / Resize**; `Virtual Machine Snapshot` → **Restore to VM / Clone to new VM / Delete** | [05-virtual-machine-lifecycle.md](./05-virtual-machine-lifecycle.md) |
+| Promote a snapshot to an image | `Virtual Machine Snapshot` → **Promote to image** (or `Image Build` → **Promote to image**): same-server base image new VMs pick via the `image` field | [08-images.md](./08-images.md#two-origins-for-a-base-image-a-url-or-a-snapshot-promote) |
 | Attach a public IPv4 to a VM   | `Reserved IP` → **Attach / Detach** (the inbound-v4 primitive: DNAT in, SNAT out) | [06-networking.md](./06-networking.md#ipv4-ingress-reserved-ip) |
 | Issue a TLS cert for a region  | `Root Domain` → **Issue / Renew Certificate**; `TLS Certificate` → **Issue/Renew / Push to Proxies**; `Domain Provider` / `TLS Provider` → **Test Connection / Archive** | [13-tls.md](./13-tls.md) |
 | Run an ad-hoc task / reboot    | `Server` → **Run Task / Reboot**                        | [04-tasks.md](./04-tasks.md) |

@@ -29,6 +29,51 @@ function add_buttons(frm) {
 	if (["Available", "Failed"].includes(frm.doc.status)) {
 		frappe.atlas.add_action(frm, "Re-bake", () => confirm_rebake(frm));
 	}
+	// Promote this build's snapshot into a first-class base image (same-server).
+	// Available + has a snapshot only; the warm-reject and every guard live in the
+	// snapshot method this delegates to (see virtual_machine_snapshot.py).
+	if (frm.doc.status === "Available" && frm.doc.snapshot) {
+		frappe.atlas.add_action(frm, "Promote to image", () => open_promote_dialog(frm));
+	}
+}
+
+function open_promote_dialog(frm) {
+	const default_name = `${frm.doc.recipe}-${frm.doc.name}`.toLowerCase();
+	const dialog = new frappe.ui.Dialog({
+		title: __("Promote {0} to a base image", [frm.doc.title]),
+		fields: [
+			{
+				fieldname: "image_name",
+				label: __("Image name"),
+				fieldtype: "Data",
+				reqd: 1,
+				default: default_name,
+				description: __(
+					"Lowercase letters, digits, dots and dashes. Becomes the image record name and the on-host LV (atlas-image-<name>)."
+				),
+			},
+			{ fieldname: "title", label: __("Title"), fieldtype: "Data", default: frm.doc.title },
+			{
+				fieldname: "hint",
+				fieldtype: "HTML",
+				options: `<p class="text-muted small">${__(
+					"Copies the snapshot's disk into a read-only base image on this build's server. New VMs there can then pick it as their image. It stays on this server (no fleet sync)."
+				)}</p>`,
+			},
+		],
+		primary_action_label: __("Promote"),
+		primary_action(values) {
+			dialog.hide();
+			frm.call("promote", values).then(({ message: image_name }) => {
+				frappe.show_alert(
+					{ message: __("Promoted to image {0}.", [image_name]), indicator: "green" },
+					6
+				);
+				frappe.set_route("Form", "Virtual Machine Image", image_name);
+			});
+		},
+	});
+	dialog.show();
 }
 
 function confirm_rebake(frm) {

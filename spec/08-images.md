@@ -199,6 +199,75 @@ is kept too — it is the import source (re-`dd`'d into the LV only if the LV is
 absent, so a re-sync of an unchanged image is a no-op) and the audit artifact.
 The LV name is derived from `image_name`, so there is no DocType field for it.
 
+### Two origins for a base image: a URL, or a snapshot (promote)
+
+A base image LV (`atlas-image-<name>`) can be sourced **two** ways, and both end
+in the same read-only CoW origin every per-VM disk snapshots from:
+
+1. **From a URL** — `sync-image.py` downloads the Ubuntu cloud image, normalizes
+   it, builds the pristine ext4, and `dd`s it into the LV (above). The image row
+   carries the kernel/rootfs URLs + checksums.
+2. **From a snapshot (promote)** — a baked `Virtual Machine Snapshot` is turned
+   into a first-class image so new VMs select it with the ordinary `image` field
+   instead of locating a one-off snapshot to *clone*. **Same-server scope only**:
+   the bytes never leave the host — snapshot LV → base-image LV is a local `dd`
+   (`promote-snapshot-image.py` → `ThinPool.import_base_image_from_lv`), no bucket,
+   no SSH copy. The image lives only on the server it was promoted on.
+
+A bake already produces a reusable same-server provisioning source (the snapshot
+LV, which `clone_to_new_vm` clones from). Promoting is the small step that makes
+that baked artifact a **named image in the picker** rather than a snapshot you
+hand-locate. There are exactly two same-server origin shapes a per-VM disk
+CoW-snapshots from (`provision-vm.py:_resolve_origin`) — the base-image LV
+(`image` field) and a snapshot LV (`clone_to_new_vm`) — and they are the same kind
+of CoW origin; promote = snapshot LV → base-image LV.
+
+**The kernel is free.** A baked snapshot was itself provisioned from some base
+`Virtual Machine Image` (recorded on the snapshot row as `source_image`), whose
+`vmlinux` is already on that server. The promoted image reuses `source_image`'s
+`kernel_filename` byte-for-byte (`promote-snapshot-image.py` hard-links it into the
+promoted image's directory — same filesystem, no copy); only the **rootfs** LV is
+new. Nothing leaves the host, no kernel export.
+
+**Local (URL-less) image rows.** A promoted image has empty
+`kernel_url`/`rootfs_url`/`sha256` fields (those are no longer `reqd`, since two
+origins now exist) — its bytes are the promoted LV, already on the server, with
+nothing to download or verify. `VirtualMachineImage.is_local` is true exactly when
+there is no rootfs URL. A local image is **non-syncable**: `after_insert` skips the
+sync fan-out and `sync_to_server` throws cleanly (there is nothing for
+`sync-image.py` to fetch, and the LV lives on one server). `kernel_filename` and
+`rootfs_filename` are still set: `kernel_filename` is the reused kernel;
+`rootfs_filename` (`atlas-image-<name>`, the LV name) is the **presence sentinel**
+`provision-vm.py`'s step-0 file probe stat's — the real rootfs bytes come from the
+base LV via `_resolve_origin`. So a promoted image looks exactly like a synced
+image to `provision-vm.py`: a kernel + a rootfs-file probe in
+`/var/lib/atlas/images/<name>/`, and a base LV by name.
+
+**Warm snapshots are rejected.** A warm `Virtual Machine Snapshot` is three
+artifacts captured at one paused instant — the disk LV, the memory pair
+(`vmstate.bin`+`mem.bin`), and `host-signature.json`. Its **value is the resume**:
+a warm clone wakes into the frozen, pre-warmed RAM with no grow, no tune2fs reroll,
+no disk-mount identity injection (mounting the disk would corrupt the RAM's
+filesystem-cache references). A base image is the **opposite contract**: clones
+cold-boot and provision *requires* grow + tune2fs + `inject_identity`, none of
+which the memory pair survives. Promoting a warm snapshot could only mean
+flattening it to its cold disk and discarding the memory pair — throwing away the
+one thing that distinguishes it from an ordinary bake. So `promote_to_image()`
+**throws on `kind == "Warm"`** before doing any work; promote a *cold* snapshot,
+clone the warm one with `clone_to_new_vm`. (Operator decision, 2026-06-19: "Memory
+is the real benefit of a warm snapshot. If we lose that, might as well not have
+it.")
+
+**Why no transport / no cross-server distribution.** With same-server scope the
+bytes never leave the host. Export-to-URL (reusing `sync-image.py`'s download path)
+and server-to-server copy are only relevant if fleet-wide distribution is wanted
+later; build none of it now.
+
+The two entry points: **`Virtual Machine Snapshot` → Promote to image** (a dialog
+taking the image name) and **`Image Build` → Promote to image** (a thin delegate
+to the snapshot method with a default name). Both funnel through the one
+`promote_to_image` method, so the warm reject and every guard live once.
+
 ## Per-VM rootfs creation
 
 When `provision-vm.py` runs, it:

@@ -728,16 +728,26 @@ A kernel + rootfs pair, identified by a name.
 
 | Field                    | Type   | Reqd | Read-only | Default | Notes                                                |
 | ------------------------ | ------ | ---- | --------- | ------- | ---------------------------------------------------- |
-| `image_name`             | Data   | Y    |           |         | Primary key. Unique. `set_only_once`. e.g. `ubuntu-24.04`. |
+| `image_name`             | Data   | Y    |           |         | Primary key. Unique. `set_only_once`. e.g. `ubuntu-24.04`. A promoted image's name is also its LVM LV name (`atlas-image-<name>`), so it is restricted to lowercase letters/digits/dots/dashes. |
 | `title`                  | Data   |      |           |         | Operator-chosen label; `title_field` for the form. `set_only_once`. |
 | `is_active`              | Check  |      |           | 1       |                                                      |
 | `default_disk_gigabytes` | Int    | Y    |           | 4       | `set_only_once`. Size of the pristine ext4 (per-VM disk grows from this). |
-| `kernel_url`             | Data   | Y    |           |         | `set_only_once`. HTTPS URL of the uncompressed `vmlinux`. |
+| `kernel_url`             | Data   |      |           |         | `set_only_once`. HTTPS URL of the uncompressed `vmlinux`. **Empty for a local image** (promoted from a snapshot — kernel reused from the snapshot's source image). |
 | `kernel_filename`        | Data   | Y    |           |         | `set_only_once`. Filename on the server.             |
-| `kernel_sha256`          | Data   | Y    |           |         | `set_only_once`. Hex digest of the kernel.           |
-| `rootfs_url`             | Data   | Y    |           |         | `set_only_once`. HTTPS URL of the source squashfs.   |
-| `rootfs_filename`        | Data   | Y    |           |         | `set_only_once`. Filename of the resulting ext4 on the server. |
-| `rootfs_sha256`          | Data   | Y    |           |         | `set_only_once`. Hex digest of the source squashfs.  |
+| `kernel_sha256`          | Data   |      |           |         | `set_only_once`. Hex digest of the kernel. Empty for a local image. |
+| `rootfs_url`             | Data   |      |           |         | `set_only_once`. HTTPS URL of the source squashfs. **Empty for a local image** (its rootfs is the promoted `atlas-image-<name>` LV, already on the server). The empty/non-empty rootfs URL is the `is_local` discriminator. |
+| `rootfs_filename`        | Data   | Y    |           |         | `set_only_once`. Filename of the resulting ext4 on the server. For a local image this is the base LV name (`atlas-image-<name>`) and the on-disk file is a presence sentinel. |
+| `rootfs_sha256`          | Data   |      |           |         | `set_only_once`. Hex digest of the source squashfs. Empty for a local image. |
+
+The URL/SHA fields are **not required** because a `Virtual Machine Image` has two
+origins (see [08-images.md](./08-images.md#two-origins-for-a-base-image-a-url-or-a-snapshot-promote)):
+**from a URL** (`sync-image.py` downloads + builds, the URL/SHA fields are set) or
+**from a snapshot** (`Virtual Machine Snapshot.promote_to_image` `dd`s a baked
+snapshot LV into the base-image LV, leaving the URL/SHA fields empty). `validate`
+still enforces `https://` on any URL that *is* present.
+`VirtualMachineImage.is_local` (no rootfs URL) drives the **non-syncable** rule: a
+local image's `after_insert` skips the sync fan-out and `sync_to_server` throws —
+its bytes are an LV on one server, with nothing to download.
 
 Every non-`is_active` field is immutable from `after_insert` onward —
 the framework `set_only_once` flag paints them read-only on the form,
@@ -786,7 +796,10 @@ for you. See [08-images.md](./08-images.md).
 `status = Active`: for each one it calls `self.sync_to_server(server)`,
 which enqueues a `sync-image.py` Task. The operator does *not* press
 **Sync to Server** for the initial fan-out — saving the image is the
-trigger. Per-attempt tracking happens via the resulting Task rows
+trigger. A **local image** (`is_local`, promoted from a snapshot) is
+skipped: its rootfs LV lives only on the server it was promoted on, and
+`sync_to_server` throws for it rather than enqueue a download Task that
+would fail. Per-attempt tracking happens via the resulting Task rows
 (filter the Task list by `script = sync-image.py`); a dedicated
 `Virtual Machine Image Sync` tracking DocType was scoped in the plan
 but deferred for the PoC.

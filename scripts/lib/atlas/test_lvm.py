@@ -329,6 +329,77 @@ class TestDiscoverPoolDisks(unittest.TestCase):
 		self.assertEqual(discover_pool_disks(out).count("/dev/md2"), 1)
 
 
+class TestImportBaseImageFromLV(unittest.TestCase):
+	"""Promote a snapshot LV into a read-only base image LV — the same dd-then-RO
+	shape as import_base_image, but the source is a local LV device, not a file.
+	No real LVM stack: every host poke (`run`, `run_ok`) is mocked."""
+
+	def setUp(self):
+		self.pool = ThinPool()
+
+	def test_idempotent_noop_when_target_exists(self):
+		# A re-promote with the image LV already present touches nothing (no dd, no
+		# lvcreate) — exactly import_base_image's idempotency.
+		with (
+			mock.patch("atlas.lvm.run_ok", return_value=True),  # target lv.exists -> True
+			mock.patch("atlas.lvm.run") as run,
+		):
+			lv = self.pool.import_base_image_from_lv(
+				self.pool.from_device("/dev/atlas/atlas-snap-x"), "golden-v1", 28
+			)
+		self.assertEqual(lv.name, "atlas-image-golden-v1")
+		run.assert_not_called()
+
+	def test_dd_from_source_device_then_read_only(self):
+		# Target absent, source present: create the thin LV, dd the SOURCE LV's
+		# device into it, then flip the base read-only. Mirrors import_base_image
+		# but reads a block device rather than a file.
+		exists = iter([False, True])  # lv.exists -> False ; source.exists -> True
+
+		def run_ok(*args, **kwargs):
+			arg_str = " ".join(str(a) for a in args)
+			if "lvs" in arg_str:
+				return next(exists)
+			return True
+
+		with (
+			mock.patch("atlas.lvm.run_ok", side_effect=run_ok),
+			mock.patch("atlas.lvm.run", return_value="") as run,
+			mock.patch.object(LogicalVolume, "_wait_for_node"),  # skip udev/stat on the fake node
+		):
+			self.pool.import_base_image_from_lv(
+				self.pool.from_device("/dev/atlas/atlas-snap-abc"), "golden-v1", 28
+			)
+		calls = [" ".join(str(a) for a in c.args) for c in run.call_args_list]
+		# dd reads the SOURCE device, writes the new image device.
+		dd = [c for c in calls if "dd" in c]
+		self.assertTrue(any("if=/dev/atlas/atlas-snap-abc" in c for c in dd), dd)
+		self.assertTrue(any("of=/dev/atlas/atlas-image-golden-v1" in c for c in dd), dd)
+		# The base image LV is flipped read-only at the LVM layer.
+		self.assertTrue(any("lvchange --permission r" in c for c in calls), calls)
+
+	def test_missing_source_raises_before_lvcreate(self):
+		# A vanished source LV (e.g. its build VM was terminated and the snapshot
+		# swept) fails loud — never a half-built empty base image.
+		exists = iter([False, False])  # lv.exists -> False ; source.exists -> False
+
+		def run_ok(*args, **kwargs):
+			if "lvs" in " ".join(str(a) for a in args):
+				return next(exists)
+			return True
+
+		with (
+			mock.patch("atlas.lvm.run_ok", side_effect=run_ok),
+			mock.patch("atlas.lvm.run") as run,
+		):
+			with self.assertRaises(FileNotFoundError):
+				self.pool.import_base_image_from_lv(
+					self.pool.from_device("/dev/atlas/atlas-snap-gone"), "golden-v1", 28
+				)
+		# No lvcreate happened: we bailed before touching the pool.
+		self.assertFalse(any("lvcreate" in " ".join(str(a) for a in c.args) for c in run.call_args_list))
+
+
 class TestPoolBackingSelection(unittest.TestCase):
 	"""select_devices() applies env → persisted → discovered → loopback, without
 	touching the host beyond the calls we mock here."""

@@ -1,7 +1,17 @@
+import re
+
 import frappe
 from frappe.model.document import Document
 
 from atlas.atlas.ssh import run_task
+from atlas.atlas.task_results import parse_result
+
+# An image name becomes both a Frappe doc name (autoname field:image_name) and an
+# LVM LV name (atlas-image-<name>). LVM LV names allow [a-zA-Z0-9+_.-]; we are
+# stricter — lowercase alnum plus dot/dash — so the name is also a clean docname
+# and a clean DNS-ish label. Reject anything else loudly rather than minting an LV
+# the host's lvcreate would refuse or a docname Frappe would mangle.
+_IMAGE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
 
 
 class VirtualMachineSnapshot(Document):
@@ -172,6 +182,126 @@ class VirtualMachineSnapshot(Document):
 			frappe.throw(f"Snapshot is not Available (status is {self.status})")
 		virtual_machine = frappe.get_doc("Virtual Machine", self.virtual_machine)
 		return virtual_machine.rebuild("snapshot", self.name)
+
+	@frappe.whitelist()
+	def promote_to_image(self, image_name: str, title: str | None = None) -> str:
+		"""Promote this cold snapshot into a first-class same-server base image, so
+		new VMs provision from it via the ordinary `image` field instead of locating
+		a one-off snapshot to clone (spec/08-images.md, spec/15-image-builder.md).
+
+		On `self.server`, `promote-snapshot-image.py` dd's the snapshot LV into a
+		new read-only `atlas-image-<image_name>` LV; then we register a *local*
+		(URL-less) `Virtual Machine Image` row pointing at it. The kernel is free —
+		the row reuses the snapshot's `source_image` kernel (already on the server),
+		so only the rootfs LV is new and nothing leaves the host.
+
+		Warm snapshots are rejected up front: a warm snapshot's value is its frozen
+		memory pair (clones RESUME it), and a base image's contract is the opposite —
+		clones cold-boot and provision *requires* grow + tune2fs + identity injection,
+		none of which the memory pair survives. Promoting a warm snapshot could only
+		mean discarding that pair, throwing away the one thing that distinguishes it
+		from an ordinary bake. So we throw on `kind == "Warm"`; promote a cold
+		snapshot, clone the warm one with `clone_to_new_vm`. (Operator decision,
+		2026-06-19.)
+
+		**Promote is root-only.** A snapshot captures both the root and data disks,
+		and `clone_to_new_vm` carries the data disk into a clone — but a base image is
+		a *root* template (the `Virtual Machine Image` DocType has no data-disk
+		fields), so a promoted image would silently drop the snapshot's data disk.
+		Rather than lose data quietly, we throw on a data-disk snapshot: promote a
+		data-less snapshot, or clone this one to preserve its data disk.
+
+		**Ordering: the image row is the durable anchor.** We insert the row FIRST,
+		then run the host `dd`. The host import is idempotent, so a host failure
+		(which raises and rolls the row back with it) leaves nothing to clean —
+		never an orphaned read-only `atlas-image-*` LV with no owning row (those are
+		protected, so the lifecycle could never reclaim one). This mirrors
+		`Virtual Machine.snapshot()`'s insert-then-host-work order.
+
+		Returns the new image's name."""
+		if self.status != "Available":
+			frappe.throw(f"Snapshot is not Available (status is {self.status})")
+		if self.kind == "Warm":
+			frappe.throw(
+				"A warm snapshot cannot be promoted to an image — its value is the frozen "
+				"memory pair clones resume, which a cold-booting base image discards. "
+				"Promote a cold snapshot, or clone this one with Clone to new VM."
+			)
+		if self.data_disk_gigabytes:
+			frappe.throw(
+				"This snapshot has a data disk; a base image captures only the root disk "
+				"(the image has no data-disk fields), so promoting would silently drop it. "
+				"Clone this snapshot with Clone to new VM to keep the data disk, or promote "
+				"a data-less snapshot."
+			)
+		if not self.source_image:
+			# The kernel is inherited from source_image; a snapshot with no recorded
+			# source image (a malformed row) has no kernel to point the image at.
+			frappe.throw("Snapshot has no source image to inherit a kernel from; cannot promote.")
+
+		image_name = (image_name or "").strip().lower()
+		if not _IMAGE_NAME_RE.match(image_name):
+			frappe.throw(
+				f"Image name {image_name!r} is invalid — use lowercase letters, digits, "
+				"dots and dashes (it becomes both the image record name and the LVM LV name)."
+			)
+		if frappe.db.exists("Virtual Machine Image", image_name):
+			frappe.throw(f"A Virtual Machine Image named {image_name!r} already exists.")
+
+		source_kernel_filename = frappe.db.get_value(
+			"Virtual Machine Image", self.source_image, "kernel_filename"
+		)
+		if not source_kernel_filename:
+			frappe.throw(
+				f"Source image {self.source_image} has no kernel_filename; cannot promote "
+				"(the promoted image reuses its kernel)."
+			)
+
+		rootfs_filename = f"atlas-image-{image_name}"
+		# Register the local image row FIRST — the durable anchor (see docstring).
+		# Empty kernel_url/rootfs_url => a URL-less image (validate permits it;
+		# after_insert/sync skip it — its bytes are the promoted LV, already on the
+		# server, not a download). rootfs_filename is the LV name; the on-disk file is
+		# a presence sentinel the host materializes (provision reads the LV).
+		image = frappe.get_doc(
+			{
+				"doctype": "Virtual Machine Image",
+				"image_name": image_name,
+				"title": (title or "").strip() or self.title,
+				"kernel_url": "",
+				"kernel_filename": source_kernel_filename,
+				"kernel_sha256": "",
+				"rootfs_url": "",
+				"rootfs_filename": rootfs_filename,
+				"rootfs_sha256": "",
+				"default_disk_gigabytes": self.disk_gigabytes,
+				"tenant": self.tenant,
+				"is_active": 1,
+			}
+		).insert(ignore_permissions=True)
+
+		# Then dd the snapshot LV into the read-only atlas-image-<name> LV on the
+		# server, and materialize the image dir (kernel hard-linked from the source
+		# image, rootfs presence sentinel) so a new VM provisions from it exactly like
+		# a synced image. Idempotent on the host (a no-op if the target LV already
+		# exists). A host failure raises here and rolls back the image row above with
+		# it, so promote is all-or-nothing — never a half-state.
+		task = run_task(
+			server=self.server,
+			script="promote-snapshot-image.py",
+			variables={
+				"SNAPSHOT_ROOTFS_PATH": self.rootfs_path,
+				"IMAGE_NAME": image_name,
+				"DISK_GIGABYTES": str(self.disk_gigabytes),
+				"ROOTFS_FILENAME": rootfs_filename,
+				"SOURCE_IMAGE": self.source_image,
+				"KERNEL_FILENAME": source_kernel_filename,
+			},
+			virtual_machine=self.virtual_machine,
+			timeout_seconds=600,
+		)
+		parse_result(task.stdout)  # fail loud if the script produced no ATLAS_RESULT line
+		return image.name
 
 	def on_trash(self) -> None:
 		"""Remove the on-host snapshot LV when the row is deleted.

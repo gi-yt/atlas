@@ -198,3 +198,59 @@ class TestImageBuildRebake(IntegrationTestCase):
 		build.db_set("status", "Building")
 		with self.assertRaises(frappe.ValidationError):
 			build.rebake()
+
+
+class TestImageBuildPromote(IntegrationTestCase):
+	"""Promote delegates to the snapshot's promote_to_image — the warm-reject and
+	every guard live there. Here we assert the delegation + the guards Image Build
+	owns (Available + has a snapshot) and the default image-name slug."""
+
+	def setUp(self) -> None:
+		_ensure_test_server()
+		_ensure_test_image()
+		_purge()
+
+	def test_promote_delegates_with_default_name(self) -> None:
+		from unittest.mock import MagicMock
+
+		build = _new_build("bench")
+		build.db_set("status", "Available")
+		build.db_set("snapshot", "snap-xyz")
+		build.reload()
+		snapshot = MagicMock()
+		snapshot.promote_to_image.return_value = "bench-img-build-00001"
+		with patch.object(image_build_module.frappe, "get_doc", return_value=snapshot):
+			result = build.promote()
+		snapshot.promote_to_image.assert_called_once()
+		kwargs = snapshot.promote_to_image.call_args.kwargs
+		self.assertEqual(kwargs["image_name"], f"bench-{build.name}".lower())
+		self.assertEqual(result, "bench-img-build-00001")
+
+	def test_promote_passes_explicit_name(self) -> None:
+		from unittest.mock import MagicMock
+
+		build = _new_build("bench")
+		build.db_set("status", "Available")
+		build.db_set("snapshot", "snap-xyz")
+		build.reload()
+		snapshot = MagicMock()
+		snapshot.promote_to_image.return_value = "my-image"
+		with patch.object(image_build_module.frappe, "get_doc", return_value=snapshot):
+			build.promote(image_name="my-image", title="My Image")
+		kwargs = snapshot.promote_to_image.call_args.kwargs
+		self.assertEqual(kwargs["image_name"], "my-image")
+		self.assertEqual(kwargs["title"], "My Image")
+
+	def test_promote_rejects_non_available_build(self) -> None:
+		build = _new_build("bench")  # Draft
+		with self.assertRaises(frappe.ValidationError) as raised:
+			build.promote()
+		self.assertIn("Available", str(raised.exception))
+
+	def test_promote_rejects_build_without_snapshot(self) -> None:
+		build = _new_build("bench")
+		build.db_set("status", "Available")  # but no snapshot linked
+		build.reload()
+		with self.assertRaises(frappe.ValidationError) as raised:
+			build.promote()
+		self.assertIn("no snapshot", str(raised.exception))
