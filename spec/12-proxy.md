@@ -92,10 +92,16 @@ the others serving — a zero-downtime rolling update.
 
 The nginx image's behavior is the **image-level release gate**: the
 docker-compose harness under [`proxy/test/`](../proxy/test) exercises the same
-`conf/` + `lua/` the in-guest build installs (routing, remap-no-reload, branded
-404, bulk `/sync`, canonical-JSON byte-match, restart-reload-from-`map.json`,
-HTTP→HTTPS, HTTP/2, socket.io upgrade) — 10/10 green. Nothing is installed on the
-dev host.
+`conf/` + `lua/` the in-guest build installs. Beyond the happy path (routing,
+remap-no-reload, branded 404, bulk `/sync`, canonical-JSON byte-match,
+restart-reload-from-`map.json`, HTTP→HTTPS, HTTP/2, socket.io upgrade) it pins the
+subtler behaviors and failure modes — forwarded-header/query fidelity, security
+headers on the branded page, the admin method/route matrix, bad-address and
+misbehaving-upstream fail-clean, corrupt-`map.json` boot, the dump debounce + its
+durability window, concurrent-read atomicity — plus latency/timing/scale guards
+(routing overhead, streaming first-byte, TLS resumption, a concurrency soak, a
+10k-entry map). `test_proxy.py` + `test_build.py` + `test_latency.py`, all green.
+Nothing is installed on the dev host.
 
 ## Host-bound facts — the `proxy_vm` Atlas e2e
 
