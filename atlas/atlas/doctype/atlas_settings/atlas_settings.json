@@ -12,6 +12,8 @@
   "default_bench_snapshot",
   "section_break_capacity",
   "overprovision_factor",
+  "section_break_tcp_proxy",
+  "tcp_port_pool",
   "section_break_ssh",
   "ssh_key_id",
   "ssh_public_key",
@@ -62,6 +64,18 @@
    "default": "1",
    "non_negative": 1,
    "description": "Fleet-wide vCPU oversubscription multiplier. A host's effective vCPU budget is its physical total times this factor; placement (and the capacity display) check against that budget. 1 = no oversubscription. Servers whose size has no known vCPU total are unaffected — they are always treated as having room."
+  },
+  {
+   "fieldname": "section_break_tcp_proxy",
+   "fieldtype": "Section Break",
+   "label": "TCP proxy"
+  },
+  {
+   "fieldname": "tcp_port_pool",
+   "fieldtype": "Data",
+   "label": "TCP Port Pool",
+   "default": "10000-19999",
+   "description": "Inclusive LOW-HIGH range of proxy-side ports the TCP forwarder allocates to Port Mappings (spec/17-tcp-proxy.md). MUST match the proxy's pre-opened nginx `listen` range; growing it is a deliberate proxy snapshot roll, not a live edit. Per region: the same port number is independently allocatable in each region."
   },
   {
    "fieldname": "section_break_ssh",

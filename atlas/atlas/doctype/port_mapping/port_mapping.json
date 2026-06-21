@@ -1,0 +1,136 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:{region}-{public_port}",
+ "creation": "2026-06-19 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "tab_overview",
+  "public_port",
+  "region",
+  "column_break_header",
+  "active",
+  "protocol",
+  "section_break_target",
+  "virtual_machine",
+  "target_port",
+  "column_break_target",
+  "address"
+ ],
+ "fields": [
+  {
+   "fieldname": "tab_overview",
+   "fieldtype": "Tab Break",
+   "label": "Overview"
+  },
+  {
+   "description": "The proxy-side port the tenant connects to, on the proxy fleet's reserved IPv4. Allocated by Atlas on insert (lowest free in the region's pool); unique per region; read-only. This is the routing key the proxy stores in its live port map.",
+   "fieldname": "public_port",
+   "fieldtype": "Int",
+   "in_global_search": 1,
+   "in_list_view": 1,
+   "label": "Public Port",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "description": "Which regional proxy fleet fronts this mapping. Every proxy VM in the region gets the full set of active mappings for the region.",
+   "fieldname": "region",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Region",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_header",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "description": "Inactive mappings are excluded from the desired map the proxy serves (the row stays for history, and still owns its port so toggling back on never collides). Toggle off to stop forwarding without releasing the port.",
+   "fieldname": "active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Active"
+  },
+  {
+   "default": "tcp",
+   "description": "A label only — the forwarder is protocol-agnostic L4. For the operator and the future dashboard.",
+   "fieldname": "protocol",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Protocol",
+   "options": "tcp\nssh\nmariadb"
+  },
+  {
+   "fieldname": "section_break_target",
+   "fieldtype": "Section Break",
+   "label": "Target"
+  },
+  {
+   "description": "The tenant VM this port forwards to. The proxy dials its public IPv6 :target_port over the v6 internet (L4 passthrough — no TLS termination).",
+   "fieldname": "virtual_machine",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Virtual Machine",
+   "options": "Virtual Machine",
+   "reqd": 1
+  },
+  {
+   "default": "22",
+   "description": "The service port inside the guest (22 SSH, 3306 MariaDB). Immutable after insert.",
+   "fieldname": "target_port",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Target Port",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_target",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The target VM's public IPv6 /128, denormalized so the desired map is a single query with no join. Kept in sync with the linked VM's ipv6_address on save.",
+   "fieldname": "address",
+   "fieldtype": "Data",
+   "label": "Address",
+   "read_only": 1,
+   "reqd": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-06-19 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Atlas",
+ "name": "Port Mapping",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 0,
+   "cancel": 0,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "import": 0,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 0,
+   "write": 1
+  }
+ ],
+ "search_fields": "public_port,region,virtual_machine",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "public_port",
+ "track_changes": 1
+}
