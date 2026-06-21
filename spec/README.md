@@ -134,6 +134,7 @@ keep it the source of truth.
 14. [Self-serve sites](./14-self-serve.md)
 15. [Image builder](./15-image-builder.md)
 16. [Central — the global control plane](./16-central.md)
+17. [The TCP proxy](./17-tcp-proxy.md)
 
 ## First run on a fresh site
 

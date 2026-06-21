@@ -1,6 +1,6 @@
 # DocTypes
 
-Twenty-three DocTypes. Module `Atlas`. None are submittable. All track changes.
+Twenty-four DocTypes. Module `Atlas`. None are submittable. All track changes.
 Read permission for `System Manager`.
 
 1. [Atlas Settings](#atlas-settings) — vendor-agnostic Atlas config (Single).
@@ -16,7 +16,8 @@ Read permission for `System Manager`.
 11. [Virtual Machine Snapshot](#virtual-machine-snapshot) — a disk snapshot of a VM.
 12. [Reserved IP](#reserved-ip) — a public IPv4 allocated to a Server, optionally attached to a VM.
 13. [Subdomain](#subdomain) — a `<subdomain>.<region>.frappe.dev` routing entry pointing at a site VM.
-14. [SSH Key](#ssh-key) — a user's public key, chosen when creating a VM.
+14. [Port Mapping](#port-mapping) — a raw-TCP forwarding entry: a proxy-side port pointing at a tenant VM's service port.
+15. [SSH Key](#ssh-key) — a user's public key, chosen when creating a VM.
 15. [Task](#task)
 16. [Domain Provider](#domain-provider) — one row per configured DNS vendor (DNS-01).
 17. [Route53 Settings](#route53-settings) — AWS Route 53 API config (Single).
@@ -1003,6 +1004,84 @@ virtual_machine
 
 - Columns: `subdomain`, `region`, `active`, `virtual_machine`, `address`.
 - Standard filters: `region`, `active`, `virtual_machine`.
+
+---
+
+## Port Mapping
+
+One forwarding entry for the **TCP proxy** ([17-tcp-proxy.md](./17-tcp-proxy.md)):
+a proxy-side port that forwards raw TCP to a tenant VM's service port (SSH `:22`,
+MariaDB `:3306`, anything L4). The set of **active** Port Mapping rows for a
+region is the **desired port map** every proxy VM in that region serves — the TCP
+control plane (`atlas/atlas/tcp_proxy.py`) reconciles each proxy guest's
+stream-side `lua_shared_dict` to it over SSH, exactly as `Subdomain` /
+`atlas/atlas/proxy.py` does for HTTP.
+
+This is the L4 sibling of [Subdomain](#subdomain) and follows it field-for-field:
+standalone and linked (the `Reserved IP` / `Subdomain` idiom), **not** a child
+grid on a proxy — every proxy VM holds the **whole** regional map, so the map is
+owned per **region**. The one field with no `Subdomain` analogue is `public_port`:
+the routing key is a *port number Atlas allocates*, not a label the user picks,
+because raw TCP carries no application-layer routing key (the local port is the
+only thing the proxy can route on — see [17-tcp-proxy.md](./17-tcp-proxy.md)).
+
+### Fields
+
+| Field             | Type                   | Reqd | Read-only | Default | Notes                                                            |
+| ----------------- | ---------------------- | ---- | --------- | ------- | ---------------------------------------------------------------- |
+| `name`            | = `<region>-<public_port>` (autoname `format:{region}-{public_port}`) | Y | Y |    | Primary key embeds the region so the same port number is free in every region — `public_port` is unique *per region*, not fleet-wide. |
+| `public_port`     | Int                    | Y    | Y         |         | The proxy-side port the tenant connects to. **Allocated by Atlas** on insert (lowest free in the region's pool); unique per region (via the name); read-only. The routing key. |
+| `region`          | Data                   | Y    |           |         | Which regional proxy fleet fronts it. Every proxy VM in the region serves all active mappings for the region. Immutable after insert. |
+| `active`          | Check                  |      |           | 1       | Inactive rows are excluded from the served map (kept for history, and the row still owns its port so toggling back on never collides). |
+| `virtual_machine` | Link → Virtual Machine | Y    |           |         | The tenant VM this port forwards to. The proxy dials its public IPv6 `:target_port` over the v6 internet. Immutable after insert. |
+| `address`         | Data                   | Y    | Y         |         | The target VM's public IPv6 `/128`, denormalized so the desired-map query is join-free. Kept in sync with the VM's `ipv6_address` on save. |
+| `target_port`     | Int                    | Y    |           |         | The service port **inside the guest** (22 SSH, 3306 MariaDB). Immutable after insert. |
+| `protocol`        | Select (`tcp`/`ssh`/`mariadb`) |  |       | `tcp`   | A label only — the forwarder is protocol-agnostic L4. For the operator and the future dashboard. |
+
+The desired map for a region is `port_map_for_region(region)` =
+`{ "<public_port>": "[<address>]:<target_port>" }` for every **active** mapping in
+the region. The value is a ready-to-dial bracketed-v6 `host:port` literal so the
+guest does no formatting.
+
+Immutability: `region`, `virtual_machine`, and `target_port` lock after insert
+(`public_port` is read-only and allocated). The one mutable field is `active`.
+`address` is always derived from the linked VM, never hand-edited.
+
+### Controller methods
+
+- `validate()` — denormalizes `address` from the target VM's `ipv6_address`
+  (throws if the VM has none — an unaddressable target can't be a route) and
+  enforces the immutability above.
+- `before_insert()` — allocates `public_port`: the lowest port in
+  `Atlas Settings.tcp_port_pool` (default `10000-19999`) not already held by an
+  active *or inactive* mapping in the region, under a region row-lock. Pool
+  exhaustion is a typed throw, never a silent wrap.
+- `port_map_for_region(region)` *(module function)* — returns
+  `{public_port: "[address]:target_port"}` for every **active** mapping in the
+  region. This is the full map every proxy VM in the region serves; the reconcile
+  loop serializes it canonically (the same `json.dumps(sort_keys=True, indent=2)`
+  + newline as `Subdomain`, byte-identical to the guest's `stream-persist.lua`)
+  and byte-compares it against each proxy guest's live map. See
+  [17-tcp-proxy.md](./17-tcp-proxy.md).
+
+### Form layout
+
+```
+── Overview ──
+public_port
+region
+| active
+protocol
+── Target ──
+virtual_machine
+target_port
+| address
+```
+
+### List view
+
+- Columns: `public_port`, `region`, `active`, `virtual_machine`, `target_port`, `protocol`.
+- Standard filters: `region`, `active`, `virtual_machine`, `protocol`.
 
 ---
 
