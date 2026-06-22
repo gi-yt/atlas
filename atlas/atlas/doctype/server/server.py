@@ -82,6 +82,33 @@ class Server(Document):
 		frappe.db.set_value(self.doctype, self.name, "status", "Archived")
 
 	@frappe.whitelist()
+	def recover(self) -> bool:
+		"""Operator escape hatch: re-drive a Server stranded pre-Active.
+
+		`provision()` creates the billing vendor box synchronously, then a single
+		fire-and-forget `finish_provisioning` job adopts it (describe → IPs →
+		Bootstrapping → bootstrap → Active). When that job is lost the row sits in
+		Pending / Bootstrapping forever with a paid-for box behind it. This re-enqueues
+		finish_provisioning — the same path the scheduled reconciler uses, deduplicated
+		so it never stacks a second job atop one still in flight.
+
+		Distinct from `bootstrap()`: that runs the host bootstrap straight away and
+		needs the IPs already populated, whereas a lost-job row has NULL addresses —
+		recover() runs the full describe()-poll first to fill them. Returns True if a
+		job was enqueued, False if one was already queued/running.
+		"""
+		from atlas.atlas.providers.worker import enqueue_finish_provisioning
+
+		if self.status not in ("Pending", "Bootstrapping", "Broken"):
+			frappe.throw(f"Cannot recover from status {self.status}; nothing is stuck")
+		if not self.provider_resource_id:
+			frappe.throw(
+				"Server has no provider_resource_id — provision() never recorded a vendor "
+				"resource, so there is nothing to recover. Re-provision instead."
+			)
+		return enqueue_finish_provisioning(self.name)
+
+	@frappe.whitelist()
 	def sync_image(self, image: str) -> str:
 		"""Single-server convenience wrapper around `Virtual Machine Image.sync_to_server`."""
 		image_doc = frappe.get_doc("Virtual Machine Image", image)

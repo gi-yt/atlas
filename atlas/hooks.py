@@ -230,10 +230,22 @@ doc_events = {
 # scheduled scan was removed when the model went push-only (the unit test asserts this
 # list carries none).
 
+# NOTE — the cron entry below is a PROVISIONING reconciler, unrelated to the
+# spec/18 routing-sweeper prohibition above. `provision()` creates a billing
+# vendor box synchronously, then a single fire-and-forget finish_provisioning
+# job adopts it; if that job is lost the Server strands pre-Active with a
+# paid-for box behind it and nothing notices. This sweep re-drives such rows.
+# Do NOT delete it citing the "no sweeper" rule — that rule is scoped to bench
+# self-routing, not server provisioning. See spec/03-bootstrapping.md.
 scheduler_events = {
 	"daily": [
 		"atlas.atlas.doctype.tls_certificate.tls_certificate.renew_expiring",
 	],
+	"cron": {
+		"*/10 * * * *": [
+			"atlas.atlas.providers.worker.reconcile_pending_servers",
+		],
+	},
 }
 
 # Testing

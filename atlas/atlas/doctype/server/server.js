@@ -14,6 +14,10 @@ function add_buttons(frm) {
 	}
 	if (["Pending", "Bootstrapping", "Broken"].includes(status)) {
 		frappe.atlas.add_primary(frm, "Bootstrap", () => confirm_bootstrap(frm));
+		// Recover: re-drive a row whose finish_provisioning job was lost (stuck
+		// Pending/Bootstrapping with a paid-for vendor box behind it). Unlike
+		// Bootstrap, this runs the describe()-poll first to fill the NULL IPs.
+		frappe.atlas.add_action(frm, "Recover", () => confirm_recover(frm));
 	} else {
 		frappe.atlas.add_success(frm, "Re-bootstrap", () => confirm_bootstrap(frm));
 	}
@@ -107,6 +111,32 @@ function confirm_bootstrap(frm) {
 			frappe.atlas.task_started(frm, "Bootstrap Server", message);
 		});
 	});
+}
+
+function confirm_recover(frm) {
+	frappe.confirm(
+		__(
+			"Re-drive provisioning for {0}? Use this when the server is stuck Pending/Bootstrapping because its background job was lost — it re-runs the provider poll and bootstrap against the existing vendor resource (no re-provision).",
+			[frm.doc.title]
+		),
+		() => {
+			frm.call(
+				"recover",
+				{},
+				{ freeze: true, freeze_message: __("Re-driving provisioning…") }
+			).then(({ message: enqueued }) => {
+				frappe.show_alert(
+					{
+						message: enqueued
+							? __("Recovery job enqueued — the server will leave Pending shortly.")
+							: __("A provisioning job is already in flight for this server."),
+						indicator: enqueued ? "green" : "blue",
+					},
+					6
+				);
+			});
+		}
+	);
 }
 
 function confirm_reboot(frm) {
