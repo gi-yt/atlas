@@ -133,10 +133,14 @@ def _check_register_reserves_and_serves(
 
 	# Build the local site (the guest's own action), then reconcile the proxy and read
 	# its live map back — the route is actually served, not just a DB row.
-	_guest(bench_vm, (
-		f'sudo -u frappe bash -lc "export PATH=/home/frappe/bench-cli:$PATH; cd {_BENCH}; '
-		f'bench -b atlas new-site {fqdn} --admin-password atlas-baked --apps erpnext"'
-	), timeout=600)
+	_guest(
+		bench_vm,
+		(
+			f'sudo -u frappe bash -lc "export PATH=/home/frappe/bench-cli:$PATH; cd {_BENCH}; '
+			f'bench -b atlas new-site {fqdn} --admin-password atlas-baked --apps erpnext"'
+		),
+		timeout=600,
+	)
 	proxy.reconcile_proxy(proxy_vm)
 	live = _read_live_map(proxy_vm)
 	assert live.get(label) == site_v6, f"proxy live map does not serve {label} → {site_v6}: {live}"
@@ -156,10 +160,14 @@ def _check_create_failure_rollback(bench_vm: str, domain: str) -> None:
 	_guest(bench_vm, f"atlas-route register {_ROLLBACK}")
 	assert frappe.db.exists("Subdomain", _ROLLBACK), "register did not reserve the rollback label"
 	# A bogus app name makes new-site fail AFTER the reservation.
-	_stdout, _stderr, code = _guest_raw(bench_vm, (
-		f'sudo -u frappe bash -lc "export PATH=/home/frappe/bench-cli:$PATH; cd {_BENCH}; '
-		f'bench -b atlas new-site {_ROLLBACK}.{domain} --admin-password atlas-baked --apps no_such_app_xyz"'
-	), timeout=300)
+	_stdout, _stderr, code = _guest_raw(
+		bench_vm,
+		(
+			f'sudo -u frappe bash -lc "export PATH=/home/frappe/bench-cli:$PATH; cd {_BENCH}; '
+			f'bench -b atlas new-site {_ROLLBACK}.{domain} --admin-password atlas-baked --apps no_such_app_xyz"'
+		),
+		timeout=300,
+	)
 	assert code != 0, "the forced new-site failure unexpectedly succeeded"
 	_guest(bench_vm, f"atlas-route deregister {_ROLLBACK}")
 	assert not frappe.db.exists("Subdomain", _ROLLBACK), "the create-failure rollback left a stale Subdomain"
@@ -178,10 +186,14 @@ def _check_drop_deregister_deconverges(
 	proxy's live map (deregister's on_trash deconverges)."""
 	print(f"\n[3] drop + deregister: drop-site {fqdn} then atlas-route deregister {label} ...")
 
-	_guest(bench_vm, (
-		f'sudo -u frappe bash -lc "export PATH=/home/frappe/bench-cli:$PATH; cd {_BENCH}; '
-		f'echo {_BAKED_MARIADB_ROOT_PASSWORD} | bench -b atlas drop-site {fqdn} --no-backup --force"'
-	), timeout=300)
+	_guest(
+		bench_vm,
+		(
+			f'sudo -u frappe bash -lc "export PATH=/home/frappe/bench-cli:$PATH; cd {_BENCH}; '
+			f'echo {_BAKED_MARIADB_ROOT_PASSWORD} | bench -b atlas drop-site {fqdn} --no-backup --force"'
+		),
+		timeout=300,
+	)
 	_guest(bench_vm, f"atlas-route deregister {label}")
 	assert not frappe.db.exists("Subdomain", label), "deregister did not delete the route"
 
@@ -249,7 +261,9 @@ def _preflight(bench_vm: str, proxy_vm: str) -> None:
 	assert pvm.is_proxy, f"{proxy_vm} is not a proxy VM"
 
 	# The guest must carry the routing client + config, or every check is a no-op.
-	stdout, _stderr, code = _guest_raw(bench_vm, "test -x /usr/local/bin/atlas-route && cat /etc/atlas-routing.env")
+	stdout, _stderr, code = _guest_raw(
+		bench_vm, "test -x /usr/local/bin/atlas-route && cat /etc/atlas-routing.env"
+	)
 	assert code == 0, f"{bench_vm} is missing /usr/local/bin/atlas-route or /etc/atlas-routing.env"
 	assert "ATLAS_BASE_URL=" in stdout, f"{bench_vm} /etc/atlas-routing.env has no ATLAS_BASE_URL: {stdout!r}"
 
@@ -264,7 +278,14 @@ def _guest_raw(vm_name: str, command: str, timeout: int = 120) -> tuple[str, str
 	vm = frappe.get_doc("Virtual Machine", vm_name)
 	connection = connection_for_guest(vm)
 	with ssh_key_file(connection.ssh_private_key) as key_path:
-		return run_ssh(connection, key_path, command, timeout_seconds=timeout)
+		result = run_ssh(connection, key_path, command, timeout_seconds=timeout)
+	# The in-guest `atlas-route` POST commits the Subdomain write in a SEPARATE web
+	# request/connection. This long-lived `bench execute` transaction snapshots under
+	# MariaDB's REPEATABLE READ at its first read, so without refreshing it the assertions
+	# can't SEE the guest's just-committed write. Roll back our (read-only) transaction so
+	# the next read observes the controller's committed state.
+	frappe.db.rollback()
+	return result
 
 
 def _read_live_map(proxy_vm_name: str) -> dict:
