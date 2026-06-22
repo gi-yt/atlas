@@ -97,9 +97,8 @@ def _verification_url(token: str) -> str:
 def _send_verification_email(request) -> None:
 	"""Email the verification link. The fqdn-to-be is shown so the user confirms
 	the subdomain they picked before committing. `frappe.sendmail` queues through
-	the site's outbound email — configuring that is an operator prerequisite
-	(like the TLS controller-host deps); with no email account set up the send is
-	a no-op queue entry, which the unit tests assert via the outbox."""
+	the site's outbound email — a default outgoing Email Account must be configured
+	or the send raises OutgoingEmailError."""
 	fqdn = f"{request.subdomain}.{active_root_domain().domain}"
 	link = _verification_url(request.token)
 	frappe.sendmail(

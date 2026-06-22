@@ -9,7 +9,6 @@ frappe.ui.form.on("Virtual Machine Image", {
 	},
 });
 
-
 function confirm_archive(frm) {
 	frappe.atlas.confirm_archive(frm, {
 		match: frm.doc.title || frm.doc.image_name,

@@ -16,40 +16,40 @@
 // doc when there's no form to collect them (e.g. Rebuild).
 
 export const ACTIONS = {
-  Running: [
-    { label: 'Stop', method: 'stop', kind: 'disruptive' },
-    { label: 'Restart', method: 'restart', kind: 'disruptive' },
-    { label: 'Pause', method: 'pause', kind: 'disruptive' },
-    { label: 'Terminate', method: 'terminate', kind: 'danger' },
-  ],
-  Stopped: [
-    { label: 'Start', method: 'start', kind: 'default' },
-    { label: 'Restart', method: 'restart', kind: 'disruptive' },
-    { label: 'Snapshot', method: 'snapshot', kind: 'action', dialog: 'snapshot' },
-    // Rebuild takes no input — it replaces the disk from the VM's own image —
-    // so it's a confirm (danger), not a form dialog. args() reads the doc.
-    {
-      label: 'Rebuild',
-      method: 'rebuild',
-      kind: 'danger',
-      args: (doc) => ({ source_type: 'image', source: doc.image }),
-    },
-    { label: 'Resize', method: 'resize', kind: 'action', dialog: 'resize' },
-    { label: 'Terminate', method: 'terminate', kind: 'danger' },
-  ],
-  Paused: [
-    { label: 'Resume', method: 'resume', kind: 'default' },
-    { label: 'Stop', method: 'stop', kind: 'disruptive' },
-    { label: 'Terminate', method: 'terminate', kind: 'danger' },
-  ],
-  Pending: [],
-  Failed: [
-    { label: 'Provision', method: 'provision', kind: 'default' },
-    { label: 'Terminate', method: 'terminate', kind: 'danger' },
-  ],
-  Terminated: [{ label: 'Delete', method: '__delete__', kind: 'danger' }],
-}
+	Running: [
+		{ label: "Stop", method: "stop", kind: "disruptive" },
+		{ label: "Restart", method: "restart", kind: "disruptive" },
+		{ label: "Pause", method: "pause", kind: "disruptive" },
+		{ label: "Terminate", method: "terminate", kind: "danger" },
+	],
+	Stopped: [
+		{ label: "Start", method: "start", kind: "default" },
+		{ label: "Restart", method: "restart", kind: "disruptive" },
+		{ label: "Snapshot", method: "snapshot", kind: "action", dialog: "snapshot" },
+		// Rebuild takes no input — it replaces the disk from the VM's own image —
+		// so it's a confirm (danger), not a form dialog. args() reads the doc.
+		{
+			label: "Rebuild",
+			method: "rebuild",
+			kind: "danger",
+			args: (doc) => ({ source_type: "image", source: doc.image }),
+		},
+		{ label: "Resize", method: "resize", kind: "action", dialog: "resize" },
+		{ label: "Terminate", method: "terminate", kind: "danger" },
+	],
+	Paused: [
+		{ label: "Resume", method: "resume", kind: "default" },
+		{ label: "Stop", method: "stop", kind: "disruptive" },
+		{ label: "Terminate", method: "terminate", kind: "danger" },
+	],
+	Pending: [],
+	Failed: [
+		{ label: "Provision", method: "provision", kind: "default" },
+		{ label: "Terminate", method: "terminate", kind: "danger" },
+	],
+	Terminated: [{ label: "Delete", method: "__delete__", kind: "danger" }],
+};
 
 export function actionsFor(status) {
-  return ACTIONS[status] ?? []
+	return ACTIONS[status] ?? [];
 }

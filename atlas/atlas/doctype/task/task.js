@@ -10,18 +10,16 @@ frappe.ui.form.on("Task", {
 	},
 });
 
-
 function add_retry_button(frm) {
 	if (frm.doc.status !== "Failure") return;
 	frappe.atlas.add_primary(frm, "Retry", () => {
 		frappe.confirm(__("Retry this Task?"), () => {
-			frm.call("retry").then(({message: task_name}) => {
+			frm.call("retry").then(({ message: task_name }) => {
 				frappe.atlas.task_started(frm, "Retry", task_name);
 			});
 		});
 	});
 }
-
 
 function pretty_print_variables(frm) {
 	const raw = frm.doc.variables;
@@ -41,7 +39,6 @@ function pretty_print_variables(frm) {
 	frm.refresh_field("variables");
 	frm._atlas_variables_prettified = frm.doc.name;
 }
-
 
 function subscribe_to_realtime(frm) {
 	if (frm._atlas_realtime_registered) return;

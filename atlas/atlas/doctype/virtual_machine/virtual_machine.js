@@ -100,7 +100,9 @@ function add_lifecycle_buttons(frm) {
 	}
 	if (status === "Running" || status === "Paused") {
 		// Live snapshot: no stop required. Crash-consistent (the dialog says so).
-		frappe.atlas.add_action(frm, "Snapshot (live)", () => open_snapshot_dialog(frm, { live: true }));
+		frappe.atlas.add_action(frm, "Snapshot (live)", () =>
+			open_snapshot_dialog(frm, { live: true })
+		);
 		// Warm snapshot: capture the live guest's memory AND disk at one paused
 		// instant into a kind=Warm snapshot — no stop. Clones resume instead of
 		// cold-booting (see capture_warm_snapshot() in virtual_machine.py).
@@ -213,10 +215,9 @@ function open_snapshot_dialog(frm, { live = false } = {}) {
 		? __(
 				"Snapshots the running VM in place — no stop. The image is <b>crash-consistent</b> (like a power-cut at this instant): unflushed writes may be missing and ext4 replays its journal on restore. Stop first if you need a guaranteed-clean snapshot."
 		  )
-		: __(
-				"Instant copy-on-write snapshot of the {0} GB rootfs (and the data disk, if any).",
-				[frm.doc.disk_gigabytes]
-		  );
+		: __("Instant copy-on-write snapshot of the {0} GB rootfs (and the data disk, if any).", [
+				frm.doc.disk_gigabytes,
+		  ]);
 	frappe.prompt(
 		[
 			{

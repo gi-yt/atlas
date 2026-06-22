@@ -390,7 +390,9 @@ class TestVirtualMachine(IntegrationTestCase):
 		task = fake_task(name="task-live-snap-2", stdout='ATLAS_RESULT={"size_bytes": 1}')
 		with patch.object(module, "run_task", return_value=task):
 			snapshot_name = vm.snapshot("live two", live="true")
-		self.assertEqual(frappe.db.get_value("Virtual Machine Snapshot", snapshot_name, "status"), "Available")
+		self.assertEqual(
+			frappe.db.get_value("Virtual Machine Snapshot", snapshot_name, "status"), "Available"
+		)
 
 	def test_regenerate_host_keys_runs_script_when_stopped(self) -> None:
 		from atlas.atlas.doctype.virtual_machine import virtual_machine as module

@@ -590,7 +590,9 @@ class VirtualMachine(Document):
 		# so that path is recreate-the-VM, not resize.
 		if new_data_disk != self.data_disk_gigabytes:
 			if not self.data_disk_gigabytes:
+				# fmt: off
 				frappe.throw("This VM has no data disk; recreate the VM to add one (resize only grows an existing data disk)")
+				# fmt: on
 			if new_data_disk < self.data_disk_gigabytes:
 				frappe.throw(
 					f"Data disk can only grow: {self.data_disk_gigabytes} GB → {new_data_disk} GB is a shrink"

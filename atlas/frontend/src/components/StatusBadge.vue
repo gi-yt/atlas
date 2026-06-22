@@ -1,13 +1,13 @@
 <script setup>
-import { Badge } from 'frappe-ui'
+import { Badge } from "frappe-ui";
 
-import { statusTheme } from '../data/status'
+import { statusTheme } from "../data/status";
 
 defineProps({
-  status: { type: String, default: '' },
-})
+	status: { type: String, default: "" },
+});
 </script>
 
 <template>
-  <Badge v-if="status" variant="subtle" :theme="statusTheme(status)" :label="status" />
+	<Badge v-if="status" variant="subtle" :theme="statusTheme(status)" :label="status" />
 </template>

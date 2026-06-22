@@ -195,9 +195,7 @@ class TestDigitalOceanClient(IntegrationTestCase):
 		# the first GET already shows it unassigned, so the poll exits at once.
 		action = _FakeResponse(201, {"action": {"id": 2, "type": "unassign_ip", "status": "in-progress"}})
 		settled = _FakeResponse(200, {"reserved_ip": {"ip": "203.0.113.5", "droplet": None}})
-		with patch(
-			"atlas.atlas.digitalocean.requests.request", side_effect=[action, settled]
-		) as request:
+		with patch("atlas.atlas.digitalocean.requests.request", side_effect=[action, settled]) as request:
 			self.client.unassign_reserved_ip("203.0.113.5")
 		# First call is the unassign POST; second is the settle-poll GET.
 		first_args, first_kwargs = request.call_args_list[0]

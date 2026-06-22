@@ -220,6 +220,7 @@ class TestImageBuildRun(IntegrationTestCase):
 		# the proxy recipe leaves it empty.
 		from atlas.atlas.image_recipes import get_recipe
 
+		frappe.db.set_single_value("Atlas Settings", "ssh_public_key", "ssh-ed25519 AAAA test")
 		build = _new_build("bench-v16")
 		with patch.object(image_build_module.frappe, "enqueue"):
 			vm_name = image_build_module._provision_build_vm(build, get_recipe("bench-v16"))
@@ -228,6 +229,7 @@ class TestImageBuildRun(IntegrationTestCase):
 	def test_provision_build_vm_proxy_has_no_mode(self) -> None:
 		from atlas.atlas.image_recipes import get_recipe
 
+		frappe.db.set_single_value("Atlas Settings", "ssh_public_key", "ssh-ed25519 AAAA test")
 		build = _new_build("proxy", region="blr1")
 		with patch.object(image_build_module.frappe, "enqueue"):
 			vm_name = image_build_module._provision_build_vm(build, get_recipe("proxy"))

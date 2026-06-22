@@ -135,9 +135,13 @@ def main() -> None:
 		data_disk = pool.data_disk(inputs.virtual_machine_name)
 		data_origin = pool.from_device(inputs.data_snapshot_rootfs_path)
 		if not data_origin.exists:
-			sys.exit(f"data snapshot LV not found: {data_origin.name} (from {inputs.data_snapshot_rootfs_path})")
+			sys.exit(
+				f"data snapshot LV not found: {data_origin.name} (from {inputs.data_snapshot_rootfs_path})"
+			)
 		data_disk.remove()
-		prepare_data_lv(pool, data_disk, inputs.data_disk_gb, bool(inputs.data_disk_format), origin=data_origin)
+		prepare_data_lv(
+			pool, data_disk, inputs.data_disk_gb, bool(inputs.data_disk_format), origin=data_origin
+		)
 		data_disk.expose_in_jail(paths.data_node, inputs.atlas_fc_uid)
 
 	print(f"Rebuilt {inputs.virtual_machine_name} from {origin.name}.")

@@ -243,7 +243,9 @@ def _run_remote_script(
 				f"test -f {shlex.quote(durable_remote)} "
 				f"|| {{ echo {DURABLE_MISSING_MARKER}; exit 127; }}\n{inner}"
 			)
-			stdout, stderr, exit_code = run_ssh(connection, key_path, guarded, timeout_seconds=timeout_seconds)
+			stdout, stderr, exit_code = run_ssh(
+				connection, key_path, guarded, timeout_seconds=timeout_seconds
+			)
 			if not (exit_code != 0 and DURABLE_MISSING_MARKER in stdout):
 				return stdout, stderr, exit_code
 			frappe.logger("atlas").warning(

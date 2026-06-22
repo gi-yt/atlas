@@ -102,7 +102,7 @@ class TestRunTask(IntegrationTestCase):
 		captured_commands = []
 
 		def capture(args, **kwargs):
-			if args[0] == "ssh" and not args[-1].startswith("mkdir"):
+			if args[0] == "ssh" and args[-1].startswith("env "):
 				captured_commands.append(args[-1])
 			return _fake_completed(args, **kwargs)
 

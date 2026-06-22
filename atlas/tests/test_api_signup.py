@@ -56,9 +56,26 @@ def _request_site(email: str = EMAIL, subdomain: str = "acme") -> dict:
 	return signup_module.request_site.__wrapped__(email=email, subdomain=subdomain)
 
 
+def _ensure_outgoing_email_account() -> None:
+	if not frappe.db.exists("Email Account", "Atlas Test Outgoing"):
+		frappe.get_doc(
+			{
+				"doctype": "Email Account",
+				"email_account_name": "Atlas Test Outgoing",
+				"email_id": "atlas-test@example.com",
+				"smtp_server": "localhost",
+				"enable_outgoing": 1,
+				"default_outgoing": 1,
+			}
+		).insert(ignore_permissions=True)
+	else:
+		frappe.db.set_value("Email Account", "Atlas Test Outgoing", "default_outgoing", 1)
+
+
 class TestSignupRequestSite(IntegrationTestCase):
 	def setUp(self) -> None:
 		_ensure_root_domain()
+		_ensure_outgoing_email_account()
 		for name in frappe.get_all("Site Request", pluck="name"):
 			frappe.delete_doc("Site Request", name, force=1, ignore_permissions=True)
 		for name in frappe.get_all("Site", pluck="name"):

@@ -207,7 +207,7 @@ class TestTreeUploads(IntegrationTestCase):
 		self.assertTrue(any(r.endswith("/build.sh") for r in remotes), remotes)
 		self.assertTrue(any(r.endswith("/conf/nginx.conf") for r in remotes), remotes)
 		self.assertTrue(any(r.endswith("/lua/router.lua") for r in remotes), remotes)
-		self.assertTrue(any(r.endswith("/guest/nginx.service") for r in remotes), remotes)
+		self.assertTrue(any(r.endswith("/guest/nginx.service.d/atlas.conf") for r in remotes), remotes)
 		# The dev-only compose harness (recipe.exclude=("test",)) + caches are gone.
 		self.assertFalse(any("/test/" in r for r in remotes), remotes)
 		self.assertFalse(any("__pycache__" in r for r in remotes), remotes)

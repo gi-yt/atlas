@@ -16,7 +16,9 @@ frappe.listview_settings["Virtual Machine"] = {
 		ipv6_address(value) {
 			if (!value) return "";
 			const safe = frappe.utils.escape_html(value);
-			return `<span class="atlas-ipv6-chip" data-ipv6="${safe}" title="${__("Copy ssh root@…")}">
+			return `<span class="atlas-ipv6-chip" data-ipv6="${safe}" title="${__(
+				"Copy ssh root@…"
+			)}">
 				<code class="text-muted small">[${safe}]</code>
 				<span class="atlas-copy-icon">📋</span>
 			</span>`;
@@ -36,17 +38,25 @@ frappe.listview_settings["Virtual Machine"] = {
 			const ipv6 = event.currentTarget.dataset.ipv6;
 			if (!ipv6) return;
 			const command = `ssh root@${ipv6}`;
-			navigator.clipboard.writeText(command).then(() => {
-				frappe.show_alert({
-					message: __("SSH command copied: {0}", [`<code>${frappe.utils.escape_html(command)}</code>`]),
-					indicator: "green",
-				}, 4);
-			}).catch(() => {
-				frappe.show_alert({
-					message: __("Could not copy to clipboard."),
-					indicator: "orange",
+			navigator.clipboard
+				.writeText(command)
+				.then(() => {
+					frappe.show_alert(
+						{
+							message: __("SSH command copied: {0}", [
+								`<code>${frappe.utils.escape_html(command)}</code>`,
+							]),
+							indicator: "green",
+						},
+						4
+					);
+				})
+				.catch(() => {
+					frappe.show_alert({
+						message: __("Could not copy to clipboard."),
+						indicator: "orange",
+					});
 				});
-			});
 		});
 	},
 };

@@ -27,6 +27,13 @@ def _request(title: str = "fake-srv-1", size: str = "", image: str = "") -> Prov
 
 
 class TestFakeProvider(IntegrationTestCase):
+	def setUp(self) -> None:
+		self._developer_mode = frappe.local.conf.developer_mode
+		frappe.local.conf.developer_mode = 1
+
+	def tearDown(self) -> None:
+		frappe.local.conf.developer_mode = self._developer_mode
+
 	def test_authenticate_ok(self) -> None:
 		result = FakeProvider().authenticate()
 		self.assertTrue(result.ok)

@@ -23,10 +23,9 @@ from dataclasses import dataclass
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 
+import atlas.certs as certs
 from atlas._run import run
 from atlas._task import TaskInputs, TaskResult
-
-from atlas import certs
 
 
 @dataclass(frozen=True)

@@ -194,7 +194,9 @@ def main() -> None:
 		data_origin = (
 			pool.from_device(inputs.data_snapshot_rootfs_path) if inputs.data_snapshot_rootfs_path else None
 		)
-		prepare_data_lv(pool, data_disk, inputs.data_disk_gb, bool(inputs.data_disk_format), origin=data_origin)
+		prepare_data_lv(
+			pool, data_disk, inputs.data_disk_gb, bool(inputs.data_disk_format), origin=data_origin
+		)
 
 	# 2. Inject this VM's identity (SSH key, network env, hostname, host
 	#    keys, machine-id, data-disk fstab) into the disk. Mounts the LV device
