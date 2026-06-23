@@ -157,7 +157,7 @@ sections, top-to-bottom:
 
 1. **Bootstrap checklist** — Frappe's native `Module Onboarding` widget,
    wired into the workspace `content` as a `type: "onboarding"` block.
-   The four steps (Add Provider + configure vendor Settings → Provision
+   The four steps (Set provider_type + configure vendor Settings → Provision
    Server → Add Virtual Machine Image → Provision Virtual Machine) ship
    as
    [`module_onboarding/atlas_setup/`](../atlas/atlas/module_onboarding/atlas_setup/)
@@ -190,8 +190,8 @@ The workspace deliberately drops the "Your Shortcuts" row and the
 "Reports & Masters" card section that earlier duplicated the sidebar.
 The sidebar carries Home plus three collapsible groups — **Virtual**
 (Virtual Machine, Virtual Machine Image), **Server** (Server, Task),
-and **Settings** (Provider, DigitalOcean Settings, Self-Managed
-Settings, Atlas Settings) — that *is* the right primitive for
+and **Settings** (Atlas Settings, DigitalOcean Settings, Self-Managed
+Settings) — that *is* the right primitive for
 navigation, so the workspace doesn't repeat it.
 
 The multi-app launcher (`/desk`, `/app/home`) is *not* hidden: Frappe
@@ -285,23 +285,12 @@ the rendered DOM from CSS.
 ### Atlas Settings
 
 - Single DocType — no list view, no `name` field on the form. The
-  `provider` Link drives `atlas.get_provider()`; switching it does not
-  retro-affect existing Server rows (they keep their FK to whatever
-  Provider they were provisioned through).
-- No primary action. Save is the only button — Frappe demotes it to
-  outline per the per-page-single-primary rule, but on a Single with no
-  competing action it lands as the page's only call to action.
-- The SSH-key fields are operator-supplied. `ssh_private_key_path`
-  points at a `0600` PEM on the Atlas host; rotating the key is a
-  file-replace operation per
-  [07-filesystem-layout.md § SSH keys](./07-filesystem-layout.md), not
-  a form edit. The `ssh_key_id` and `ssh_public_key` fields are
-  read by providers that need them (DigitalOcean reads the key id;
-  future vendors that upload keys read the body).
-
-### Provider
-
-- **Provision Server** is the primary action.
+  `provider_type` Select drives `atlas.get_provider()`; switching it does not
+  retro-affect existing Server rows (they keep their own `provider_type` —
+  the vendor they were provisioned through). `validate()` refuses to change
+  `provider_type` while a non-Archived Server carries a different one.
+- **Provision Server** is the primary action — the compute-provider
+  actions relocated here from the deleted Provider form.
 - **Authenticate** lives under `Actions ▾`. Calls
   `provider.authenticate()` — cheap read-only ping; doesn't need
   top-bar real estate. For Self-Managed it returns
@@ -309,12 +298,16 @@ the rendered DOM from CSS.
 - **Refresh Catalog** lives under `Actions ▾`. Calls
   `provider.discover()` and upserts `Provider Size` + `Provider Image`
   rows. Disappeared slugs flip to `enabled = 0`.
-- **Archive** lives under `Actions ▾`, shown only while `is_active = 1`.
-  Confirms via `frappe.confirm` (no destructive type-the-title dance —
-  archiving the Provider does not destroy its Servers). The
-  controller's `archive()` flips `is_active = 0` via `db.set_value`.
+- **Discover Servers** lives under `Actions ▾`. Lists the vendor's
+  servers and lets the operator adopt the ones Atlas doesn't yet model
+  as `Pending` rows — see [03-bootstrapping.md § Adopting an
+  already-provisioned server](./03-bootstrapping.md#adopting-an-already-provisioned-server).
+- There is no **Archive** — you don't archive your only provider.
+  Switching vendor is editing `provider_type` and saving; `validate()`
+  refuses to change it while a non-Archived Server carries a different
+  `provider_type`.
 - The Provision dialog uses standard fieldtype inputs — a `title` Data
-  field common to both types, then:
+  field common to all vendor types, then:
   - **DigitalOcean**: two editable Link controls (`size` → `Provider
     Size`, `image` → `Provider Image`, both filtered to
     `provider_type=DigitalOcean, enabled=1`) defaulting to
@@ -328,13 +321,20 @@ the rendered DOM from CSS.
 - No auto-painted credential indicator lives on this form. Operators
   verify the token via **Authenticate** or via Test Connection on
   `DigitalOcean Settings`; both surface their result as a toast.
+- The SSH-key fields are operator-supplied. `ssh_private_key_path`
+  points at a `0600` PEM on the Atlas host; rotating the key is a
+  file-replace operation per
+  [07-filesystem-layout.md § SSH keys](./07-filesystem-layout.md), not
+  a form edit. The `ssh_key_id` and `ssh_public_key` fields are
+  read by providers that need them (DigitalOcean reads the key id;
+  future vendors that upload keys read the body).
 
 ### DigitalOcean Settings
 
 - Single DocType. Form layout mirrors the schema (api_token, region,
   default_size, default_image).
 - **Test Connection** lives under `Actions ▾`. Calls the same
-  `provider.authenticate()` path as the Provider form's Authenticate
+  `provider.authenticate()` path as Atlas Settings' Authenticate
   button — exposed here as a courtesy when the operator is mid-credentials.
   The result paints a toast (`OK: <account>` / `Failed: <error>`); the
   form itself stays free of auto-painted dashboard chips.
@@ -351,7 +351,7 @@ the rendered DOM from CSS.
 ### Provider Size / Provider Image
 
 - Regular DocTypes. Operators don't create rows by hand — the **Refresh
-  Catalog** button on Provider seeds them. The list view exists so the
+  Catalog** button on Atlas Settings seeds them. The list view exists so the
   operator can spot-check the catalog and flip `enabled` if they want
   to hide a slug from the Provision dialog without re-running
   `discover()`.
@@ -363,7 +363,7 @@ the rendered DOM from CSS.
 - The Server row's `name` is a UUID; the operator-facing label lives in
   the `title` field. List view, breadcrumbs, and the browser tab title
   all read `title`, not `name`. `set_only_once` freezes `title` and
-  `provider` after the first save; the rest of the row is locked once
+  `provider_type` after the first save; the rest of the row is locked once
   written via the controller's `_validate_immutability` (which allows
   `None → value`, so the DigitalOcean provision flow can fill IPv4/6
   after insert).

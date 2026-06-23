@@ -9,7 +9,6 @@
                 |                                  |
                 |  DocTypes:                       |
                 |   - Atlas Settings (Single)      |
-                |   - Provider                     |
                 |   - DigitalOcean Settings        |
                 |   - Scaleway Settings            |
                 |   - Self-Managed Settings        |
@@ -106,9 +105,11 @@ confirmation for destructive or billable actions. See
 Atlas talks to vendors through one Python interface (a `Provider` ABC at
 `atlas/atlas/providers/base.py`) with five methods: `authenticate`,
 `discover`, `provision`, `describe`, `destroy`. One subclass per
-vendor; the registry keys off `Provider.provider_type`. Controllers
-never branch on the vendor — they call `atlas.get_provider()` and use
-the returned object.
+vendor; the registry (`atlas/atlas/providers/__init__.py`) maps a
+`provider_type` straight to its class — there are no `Provider` rows.
+Controllers never branch on the vendor — they call `atlas.get_provider()`
+(which reads `Atlas Settings.provider_type` and looks the class up via
+`for_provider_type`) and use the returned object.
 
 Four provider types are implemented (the fourth, `Fake`, is developer-only):
 
@@ -141,15 +142,15 @@ Four provider types are implemented (the fourth, `Fake`, is developer-only):
   no-ops), **and** it short-circuits the Task/SSH seam — `run_task()` on a
   Fake-backed `Server` produces a successful (or, on demand, failed) `Task`
   without opening a connection (`atlas/atlas/providers/fake_tasks.py`). Every
-  mutating method is gated on `developer_mode`, so a Fake `Provider` row on a
-  production site is inert. Used by the demo/populate script
+  mutating method is gated on `developer_mode`, so `Atlas Settings.provider_type
+  = Fake` on a production site is inert. Used by the demo/populate script
   (`atlas/atlas/demo.py`). See [09-roadmap.md § Fake provider](./09-roadmap.md).
 
 Cross-vendor configuration lives on `Atlas Settings` (Single): the
-active `Provider` link, and the SSH key (fingerprint, public key body,
+active `provider_type`, and the SSH key (fingerprint, public key body,
 on-disk path). Vendor catalogs (machine sizes, OS images) live in the
 `Provider Size` / `Provider Image` DocTypes — seeded at first run,
-refreshed via the Provider form's **Refresh Catalog** button which
+refreshed via the Atlas Settings form's **Refresh Catalog** button which
 calls `provider.discover()`. See [02-doctypes.md](./02-doctypes.md) for
 the full schema and [llm/plan/provider-abstraction.md](../llm/plan/provider-abstraction.md)
 for the implementation plan.
@@ -163,7 +164,7 @@ system.
 ### Server
 
 A `Server` document represents one host. It is created by clicking
-"Provision Server" on a `Provider`. For `DigitalOcean` providers this
+"Provision Server" on `Atlas Settings`. For `DigitalOcean` providers this
 calls the DO API, then a worker polls `provider.describe()` until the
 droplet is ready and writes the IPs / size / image / `provider_metadata`
 back to the row. For `Self-Managed` providers the operator types in
@@ -234,7 +235,7 @@ One task per lifecycle operation. Not one task per shell command. See
 
 | State                          | Where                                  | Authoritative? |
 | ------------------------------ | -------------------------------------- | -------------- |
-| Server IPs, size, image, provider | Frappe DB                           | Yes            |
+| Server IPs, size, image, provider_type | Frappe DB                      | Yes            |
 | Vendor catalogs (sizes, images) | Frappe DB (`Provider Size`, `Provider Image`) | Yes (mirrors vendor; refreshed via `discover()`) |
 | Provider credentials           | Frappe DB (per-vendor Settings Single) | Yes            |
 | SSH key (fingerprint, public key) | Frappe DB (`Atlas Settings`)        | Yes            |

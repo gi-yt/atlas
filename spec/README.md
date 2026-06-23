@@ -65,8 +65,8 @@ keep it the source of truth.
 - Two UIs, two audiences. **Operators** use Desk (`/app/atlas`) — the whole
   fleet, providers, servers, image sync, ad-hoc tasks. **Users** use a small
   frappe-ui SPA at `/dashboard` that exposes only their own Virtual Machines,
-  Images (read-only, shared), and Snapshots; Provider, Server, and Task are
-  invisible and access-denied to them. The SPA defines no new server-side
+  Images (read-only, shared), and Snapshots; Server, Task, and the Settings
+  Singles are invisible and access-denied to them. The SPA defines no new server-side
   logic or API — it drives the existing whitelisted methods through standard
   Frappe endpoints. See [11-user-ui.md](./11-user-ui.md). (Earlier iterations
   said "no web UI of our own; Desk is the UI" — that held for the operator-only
@@ -113,7 +113,7 @@ keep it the source of truth.
    zx), reimplement the small subset we need. We avoid library coupling on a
    foundational layer.
 7. **Names are full words.** `Server`, `Task`, `Virtual Machine`,
-   `Virtual Machine Image`, `Provider`, `Atlas Settings`. No `VM`,
+   `Virtual Machine Image`, `Reserved IP`, `Atlas Settings`. No `VM`,
    `Cmd`, or `Metal Node`.
 
 ## Read this in order
@@ -141,18 +141,18 @@ keep it the source of truth.
 
 The operator-visible setup order on the desk is:
 
-1. **Atlas Settings** — SSH key (fingerprint, public key, on-disk path)
-   and the active `Provider`.
-2. **Provider** — one row per configured vendor; pick a `provider_type`.
-3. **Per-vendor Settings** (e.g. `DigitalOcean Settings`) — API token,
+1. **Atlas Settings** — the active `provider_type` (the vendor this
+   instance provisions through), the active `tls_provider_type`, and the
+   SSH key (fingerprint, public key, on-disk path).
+2. **Per-vendor Settings** (e.g. `DigitalOcean Settings`) — API token,
    region, default size + image. Skip for `Self-Managed`.
-4. **Server** — provisioned by clicking **Provision Server** on the
-   active provider.
-5. **Virtual Machine Image** — the kernel + rootfs pair to install.
-6. **Virtual Machine** — created against a Server and an Image, then
+3. **Server** — provisioned by clicking **Provision Server** on
+   **Atlas Settings**.
+4. **Virtual Machine Image** — the kernel + rootfs pair to install.
+5. **Virtual Machine** — created against a Server and an Image, then
    **Provision**ed.
 
-To skip the clicking and stand up provider → server → image → VM in one
+To skip the clicking and stand up server → image → VM in one
 shot, run [`atlas/bootstrap.py`](../atlas/bootstrap.py):
 
 ```
@@ -170,14 +170,16 @@ The file's docstring lists every config key.
 To put a site behind a real cert, layer the proxy ([12-proxy.md](./12-proxy.md))
 and TLS ([13-tls.md](./13-tls.md)) setup on top:
 
-7. **Domain Provider** + **Route53 Settings** — the DNS account (DNS-01).
-8. **TLS Provider** + **Lets Encrypt Settings** — the issuer (ACME directory,
-   account email, agree-to-ToS).
-9. **Root Domain** — one row per region (`<region>.frappe.dev`, `region`, the
-   two providers); click **Issue / Renew Certificate** to issue the regional
-   wildcard and push it onto every proxy VM in the region.
+6. **Route53 Settings** — the DNS account (DNS-01); pick the
+   `domain_provider_type` (`Route53`).
+7. **Lets Encrypt Settings** — the ACME account (directory URL, account
+   email, agree-to-ToS); the active issuer is `Atlas Settings.tls_provider_type`.
+8. **Root Domain** — one row per region (`<region>.frappe.dev`, `region`);
+   click **Issue / Renew Certificate** to issue the regional wildcard and push
+   it onto every proxy VM in the region. The domain/TLS vendor types are
+   denormalized onto the row from the active vendors at insert.
 
-To script steps 7-9, run [`atlas/bootstrap.py`](../atlas/bootstrap.py)'s TLS
+To script steps 6-8, run [`atlas/bootstrap.py`](../atlas/bootstrap.py)'s TLS
 tail instead of clicking:
 
 ```
@@ -186,7 +188,9 @@ bench --site <site> execute atlas.bootstrap.run_with_proxy
 
 `run_with_proxy` is `run` plus the TLS tail: it does the compute bootstrap, then
 — only if the `atlas_tls_domain` + Route 53 + ACME config keys are present —
-seeds the five domain/TLS rows and issues the regional wildcard (defaulting to
+writes the domain/TLS vendor types (`Atlas Settings.tls_provider_type`,
+`Route53 Settings.domain_provider_type`), the two per-vendor Settings, and the
+`Root Domain` row, then issues the regional wildcard (defaulting to
 Let's Encrypt **staging** so an unattended run never burns production quota; set
 `atlas_acme_directory_url` for a trusted cert). Absent those keys it skips the
 tail and behaves like `run`. The file's docstring lists every config key.
@@ -207,8 +211,8 @@ operator-facing features add to this list; new tests follow it.
 
 | Use case                       | Operator action                                         | Spec |
 | ------------------------------ | ------------------------------------------------------- | ---- |
-| Provision a server             | `Provider` → **Provision Server**                       | [03-bootstrapping.md](./03-bootstrapping.md) |
-| Adopt an existing server       | `Provider` → **Discover Servers** (preview the vendor's servers, tick which to import as `Pending` rows; Bootstrap takes each to Active) | [03-bootstrapping.md](./03-bootstrapping.md#adopting-an-already-provisioned-server) |
+| Provision a server             | `Atlas Settings` → **Provision Server**                 | [03-bootstrapping.md](./03-bootstrapping.md) |
+| Adopt an existing server       | `Atlas Settings` → **Discover Servers** (preview the vendor's servers, tick which to import as `Pending` rows; Bootstrap takes each to Active) | [03-bootstrapping.md](./03-bootstrapping.md#adopting-an-already-provisioned-server) |
 | Sync an image to a server      | `Virtual Machine Image` → **Sync to Server / All**      | [08-images.md](./08-images.md) |
 | Bake an image                  | `Image Build` → **New / Re-bake**, or `Server` → **Bake Image** | [15-image-builder.md](./15-image-builder.md) |
 | Provision a virtual machine    | `Virtual Machine` → **Provision**                       | [05-virtual-machine-lifecycle.md](./05-virtual-machine-lifecycle.md) |
@@ -216,7 +220,7 @@ operator-facing features add to this list; new tests follow it.
 | Manage a VM's disk and size    | `Virtual Machine` → **Snapshot / Rebuild / Resize**; `Virtual Machine Snapshot` → **Restore to VM / Clone to new VM / Delete** | [05-virtual-machine-lifecycle.md](./05-virtual-machine-lifecycle.md) |
 | Promote a snapshot to an image | `Virtual Machine Snapshot` → **Promote to image** (or `Image Build` → **Promote to image**): same-server base image new VMs pick via the `image` field | [08-images.md](./08-images.md#two-origins-for-a-base-image-a-url-or-a-snapshot-promote) |
 | Attach a public IPv4 to a VM   | `Reserved IP` → **Attach / Detach** (the inbound-v4 primitive: DNAT in, SNAT out) | [06-networking.md](./06-networking.md#ipv4-ingress-reserved-ip) |
-| Issue a TLS cert for a region  | `Root Domain` → **Issue / Renew Certificate**; `TLS Certificate` → **Issue/Renew / Push to Proxies**; `Domain Provider` / `TLS Provider` → **Test Connection / Archive** | [13-tls.md](./13-tls.md) |
+| Issue a TLS cert for a region  | `Root Domain` → **Issue / Renew Certificate**; `TLS Certificate` → **Issue/Renew / Push to Proxies**; `Route53 Settings` / `Lets Encrypt Settings` → **Test Connection** | [13-tls.md](./13-tls.md) |
 | Route guest-created bench sites | (guest-driven, no operator action) the in-guest `atlas-route register`/`deregister`/`list` POSTs reserve/remove a `Subdomain` the controller arbitrates (uniqueness, brand denylist, per-VM cap, own-VM scoping by source `/128`); every call audited; `terminate()` is the only controller-side teardown | [18-bench-self-routing.md](./18-bench-self-routing.md) |
 | Run an ad-hoc task / reboot    | `Server` → **Run Task / Reboot**                        | [04-tasks.md](./04-tasks.md) |
 | Click any button on the desk   | every form button driven through `run_doc_method`       | (this section, *Desk-button coverage*) |

@@ -10,8 +10,8 @@ Atlas has two audiences with two UIs:
   [10-desk-ui.md](./10-desk-ui.md).
 - **Users** use a **frappe-ui single-page app at `/dashboard`**. They see and
   operate **only their own** Virtual Machines, Snapshots, and SSH Keys, plus
-  Images (read-only, shared). They never see Provider, Server, or Task as
-  surfaces.
+  Images (read-only, shared). They never see Server, Task, or the Settings
+  Singles as surfaces.
 
 This is a deliberate, documented reversal of the original PoC stance ("Desk is
 the UI; no web UI of our own"). The reversal is scoped: Desk stays the
@@ -33,7 +33,7 @@ Desk is built for an operator reading infrastructure to act on the whole
 fleet. A user has a narrower, different job: stand up a machine, reach it,
 snapshot it, tear it down — for *their own* machines, with no exposure to
 providers, servers, capacity, or the task log. Desk's doctype-per-everything
-model can't hide Provider/Server/Task from a user without contorting Desk;
+model can't hide Server/Task/Settings from a user without contorting Desk;
 a purpose-built SPA with a three-item world is simpler for the user and keeps
 the operator surfaces entirely out of reach.
 
@@ -51,7 +51,7 @@ hand is refused.
 | Site                     | all rows, all perms       | **own rows** (`if_owner`): read/write/create/delete |
 | Virtual Machine Image    | all rows, all perms       | **read, all rows** (shared base images)     |
 | Task                     | all rows (read; no delete)| **read, only Tasks of an owned VM**         |
-| Provider / Server        | all rows, all perms       | **no access**                               |
+| Server                   | all rows, all perms       | **no access**                               |
 | Provider Size / Image    | all rows                  | **no access**                               |
 | Settings (all Singles)   | all                       | **no access**                               |
 
@@ -216,7 +216,7 @@ A user gets a new surface, so a new e2e use-case module
 `SSH Key`, creates + provisions a VM with it (placement filled, `owner` stamped,
 auto-provision boots it), reaches it (IPv6 + that key — the existing
 reachability bar), reads its Tasks inline, and is **denied** another user's VM /
-SSH Key and all of Provider/Server/global-Task. Unit tests in
+SSH Key and all of Server/global-Task. Unit tests in
 `test_permissions.py` (SSH Key `if_owner` scoping) and `test_ssh_key.py` (key
 validation + fingerprint) pin the contract in milliseconds.
 

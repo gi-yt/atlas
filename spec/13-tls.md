@@ -10,8 +10,11 @@ VM in the domain's region.
 
 The shape mirrors the compute Provider abstraction
 ([01-architecture.md](./01-architecture.md)): two small registries (DNS, TLS),
-each an ABC with one implementation per vendor type, resolved by name so callers
-never branch on `provider_type`.
+each an ABC with one implementation per vendor type, resolved by **type** so
+callers never branch on the vendor. The active types live on Settings — the DNS
+vendor on `Route53 Settings.domain_provider_type`, the TLS issuer on
+`Atlas Settings.tls_provider_type` — with no `Domain Provider` / `TLS Provider`
+DocTypes.
 
 ## The flow
 
@@ -46,9 +49,10 @@ Two registries under `atlas/atlas/`, each modeled on `atlas/atlas/providers/`:
   `certbot_authenticator()` (the plugin NAME, e.g. `route53`), and
   `upsert_wildcard(domain, targets)` (publish the public `*.<domain>` A/AAAA
   records that point the regional wildcard at the proxy fleet — A → the proxies'
-  reserved IPv4s, AAAA → their `/128`s, round-robin). `for_domain_provider(name)`
-  resolves a `Domain Provider` row to an instance. `Route53DnsProvider` is the
-  only implementation; Cloudflare is a reserved Select option.
+  reserved IPv4s, AAAA → their `/128`s, round-robin). `for_dns_provider_type(type)`
+  resolves the active `Route53 Settings.domain_provider_type` to an instance.
+  `Route53DnsProvider` is the only implementation; Cloudflare is a reserved
+  Select option.
 
   The challenge TXT records are certbot's job (Atlas never writes them); the
   durable `*.<domain>` record is Atlas's, reconciled by `TLS Certificate`'s
@@ -57,9 +61,10 @@ Two registries under `atlas/atlas/`, each modeled on `atlas/atlas/providers/`:
   but `<sub>.<domain>` resolves to nothing.
 - **`tls/`** — the issuer seam. `TlsProvider(ABC)`: `authenticate()` and
   `issue(domain, dns_provider) -> IssuedCert` (on-disk PEM paths + validity
-  window). `for_tls_provider(name)` resolves a `TLS Provider` row.
-  `LetsEncryptProvider` is implemented; `ZeroSslProvider` is a stub
-  (`frappe.throw`); `SelfManagedTlsProvider` expects operator-supplied PEMs.
+  window). `for_tls_provider_type(type)` resolves the active
+  `Atlas Settings.tls_provider_type`. `LetsEncryptProvider` is implemented;
+  `ZeroSslProvider` is a stub (`frappe.throw`); `SelfManagedTlsProvider`
+  expects operator-supplied PEMs.
 
 Atlas talks to DNS/TLS vendors only through these interfaces.
 
@@ -118,13 +123,14 @@ failure and moves on, exactly like `proxy.reconcile_region`.
 
 Layered on top of the proxy first-run ([12-proxy.md](./12-proxy.md)):
 
-1. **Domain Provider** — one row, `provider_type = Route53`.
-2. **Route53 Settings** — IAM access key + secret with `route53:*` on the zone.
-3. **TLS Provider** — one row, `provider_type = Let's Encrypt`.
-4. **Lets Encrypt Settings** — ACME directory (staging while testing), account
+1. **Route53 Settings** — `domain_provider_type = Route53` + the IAM access key
+   and secret with `route53:*` on the zone.
+2. **Atlas Settings** — `tls_provider_type = Let's Encrypt` (the active issuer).
+3. **Lets Encrypt Settings** — ACME directory (staging while testing), account
    email, agree-to-ToS.
-5. **Root Domain** — one row per region: `domain = <region>.frappe.dev`,
-   `region`, link the Domain + TLS providers. Click **Issue / Renew Certificate**.
+4. **Root Domain** — one row per region: `domain = <region>.frappe.dev`,
+   `region`. The DNS + TLS vendor types are denormalized onto the row from the
+   active vendors at insert. Click **Issue / Renew Certificate**.
 
 After issuance the regional wildcard is on every proxy VM in the region and nginx
 has reloaded; the proxy now serves `https://*.<region>.frappe.dev` with a real
@@ -133,16 +139,17 @@ cert.
 > The DocType name is **"Lets Encrypt Settings"** (no apostrophe): Frappe scrubs a
 > DocType name into a Python module path, and `Let's Encrypt Settings` scrubs to
 > `let's_encrypt_settings` — an apostrophe in a module path is unimportable. The
-> issuer's `provider_type` Select value keeps the apostrophe (`Let's Encrypt`)
-> since that is data, not a module.
+> `Atlas Settings.tls_provider_type` Select value keeps the apostrophe
+> (`Let's Encrypt`) since that is data, not a module.
 
 ## Verification
 
 The split follows the project's host-facts-vs-unit-logic rule
 ([README.md § Testing](./README.md#testing)):
 
-- **Unit (no host, the bulk of coverage):** the registries resolve and reject
-  archived rows (`for_domain_provider`/`for_tls_provider`, twins of
+- **Unit (no host, the bulk of coverage):** the registries resolve a vendor type
+  to its class and reject an unknown type (`for_dns_provider_type` /
+  `for_tls_provider_type`, twins of
   `providers/test_registry.py`); `Route53DnsProvider.credential_env()` /
   `certbot_authenticator()` and the `LetsEncryptProvider` certbot argv compose
   correctly against a mocked local runner (**no real certbot**); `Root Domain`
@@ -156,5 +163,6 @@ The split follows the project's host-facts-vs-unit-logic rule
   live Route 53 zone and the controller-host deps, and skips cleanly
   (`MissingConfig`, before any billable provision) on a site without the
   `atlas_tls_*` config keys. `proxy_vm` uses a self-signed stand-in cert, not this
-  chain. The new desk buttons (Issue/Renew, Push to Proxies, Test Connection,
-  Archive) are exercised through the HTTP layer in `desk_buttons`.
+  chain. The new desk buttons (Issue/Renew, Push to Proxies, Test Connection on
+  Route53 Settings / Lets Encrypt Settings) are exercised through the HTTP layer
+  in `desk_buttons`.

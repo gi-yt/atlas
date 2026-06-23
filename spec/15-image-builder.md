@@ -180,7 +180,7 @@ name) — only the upload/build half of `build_proxy` moved.
 The operator-facing object: one row per bake run, named `IMG-BUILD-#####`. It is
 **operator-only** — `Image Build` carries only a System Manager permission and is
 not in `_OWNED_DOCTYPES`, so it is invisible and access-denied to the SPA `Atlas
-User`, like `Provider` / `Server` / `Task`. Baking images is an operator-fleet
+User`, like `Server` / `Task`. Baking images is an operator-fleet
 operation, not a per-user one.
 
 Fields and the full table are in

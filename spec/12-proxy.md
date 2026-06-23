@@ -15,7 +15,10 @@ source of truth and reconciles each proxy's live map over SSH.
   sandbox. It runs the self-built nginx + Lua stack ([`proxy/`](../proxy)) and
   carries an attached `public_ipv4` (the inbound-v4 primitive,
   [06-networking.md](./06-networking.md#ipv4-ingress-reserved-ip)) so it can
-  terminate v4 **and** v6 on `:443`.
+  terminate v4 **and** v6 on `:443`. Bootstrap titles a proxy VM
+  `proxy.{region}.{domain}` (e.g. `proxy.blr1.frappe.dev`), for parity with the
+  FQDN titles Site VMs carry — so Desk lists read a recognizable name, not a
+  UUID.
 - **2–3 proxy VMs per region** behind the one regional wildcard (DNS
   round-robin over their v4 + v6), for resiliency and zero-downtime rolling
   updates. Each proxy is independent and holds the **whole** regional map.

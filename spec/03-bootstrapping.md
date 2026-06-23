@@ -199,11 +199,11 @@ appear on stderr of the task because Python tasks echo each command (the
 
 ## Provisioning a server end-to-end
 
-`Provider.provision_server(...)` is whitelisted and called from the
-**Provision Server** button. It calls the provider implementation
-(`atlas.get_provider().provision(request)`) in the web request, then
-enqueues `finish_provisioning` to run `describe()` (DigitalOcean) or
-no-op (Self-Managed) and run bootstrap.
+`Atlas Settings.provision_server(...)` is whitelisted and called from the
+**Provision Server** button on the Atlas Settings form. It calls the active
+provider implementation (`atlas.get_provider().provision(request)`) in the web
+request, then enqueues `finish_provisioning` to run `describe()` (DigitalOcean)
+or no-op (Self-Managed) and run bootstrap.
 
 `finish_provisioning` is enqueued (`frappe.enqueue(..., queue="long")`),
 not run inline. The button returns the moment the `Server` row is
@@ -221,11 +221,11 @@ should use the returned name, not the title.
 
 A Server row may be created by **Provision Server** (above) *or adopted*
 from a box the vendor account already holds. The **Discover Servers**
-button on the `Provider` form — sibling of **Refresh Catalog**, same
+button on the `Atlas Settings` form — sibling of **Refresh Catalog**, same
 "ask the vendor what exists, reconcile into Atlas" mental model — drives
 this:
 
-- `Provider.discover_servers()` (whitelisted, read-only) calls
+- `Atlas Settings.discover_servers()` (whitelisted, read-only) calls
   `provider.list_servers()`, the unfiltered list of every server in the
   account/region (not the tag-filtered list the e2e pre-sweep uses — a
   box built outside Atlas carries no `atlas` tag). It flags each one
@@ -233,7 +233,7 @@ this:
   `Server.provider_resource_id`. The picker dialog renders the list;
   already-modeled servers are disabled and badged so a re-run can't
   double-insert.
-- `Provider.import_servers(resource_ids)` (the dialog posts
+- `Atlas Settings.import_servers(resource_ids)` (the dialog posts
   `resource_ids` as a JSON *string* — parsed with `frappe.parse_json`)
   re-resolves each picked id authoritatively via `describe()` — the same
   path `finish_provisioning` trusts — and inserts a Server row through
@@ -272,7 +272,7 @@ enforces:
   `ipv6_virtual_machine_range`, and `provider_metadata` from its result
   — `provision()`'s output is treated as a hint, not the truth.
 
-See [02-doctypes.md § Provider abstraction](./02-doctypes.md#provider) and
+See [01-architecture.md § Provider abstraction](./01-architecture.md#provider-abstraction) and
 [llm/plan/provider-abstraction.md](../llm/plan/provider-abstraction.md)
 for the full interface.
 

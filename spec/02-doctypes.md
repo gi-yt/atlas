@@ -1,46 +1,48 @@
 # DocTypes
 
-Twenty-four DocTypes. Module `Atlas`. None are submittable. All track changes.
+Twenty-one DocTypes. Module `Atlas`. None are submittable. All track changes.
 Read permission for `System Manager`.
 
-1. [Atlas Settings](#atlas-settings) — vendor-agnostic Atlas config (Single).
-2. [Provider](#provider) — one row per configured vendor.
-3. [DigitalOcean Settings](#digitalocean-settings) — DO API config (Single).
-4. [Scaleway Settings](#scaleway-settings) — Scaleway Elastic Metal API config (Single).
-5. [Self-Managed Settings](#self-managed-settings) — Self-Managed config (Single).
-6. [Provider Size](#provider-size) — vendor catalog of machine sizes.
-7. [Provider Image](#provider-image) — vendor catalog of OS images.
-8. [Server](#server)
-9. [Virtual Machine](#virtual-machine)
-10. [Virtual Machine Image](#virtual-machine-image)
-11. [Virtual Machine Snapshot](#virtual-machine-snapshot) — a disk snapshot of a VM.
-12. [Reserved IP](#reserved-ip) — a public IPv4 allocated to a Server, optionally attached to a VM.
-13. [Subdomain](#subdomain) — a `<subdomain>.<region>.frappe.dev` routing entry pointing at a site VM.
-14. [Port Mapping](#port-mapping) — a raw-TCP forwarding entry: a proxy-side port pointing at a tenant VM's service port.
-15. [SSH Key](#ssh-key) — a user's public key, chosen when creating a VM.
+1. [Atlas Settings](#atlas-settings) — vendor-agnostic Atlas config + the active `provider_type` / `tls_provider_type` (Single).
+2. [DigitalOcean Settings](#digitalocean-settings) — DO API config (Single).
+3. [Scaleway Settings](#scaleway-settings) — Scaleway Elastic Metal API config (Single).
+4. [Self-Managed Settings](#self-managed-settings) — Self-Managed config (Single).
+5. [Provider Size](#provider-size) — vendor catalog of machine sizes.
+6. [Provider Image](#provider-image) — vendor catalog of OS images.
+7. [Server](#server)
+8. [Virtual Machine](#virtual-machine)
+9. [Virtual Machine Image](#virtual-machine-image)
+10. [Virtual Machine Snapshot](#virtual-machine-snapshot) — a disk snapshot of a VM.
+11. [Reserved IP](#reserved-ip) — a public IPv4 allocated to a Server, optionally attached to a VM.
+12. [Subdomain](#subdomain) — a `<subdomain>.<region>.frappe.dev` routing entry pointing at a site VM.
+13. [Port Mapping](#port-mapping) — a raw-TCP forwarding entry: a proxy-side port pointing at a tenant VM's service port.
+14. [SSH Key](#ssh-key) — a user's public key, chosen when creating a VM.
 15. [Task](#task)
-16. [Domain Provider](#domain-provider) — one row per configured DNS vendor (DNS-01).
-17. [Route53 Settings](#route53-settings) — AWS Route 53 API config (Single).
-18. [TLS Provider](#tls-provider) — one row per configured certificate issuer.
-19. [Lets Encrypt Settings](#lets-encrypt-settings) — ACME account config (Single).
-20. [Root Domain](#root-domain) — one wildcard zone == one region.
-21. [TLS Certificate](#tls-certificate) — the issued regional wildcard cert.
-22. [Site](#site) — a user's self-serve Frappe site at `<subdomain>.<region domain>`. See [14-self-serve.md](./14-self-serve.md).
-23. [Site Request](#site-request) — the pre-verification signup holding row (email + subdomain + token); fulfils into a `Site` only after the email is verified (Contract C). See [14-self-serve.md](./14-self-serve.md).
+16. [Route53 Settings](#route53-settings) — AWS Route 53 API config + the active `domain_provider_type` (Single).
+17. [Lets Encrypt Settings](#lets-encrypt-settings) — ACME account config (Single); the active TLS issuer is `Atlas Settings.tls_provider_type`.
+18. [Root Domain](#root-domain) — one wildcard zone == one region.
+19. [TLS Certificate](#tls-certificate) — the issued regional wildcard cert.
+20. [Site](#site) — a user's self-serve Frappe site at `<subdomain>.<region domain>`. See [14-self-serve.md](./14-self-serve.md).
+21. [Site Request](#site-request) — the pre-verification signup holding row (email + subdomain + token); fulfils into a `Site` only after the email is verified (Contract C). See [14-self-serve.md](./14-self-serve.md).
 
-The first seven form the **Provider abstraction**: a single ABC in
-`atlas/atlas/providers/base.py` with one implementation per
-`Provider.provider_type`. Every vendor call goes through that interface;
-controllers never branch on `provider_type`. See
+The **Provider abstraction** is a single ABC in
+`atlas/atlas/providers/base.py` with one implementation per `provider_type`,
+and a registry (`atlas/atlas/providers/__init__.py`) that maps a `provider_type`
+straight to its class — there is no `Provider` DocType. The active vendor is
+`Atlas Settings.provider_type`; `atlas.get_provider()` reads it and resolves the
+class via `for_provider_type`. Every vendor call goes through that interface;
+controllers never branch on `provider_type`. The vendor catalogs
+([Provider Size](#provider-size) / [Provider Image](#provider-image)) and the
+per-vendor Settings Singles round out the layer. See
 [provider-abstraction.md](../llm/plan/provider-abstraction.md) for the
 implementation plan.
 
-DocTypes 16–21 form the **TLS & Domain layer** ([13-tls.md](./13-tls.md)) — the
-producer for the proxy's `push_cert`. They mirror the Provider shape with two
-more registries: `atlas/atlas/dns/` (a `DnsProvider` ABC per `Domain
-Provider.provider_type`) and `atlas/atlas/tls/` (a `TlsProvider` ABC per `TLS
-Provider.provider_type`). Same rule: controllers resolve an implementation by
-name and never branch on the vendor type.
+The **TLS & Domain layer** ([13-tls.md](./13-tls.md)) — the producer for the
+proxy's `push_cert` — mirrors that shape with two more registries keyed by type:
+`atlas/atlas/dns/` (a `DnsProvider` ABC per `domain_provider_type`, the active
+one on `Route53 Settings`) and `atlas/atlas/tls/` (a `TlsProvider` ABC per
+`tls_provider_type`, the active one on `Atlas Settings`). Same rule: controllers
+resolve an implementation by type and never branch on the vendor.
 
 Each DocType is specified by three sections: **Fields** (the schema), **Form
 layout** (the section/column structure of the desk form), and **List view**
@@ -60,38 +62,47 @@ Notation in the Form layout sections:
 ## Atlas Settings
 
 A Single DocType. Holds Atlas-wide configuration that is not vendor-specific:
-which `Provider` is currently active, and the operator's SSH key (fingerprint,
-public-key body, on-disk path). Every `get_provider()` call in the codebase
-reads `Atlas Settings.provider` to pick the implementation — this is the
-indirection layer.
+which `provider_type` is currently active, which `tls_provider_type` issues
+certs, and the operator's SSH key (fingerprint, public-key body, on-disk path).
+Every `get_provider()` call in the codebase reads `Atlas Settings.provider_type`
+and resolves the implementation via `for_provider_type` — this is the
+indirection layer; there is no `Provider` row to load.
 
 ### Fields
 
 | Field                  | Type             | Reqd | Notes                                                              |
 | ---------------------- | ---------------- | ---- | ------------------------------------------------------------------ |
-| `provider`             | Link → Provider  | Y    | The currently-active Provider row. `atlas.get_provider()` reads this. |
+| `provider_type`        | Select           | Y    | The currently-active vendor: `DigitalOcean` / `Scaleway` / `Self-Managed` (`Fake` is also an option in `developer_mode` / test builds). `atlas.get_provider()` reads this and calls `for_provider_type` against the registry directly. Guarded in `validate()` (see below). |
+| `tls_provider_type`    | Select           |      | The active certificate issuer: `Let's Encrypt` / `ZeroSSL` / `Self-Managed`. Drives the TLS registry (`tls.for_tls_provider_type`); denormalized onto `Root Domain` / `TLS Certificate` at insert. See [13-tls.md](./13-tls.md). |
+| `fail_scripts`         | Small Text       |      | Developer-mode fault injection, shown only when `provider_type=Fake`. Comma/newline-separated script names whose Tasks the Fake provider makes FAIL; `*` fails every script. Read by `fake_tasks._configured_failure` (replaces the old per-`Provider`-row field). |
 | `default_user_image`   | Link → Virtual Machine Image | | Base image a dashboard user's new machine provisions from when they don't pick one. Disambiguates placement when several images are active. See [11-user-ui.md](./11-user-ui.md). |
 | `default_bench_snapshot` | Link → Virtual Machine Snapshot | | The golden bench snapshot a self-serve `Site`'s backing VM is cloned from (the baked bench + MariaDB + Redis, [08-images.md § golden bench image](./08-images.md)). `Site.before_insert` placement resolves it; provisioning clones via `Virtual Machine Snapshot.clone_to_new_vm`. Must be set + `Available` before any Site is created. See [14-self-serve.md](./14-self-serve.md). |
 | `overprovision_factor` | Float            |      | Fleet-wide vCPU oversubscription multiplier (default `1`). A host's *effective* vCPU budget — what `default_server` placement and the desk capacity helper check against — is its physical vCPU total times this factor. `1` means no oversubscription. Safe to raise because a VM's `vcpus` is a `cpu.max` *bandwidth* cap, not a pinned core. A host whose size has no known vCPU total (uncatalogued slug or self-managed) is unaffected — it always counts as having room. See [server_capacity.py](../atlas/atlas/api/server_capacity.py) and `placement.py`. |
+| `tcp_port_pool`        | Data             |      | Inclusive `LOW-HIGH` range (default `10000-19999`) of proxy-side ports the TCP forwarder allocates to `Port Mapping`s; must match the proxy nginx `listen` range. See [17-tcp-proxy.md](./17-tcp-proxy.md). |
 | `ssh_key_id`           | Data             |      | Vendor's handle for the uploaded SSH key, when the vendor needs one (DigitalOcean). Passed through to the provider as `SshKey.vendor_id`; format is vendor-specific (DO accepts the key's numeric id or its SHA-256 fingerprint). |
 | `ssh_public_key`       | Long Text        |      | OpenSSH public key body. Crosses the provider interface for vendors that upload at provision time. Not required for DO. |
 | `ssh_private_key_path` | Data             | Y    | Absolute path on the Atlas host where the matching private key lives. Atlas reads the PEM at SSH-connect time via `secrets.get_ssh_key_from_disk(path)`. `0600`, owned by the Frappe user. |
 
-Why one Single instead of fields on each `Provider` row: the SSH key, the
-active provider, and any other cross-vendor switch are properties of the
-Atlas instance, not of a vendor. Routing reads through a single helper
-also lets the storage backend swap to an external secret store later
-without touching callers.
+Why these live on one Single instead of per-vendor rows: the SSH key, the
+active `provider_type`, the active `tls_provider_type`, and any other
+cross-vendor switch are properties of the Atlas instance, not of a vendor.
+Routing reads through a single helper also lets the storage backend swap to an
+external secret store later without touching callers.
 
 ### Form layout
 
 ```
 ── Active provider ──
-provider
+provider_type
+| tls_provider_type
+  fail_scripts
 ── User dashboard ──
 default_user_image
+default_bench_snapshot
 ── Capacity ──
 overprovision_factor
+── TCP proxy ──
+tcp_port_pool
 ── SSH key ──
 ssh_key_id
 ssh_public_key
@@ -100,48 +111,12 @@ ssh_public_key
 
 ### Buttons
 
-None. The form saves on edit and `atlas.get_provider()` picks up the new
-value on the next call. Switching the active provider does not destroy
-any existing Server rows — they keep their `provider` FK pointing at
-whatever they were provisioned through.
-
----
-
-## Provider
-
-One row per configured vendor. Thin link table — no credentials, no
-defaults. Vendor-specific configuration lives on the per-vendor Single
-Settings DocType (e.g. `DigitalOcean Settings`).
-
-`Server.provider` is a Link → Provider, frozen on first save.
-
-### Fields
-
-| Field           | Type   | Reqd | Default | Notes                                                              |
-| --------------- | ------ | ---- | ------- | ------------------------------------------------------------------ |
-| `provider_name` | Data   | Y    |         | Primary key. Unique. `set_only_once`. e.g. `digitalocean-production`, `home-lab`. |
-| `provider_type` | Select | Y    |         | Options: `DigitalOcean`, `Scaleway`, `Self-Managed`. `set_only_once`. The provider registry (`atlas/atlas/providers/__init__.py`) keys off this value to pick the implementation class. |
-| `is_active`     | Check  |      | 1       | Flipped to 0 via the `archive()` controller method. `get_provider()` refuses to instantiate an archived row. |
-
-### Form layout
-
-```
-provider_name
-provider_type
-| is_active
-```
-
-### List view
-
-- Columns: `provider_name`, `provider_type`, `is_active`.
-- Standard filters: `provider_type`, `is_active`.
-
-### Buttons
+The compute-provider actions live here (there is no `Provider` form):
 
 - **Provision Server** (primary) — opens a dialog. Common field:
   `title` (lowercase + digits + hyphens, max 63 chars; passed through
   to the vendor as the server's name and tag). The remaining inputs
-  are produced by the provider implementation's `discover()`-backed
+  are produced by the active provider implementation's `discover()`-backed
   dialog schema:
   - **DigitalOcean**: `size` (Link → Provider Size, filtered to
     `provider_type=DigitalOcean, enabled=1`), `image` (Link → Provider
@@ -169,25 +144,30 @@ provider_type
   `ok=True, account_label="local"` so the form still paints a green
   chip on refresh).
 - **Refresh Catalog** — under `Actions ▾`. Calls `provider.discover()`
-  and upserts `Provider Size` and `Provider Image` rows. Slugs the
-  vendor no longer returns are flipped to `enabled=0`; historical
-  Server rows keep their Link.
-- **Discover Servers** — under `Actions ▾`, shown only when
-  `is_active = 1`. Calls `discover_servers()` (read-only) to list the
-  vendor's servers — the *unfiltered* `provider.list_servers()`, so a box
-  built outside Atlas is found — and dedups each against existing
-  `Server.provider_resource_id`. The picker lets the operator tick which
-  to adopt; `import_servers(resource_ids)` re-resolves each via
-  `describe()` and inserts a `Pending` Server row (already-modeled ids
-  are skipped). Self-Managed has no discovery (`list_servers()` returns
-  `()`). See [03-bootstrapping.md § Adopting an already-provisioned
+  and upserts `Provider Size` and `Provider Image` rows (the controller
+  method, renamed from `discover_and_upsert`). Slugs the vendor no longer
+  returns are flipped to `enabled=0`; historical Server rows keep their Link.
+- **Discover Servers** — under `Actions ▾`. Calls `discover_servers()`
+  (read-only) to list the vendor's servers — the *unfiltered*
+  `provider.list_servers()`, so a box built outside Atlas is found — and
+  dedups each against existing `Server.provider_resource_id`. The picker lets
+  the operator tick which to adopt; `import_servers(resource_ids)` re-resolves
+  each via `describe()` and inserts a `Pending` Server row (already-modeled ids
+  are skipped). Self-Managed has no discovery (`list_servers()` returns `()`).
+  See [03-bootstrapping.md § Adopting an already-provisioned
   server](./03-bootstrapping.md#adopting-an-already-provisioned-server).
-- **Archive** — `Actions ▾`, shown only when `is_active = 1`. Calls
-  `archive()` which flips `is_active = 0` via `db.set_value`. Existing
-  Servers keep their FK reference so historical Tasks stay queryable.
 
-The Provider form has no auto-painted credential indicator; the
-operator clicks **Authenticate** when they need to verify.
+There is no auto-painted credential indicator; the operator clicks
+**Authenticate** when they need to verify.
+
+Switching the active vendor is editing `provider_type` and saving;
+`atlas.get_provider()` picks up the new value on the next call. There is no
+**Archive** — you don't archive your only provider. `validate()` **refuses to
+change `provider_type` while any non-Archived `Server` carries a different
+`provider_type`**: that is the Single-world equivalent of "switching the active
+provider doesn't destroy existing Server rows" — each historical Server keeps
+its own `provider_type` (the vendor it was provisioned through), so the active
+type can only move once the fleet has been migrated/archived off the old vendor.
 
 ---
 
@@ -217,7 +197,7 @@ default_size
 ### Buttons
 
 - **Test Connection** — under `Actions ▾`. Calls
-  `DigitalOceanProvider.authenticate()` (same as the Provider form's
+  `DigitalOceanProvider.authenticate()` (same as Atlas Settings'
   Authenticate button, mirrored here for the operator who's mid-credentials).
   Result surfaces via a toast (`OK: <account>` / `Failed: <error>`);
   there is no auto-painted dashboard indicator.
@@ -285,7 +265,7 @@ form ships with a single section break and no fields.
 
 A regular DocType. One row per vendor-advertised machine size that Atlas
 is willing to provision. Seeded at first run by `bootstrap.py` and
-refreshed via the Provider form's **Refresh Catalog** button (which
+refreshed via the Atlas Settings form's **Refresh Catalog** button (which
 calls `provider.discover()`).
 
 ### Fields
@@ -293,7 +273,7 @@ calls `provider.discover()`).
 | Field               | Type   | Reqd | Read-only | Default | Notes                                                              |
 | ------------------- | ------ | ---- | --------- | ------- | ------------------------------------------------------------------ |
 | `name`              | Data   | Y    | Y         |         | Primary key. Format: `{provider_type}/{slug}` (e.g. `DigitalOcean/s-2vcpu-4gb-intel`). Assigned in `autoname()`. |
-| `provider_type`     | Select | Y    |           |         | Same options as `Provider.provider_type`. `set_only_once`.         |
+| `provider_type`     | Select | Y    |           |         | Same options as `Atlas Settings.provider_type`. `set_only_once`.   |
 | `slug`              | Data   | Y    |           |         | Vendor-native slug — the string sent on the API wire (`s-2vcpu-4gb-intel`). `set_only_once`. |
 | `enabled`           | Check  |      |           | 1       | Flipped by `discover()` when the vendor drops a slug. Disabled rows do not appear in the Provision dialog but remain pointable from historical Server rows. |
 | `monthly_cost_usd`  | Int    |      |           |         | Hand-maintained for vendors without per-size pricing in the API (DO). Renders as "—" when blank. |
@@ -343,7 +323,7 @@ operator-facing label lives in `title` (e.g. `server-blr1-01`).
 | ------------------------------ | --------------------- | ---- | --------- | ------- | -------------------------------------------------------------- |
 | `name`                         | UUID (autoname)       | Y    | Y         |         | Primary key. UUID minted in `Server.autoname()`. Stable for the row's lifetime; no rename UI. |
 | `title`                        | Data                  | Y    |           |         | Operator-chosen label. `set_only_once` — first save freezes it. |
-| `provider`                     | Link → Provider       | Y    |           |         | `set_only_once`. |
+| `provider_type`                | Select                | Y    | Y         |         | The vendor this host was provisioned through (`DigitalOcean` / `Scaleway` / `Self-Managed`). Copied from `Atlas Settings.provider_type` at insert and frozen (`set_only_once`); it does **not** follow a later change to the active type — a historical Server keeps its own vendor. `in_list_view`, `in_standard_filter`. |
 | `status`                       | Select                | Y    | Y         | Pending | `Pending`, `Bootstrapping`, `Active`, `Draining`, `Broken`, `Archived`. Controllers mutate via `db.set_value`. |
 | `provider_resource_id`         | Data                  |      | Y         |         | Vendor's primary key for this host (DigitalOcean droplet id, future AWS instance id, …). Empty for `Self-Managed`. Locked once written. |
 | `size`                         | Link → Provider Size  |      | Y         |         | Populated by `provider.describe()` after provision. Empty for `Self-Managed`. |
@@ -367,8 +347,11 @@ Immutability is enforced by `Server._validate_immutability()` (lock
 once a value is written; allow `None → value` so `finish_provisioning`
 can write the IPs, size, image, and `provider_metadata` onto a freshly
 inserted Pending row). The framework `set_only_once` flag covers
-`title` and `provider` because those are populated at insert time and
-never legitimately change.
+`title` and `provider_type` because those are populated at insert time and
+never legitimately change. Stamping `provider_type` at insert (rather than
+linking the active provider) is what preserves the invariant "switching the
+active provider doesn't destroy existing Server rows" — see
+[Atlas Settings](#atlas-settings).
 
 ### Controller methods
 
@@ -400,7 +383,7 @@ sections, not separate tabs.
 ```
 ── Overview ──
 title
-provider
+provider_type
 | status
 ── Provider resource ──
 provider_resource_id
@@ -422,9 +405,9 @@ provider_metadata
 
 ### List view
 
-- Columns (left to right): `title`, `provider`, `status`, `size`,
+- Columns (left to right): `title`, `provider_type`, `status`, `size`,
   `ipv4_address`.
-- Standard filters: `provider`, `status`, `size`.
+- Standard filters: `provider_type`, `status`, `size`.
 
 ### Buttons
 
@@ -1171,7 +1154,7 @@ lifecycle.
 | Field               | Type              | Reqd | Read-only | Notes                                                                              |
 | ------------------- | ----------------- | ---- | --------- | ---------------------------------------------------------------------------------- |
 | `name`              | (autoname `hash`) | Y    | Y         | Primary key. UUID (`str(uuid.uuid4())`), like Virtual Machine / Snapshot / Server. |
-| `title`             | Data              |      |           | `title_field`. Human label for lists.                                              |
+| `title`             | Data              |      |           | `title_field`. Human label for lists. `before_insert` defaults it to `email` (or `central_reference`) when Central omits it, so Desk lists show a readable name rather than the UUID `name`. Still editable. |
 | `email`             | Data (`Email`)    | Y    |           | `set_only_once`, `unique`. Central sets once. Lowercased in `validate()`.          |
 | `central_reference` | Data              | Y    |           | `set_only_once`, `unique`. The Central-side resource id this tenant maps to.       |
 
@@ -1190,6 +1173,8 @@ the framework's `set_only_once` alone — it has no immutability tuple).
 
 ### Controller methods
 
+- `before_insert()` — defaults `title` to `email` (or `central_reference`) when
+  Central omits it, so a tenant never shows up in Desk lists as a bare UUID.
 - `virtual_machines()` / `images()` / `snapshots()` (whitelisted) — the rows of
   each resource type stamped with this tenant, newest first.
 - `resources()` (whitelisted) — all three in one round-trip as
@@ -1305,53 +1290,22 @@ Tasks aren't a black box.
 
 ---
 
-## Domain Provider
-
-Thin link table over the DNS provider abstraction, the exact twin of
-[Provider](#provider) for compute. Stores only the identity of a DNS account; all
-behavior lives in the registered `DnsProvider`
-([atlas/atlas/dns/](../atlas/atlas/dns/)). Used by `Root Domain` to prove control
-of a zone during a DNS-01 challenge. See [13-tls.md](./13-tls.md).
-
-### Fields
-
-| Field           | Type   | Reqd | Notes                                                                 |
-| --------------- | ------ | ---- | --------------------------------------------------------------------- |
-| `provider_name` | Data   | Y    | Primary key (autoname `field:provider_name`), `unique`, `set_only_once`. E.g. `route53-prod`. |
-| `provider_type` | Select | Y    | `Route53` / `Cloudflare`. `set_only_once`. Keys the DNS registry. Only Route53 implemented; Cloudflare reserved. |
-| `is_active`     | Check  |      | Default 1; **Archive** flips it. `for_domain_provider` refuses an archived row. |
-
-Buttons: **Test Connection** (`dns.for_domain_provider(name).authenticate()` —
-Route 53 lists hosted zones), **Archive**.
-
-### Form layout
-
-```
-provider_name
-provider_type
-| is_active
-```
-
-### List view
-
-- Columns: `provider_name`, `provider_type`, `is_active`.
-- Standard filters: `provider_type`, `is_active`.
-
----
-
 ## Route53 Settings
 
-A Single. AWS Route 53 credentials, the twin of [DigitalOcean
-Settings](#digitalocean-settings). Read by `Route53DnsProvider`; the secret comes
-out via `atlas.atlas.secrets.get_secret`.
+A Single. AWS Route 53 credentials plus the active DNS vendor type, the twin of
+[DigitalOcean Settings](#digitalocean-settings). Read by `Route53DnsProvider`;
+the secret comes out via `atlas.atlas.secrets.get_secret`. There is no separate
+`Domain Provider` DocType — the active DNS vendor is the `domain_provider_type`
+field below, and the DNS registry keys off it (`dns.for_dns_provider_type`).
 
 ### Fields
 
-| Field               | Type     | Reqd | Notes                                                          |
-| ------------------- | -------- | ---- | -------------------------------------------------------------- |
-| `access_key_id`     | Data     | Y    | AWS IAM access key id with `route53:*` on the zone. `set_only_once`. |
-| `secret_access_key` | Password | Y    | AWS IAM secret. Rotate by clearing via `db.set_value`, then re-saving. |
-| `region`            | Data     |      | AWS API region for signing (default `us-east-1`; Route 53 is global). |
+| Field                  | Type     | Reqd | Notes                                                          |
+| ---------------------- | -------- | ---- | -------------------------------------------------------------- |
+| `domain_provider_type` | Select   | Y    | The active DNS vendor: `Route53` / `Cloudflare`. Keys the DNS registry (`dns.for_dns_provider_type`); denormalized onto `Root Domain` at insert. Only Route53 implemented; Cloudflare reserved. |
+| `access_key_id`        | Data     | Y    | AWS IAM access key id with `route53:*` on the zone. `set_only_once`. |
+| `secret_access_key`    | Password | Y    | AWS IAM secret. Rotate by clearing via `db.set_value`, then re-saving. |
+| `region`               | Data     |      | AWS API region for signing (default `us-east-1`; Route 53 is global). |
 
 No zone-id field: `certbot-dns-route53` discovers the hosted zone from the domain
 name at issue time.
@@ -1359,52 +1313,31 @@ name at issue time.
 ### Form layout
 
 ```
+domain_provider_type
+── AWS credentials ──
 access_key_id
 secret_access_key
 region
 ```
 
----
+### Buttons
 
-## TLS Provider
-
-Thin link table over the TLS issuer abstraction, twin of [Provider](#provider) and
-[Domain Provider](#domain-provider). All behavior lives in the registered
-`TlsProvider` ([atlas/atlas/tls/](../atlas/atlas/tls/)).
-
-### Fields
-
-| Field           | Type   | Reqd | Notes                                                                 |
-| --------------- | ------ | ---- | --------------------------------------------------------------------- |
-| `provider_name` | Data   | Y    | Primary key (autoname `field:provider_name`), `unique`, `set_only_once`. E.g. `letsencrypt-prod`. |
-| `provider_type` | Select | Y    | `Let's Encrypt` / `ZeroSSL` / `Self-Managed`. `set_only_once`. Keys the TLS registry. Only Let's Encrypt implemented; ZeroSSL is a `frappe.throw` stub; Self-Managed expects operator-supplied PEMs. |
-| `is_active`     | Check  |      | Default 1; **Archive** flips it. |
-
-Buttons: **Test Connection** (`tls.for_tls_provider(name).authenticate()`),
-**Archive**.
-
-### Form layout
-
-```
-provider_name
-provider_type
-| is_active
-```
-
-### List view
-
-- Columns: `provider_name`, `provider_type`, `is_active`.
-- Standard filters: `provider_type`, `is_active`.
+- **Test Connection** — `dns.for_dns_provider_type(domain_provider_type).authenticate()`
+  (Route 53 lists hosted zones). Result surfaces via a toast; no auto-painted
+  indicator.
 
 ---
 
 ## Lets Encrypt Settings
 
-A Single. ACME account config read by `LetsEncryptProvider`. The DocType name
-drops the apostrophe in "Let's Encrypt" because Frappe scrubs a DocType name into
-a Python module path and `Let's Encrypt Settings` would scrub to the unimportable
-`let's_encrypt_settings`; the `TLS Provider.provider_type` Select value keeps the
-apostrophe (`Let's Encrypt`) since that is data, not a module.
+A Single. ACME account config read by `LetsEncryptProvider`. The active TLS
+issuer is not stored here — it lives on `Atlas Settings.tls_provider_type` (the
+TLS registry keys off it, `tls.for_tls_provider_type`), since there is no single
+"TLS Settings" and no `TLS Provider` DocType. The DocType name drops the
+apostrophe in "Let's Encrypt" because Frappe scrubs a DocType name into a Python
+module path and `Let's Encrypt Settings` would scrub to the unimportable
+`let's_encrypt_settings`; the `Atlas Settings.tls_provider_type` Select value
+keeps the apostrophe (`Let's Encrypt`) since that is data, not a module.
 
 ### Fields
 
@@ -1421,6 +1354,11 @@ acme_directory_url
 account_email
 agree_tos
 ```
+
+### Buttons
+
+- **Test Connection** — `tls.for_tls_provider_type(Atlas Settings.tls_provider_type).authenticate()`.
+  Result surfaces via a toast; no auto-painted indicator.
 
 ---
 
@@ -1439,11 +1377,13 @@ wildcard cert `*.blr1.frappe.dev` that fronts the proxy fleet in `region`.
 | `domain`          | Data                  | Y    | The wildcard zone, e.g. `blr1.frappe.dev`. `unique`, `set_only_once`. The cert is `*.<domain>`. |
 | `region`          | Data                  | Y    | The proxy fleet this domain fronts. Join key to `Virtual Machine.region`. `set_only_once`. |
 | `is_active`       | Check                 |      | Default 1. |
-| `domain_provider` | Link → Domain Provider| Y    | The DNS account that owns the zone (DNS-01). |
-| `tls_provider`    | Link → TLS Provider   | Y    | The issuer that produces the cert. |
+| `domain_provider_type` | Select           |      | The DNS vendor that owns the zone (DNS-01). Read-only; denormalized from `Route53 Settings.domain_provider_type` at insert. |
+| `tls_provider_type`    | Select           |      | The issuer that produces the cert. Read-only; denormalized from `Atlas Settings.tls_provider_type` at insert. |
 
 `domain` and `region` lock after insert. `common_name` (`*.<domain>`) is a derived
-property, not a stored field.
+property, not a stored field. The two vendor-type fields are denormalized once at
+insert (read-only thereafter), so a later change to the active vendors does not
+silently re-point an already-issued domain.
 
 ### Controller methods
 
@@ -1458,8 +1398,8 @@ domain
 region
 | is_active
 ── Providers ──
-domain_provider
-tls_provider
+domain_provider_type
+tls_provider_type
 ```
 
 ### List view
@@ -1483,7 +1423,7 @@ in the domain's region — the producer the proxy's `push_cert` was missing. One
 | `root_domain`    | Link → Root Domain  | Y    |           | `set_only_once`. |
 | `common_name`    | Data                |      | Y         | `*.<domain>`, derived from the Root Domain. `title_field`. |
 | `status`         | Select              |      | Y         | `Pending` / `Active` / `Expiring` / `Failed`. Set by issue/renew + the scheduler. |
-| `tls_provider`   | Link → TLS Provider |      |           | Denormalized from the domain; the issuer used. |
+| `tls_provider_type` | Select           |      | Y         | The issuer vendor used. Denormalized from the domain's `tls_provider_type` (itself denormalized from `Atlas Settings`). |
 | `issued_on`      | Datetime            |      | Y         | Parsed from the issued cert. |
 | `expires_on`     | Datetime            |      | Y         | Parsed from the issued cert; drives `renew_expiring`. |
 | `fullchain_path` | Data                |      | Y         | Path to `fullchain.pem` on the controller. Bytes stay out of the DB. |
@@ -1509,7 +1449,7 @@ Buttons: **Issue/Renew** (primary), **Push to Proxies**.
 root_domain
 common_name
 status
-| tls_provider
+| tls_provider_type
 issued_on
 expires_on
 ── On-disk PEM paths (controller) ──
@@ -1691,7 +1631,7 @@ insert — re-baking with different inputs is a new row, guarded in `validate()`
 ### Permissions
 
 `System Manager` full; **not** in `_OWNED_DOCTYPES` — invisible and access-denied
-to the SPA `Atlas User`, like `Provider` / `Server` / `Task`.
+to the SPA `Atlas User`, like `Server` / `Task`.
 
 ### List view
 

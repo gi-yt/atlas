@@ -52,7 +52,7 @@ def connection_for_server(server) -> Connection:
     """Build the SSH Connection from a Server doc. Reads the private-key
     path off `Atlas Settings.ssh_private_key_path` via
     `atlas.get_ssh_private_key_path()` and loads the PEM at SSH-connect
-    time. Only guard is `Server.ipv4_address` — `Server.provider` is not
+    time. Only guard is `Server.ipv4_address` — `Server.provider_type` is not
     read by this function (the SSH key is vendor-agnostic)."""
 
 def connection_for_guest(virtual_machine) -> Connection:

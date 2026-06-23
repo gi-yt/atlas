@@ -113,10 +113,10 @@ VMs, and Tasks to look at without standing up real cloud resources.
 
 ### Fake provider
 
-A `provider_type = Fake` (`atlas/atlas/providers/fake.py`) under which **every
-action just works** — it transitions Frappe DB state without ever touching a real
-host or vendor API. The design point worth recording: faking the VM lifecycle
-needs **two** seams intercepted, not one.
+`Atlas Settings.provider_type = Fake` (`atlas/atlas/providers/fake.py`) under
+which **every action just works** — it transitions Frappe DB state without ever
+touching a real host or vendor API. The design point worth recording: faking the
+VM lifecycle needs **two** seams intercepted, not one.
 
 1. The `Provider` ABC covers only *server* creation + reserved IPs. `FakeProvider`
    implements it: `provision()` returns a host already `ready` with synthetic,
@@ -132,26 +132,27 @@ needs **two** seams intercepted, not one.
    four scripts whose controllers parse one (`bootstrap-server.py`,
    `snapshot-vm.py`, `snapshot-stop-vm.py`, `warm-snapshot-vm.py`).
 
-Routing is **per-Server** (off the Server's own `provider`, not the globally
+Routing is **per-Server** (off the Server's own `provider_type`, not the globally
 active one), so a Fake provider and a historical real Server coexist and each
 Task goes the right way. The real worker still runs (`finish_provisioning` polls
 the instant-ready `describe()`, then runs the faked `bootstrap()`), so a Fake
 server marches Pending → Active through the real code path.
 
 **Failure injection.** To exercise error paths, name scripts that should fail
-either on the Fake `Provider` row's `fail_scripts` field (comma/newline list, or
-`*`) or per-call via `frappe.flags.fake_fail`. A faked failure is
+either on `Atlas Settings.fake_fail_scripts` (comma/newline list, or `*`) or
+per-call via `frappe.flags.fake_fail`. A faked failure is
 indistinguishable from a real one to the controller (Task `Failure`, non-zero
 exit, `frappe.throw`) — the VM lands `Failed`, the Server lands `Broken`, the
 retry button returns.
 
-**Safety.** Every mutating Fake method is gated on `developer_mode`; a Fake
-`Provider` row on a production site is inert and loud. The unroutable address
-blocks mean even an accidental real `ssh` can never reach a stranger's machine.
+**Safety.** Every mutating Fake method is gated on `developer_mode`;
+`Atlas Settings.provider_type = Fake` on a production site is inert and loud. The
+unroutable address blocks mean even an accidental real `ssh` can never reach a
+stranger's machine.
 
-The Provider controller's `_provision_server` reads a per-vendor Settings Single
-for default size/image; Fake has none, so the lookup falls back to the dialog
-values (DigitalOcean/Scaleway are unchanged — their Single exists).
+The `Atlas Settings._provision_server` controller reads a per-vendor Settings
+Single for default size/image; Fake has none, so the lookup falls back to the
+dialog values (DigitalOcean/Scaleway are unchanged — their Single exists).
 
 **Desk coverage.** The `fake_provider_desk` e2e
 ([`atlas/tests/e2e/use_cases/fake_provider_desk.py`](../atlas/tests/e2e/use_cases/fake_provider_desk.py))
@@ -160,8 +161,8 @@ button through the exact HTTP layer the desk uses (`run_doc_method` for
 controller methods, `execute_cmd` for the Reserved IP module-function buttons),
 with the desk's real argument shapes — but against the Fake provider, so it runs
 anywhere `developer_mode` is on (e.g. `fake.local`) with no droplet, in seconds.
-It is self-contained (creates and tears down its own provider/server/image/VMs,
-restores `Atlas Settings.provider`) and includes the wrong-state and
+It is self-contained (sets and tears down its own server/image/VMs,
+restores `Atlas Settings.provider_type`) and includes the wrong-state and
 fault-injection negatives. Run it directly:
 `bench --site fake.local execute atlas.tests.e2e.use_cases.fake_provider_desk.run`.
 
@@ -432,7 +433,7 @@ never touches real DO/Scaleway rows.
   `cloud-images.ubuntu.com` (release dirs + `SHA256SUMS`) and upserts a
   catalog, so operators pick a release × variant instead of hand-copying
   `DEFAULT_IMAGE`/`MINIMAL_IMAGE` constants. Mirrors `provider.discover()` /
-  the Provider **Refresh Catalog** button. Today the images are pinned
+  the Atlas Settings **Refresh Catalog** button. Today the images are pinned
   constants (server + minimal noble); this is the additive follow-up.
 
 - **Newer guest release**. Bump the supported guest to Ubuntu 26.04 once it's
@@ -629,7 +630,7 @@ never touches real DO/Scaleway rows.
   guest, and flips the Site to `Running` **only on an observed HTTP 200** from
   `:80` (Contract B), then creates the `Subdomain`. A `/signup` www page + guest
   API is the one guest-reachable surface. See [14-self-serve.md](./14-self-serve.md).
-- `v0.10` — **Scaleway Elastic Metal provider.** A third `Provider.provider_type`
+- `v0.10` — **Scaleway Elastic Metal provider.** A third `provider_type`
   alongside DigitalOcean and Self-Managed — bare-metal hosts via the Scaleway
   Elastic Metal API. `Scaleway Settings` (Single) holds the IAM secret key,
   project id, zone, billing mode, and default size/image; `ScalewayProvider`

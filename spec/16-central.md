@@ -2,7 +2,7 @@
 
 Central is a global management dashboard for Frappe Cloud. One Central talks to
 *many* Atlas instances, each running its own region and provider. Atlas is the
-**client** of Central — the mirror image of the `Provider` relationship, where
+**client** of Central — the mirror image of the provider relationship, where
 Atlas is the client of a vendor (DigitalOcean, Scaleway).
 
 This document describes the Atlas side of that seam. The Central app itself
@@ -12,7 +12,7 @@ set of whitelisted HTTP methods (see *The wire contract* below).
 ## What Central does for Atlas
 
 1. **Registration.** After setup, an Atlas registers itself on Central —
-   announcing its region, active provider, and host site — and receives an
+   announcing its region, active `provider_type`, and host site — and receives an
    `atlas_id` that Central uses to address it from then on.
 2. **VM Sizes.** Today each Atlas hardcodes its size catalog
    (`atlas/atlas/sizes.py` `SIZE_PRESETS`). Central becomes the source of truth:
