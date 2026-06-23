@@ -52,6 +52,23 @@ MAX_OPEN_FILES = 1024
 # uplink and is never visible on the wire — it only needs to be unique per host.
 IPV4_EGRESS_SUPERNET = "100.64.0.0/16"
 
+# WireGuard VPN broker (spec/19-vpn-broker.md). Each tunnel terminates on the
+# host with its own wg interface; a per-server slot index gives each one a UDP
+# listen port and a private overlay link, in the spirit of allocate_ipv6 /
+# derive_ipv4_link. The slot SCAN lives with the VPN Tunnel controller (it
+# queries the doctype); the derivations below are pure functions of the slot.
+
+# First UDP port for tunnel listeners (WireGuard's default port). Slot 0 -> 51820,
+# slot 1 -> 51821, … The host has no input firewall (the `inet atlas` table is
+# forward + nat only), so the port is reachable on the host's public address.
+TUNNEL_PORT_BASE = 51820
+
+# Fixed ULA supernet for per-tunnel overlay links — the private v6 addresses the
+# host and client ends of a tunnel carry so the VM has a return path. Like the
+# NAT44 egress supernet, the overlay is private, routed into one interface, and
+# never appears on the public wire, so it only has to be unique per host.
+ATLAS_TUNNEL_SUPERNET = "fd00:a71a:5000::/48"
+
 
 def carve_virtual_machine_range(host_address: str, prefix_cidr: str) -> str:
 	"""Return the /124 inside `prefix_cidr` that contains `host_address`.
@@ -270,6 +287,41 @@ def derive_ipv4_link(ipv6_address: str) -> tuple[str, str]:
 	link = ipaddress.IPv4Network((base, 30))
 	if not supernet.supernet_of(link):
 		raise frappe.ValidationError("No IPv4 egress capacity on server")
+	hosts = list(link.hosts())
+	return (
+		f"{hosts[0]}/{link.prefixlen}",
+		f"{hosts[1]}/{link.prefixlen}",
+	)
+
+
+def derive_tunnel_interface(tunnel_name: str) -> str:
+	"""wg-<first 11 hex of the tunnel UUID>. Length 14, IFNAMSIZ-safe (`wg-` (3) +
+	11 = 14), and distinct from a VM's `atlas-…` tap/veth names. Pure function of
+	the tunnel's UUID, like derive_tap — so the on-host interface is
+	reconstructible from the row with no allocator."""
+	hex_only = uuid.UUID(tunnel_name).hex
+	return f"wg-{hex_only[:11]}"
+
+
+def tunnel_listen_port(slot_index: int) -> int:
+	"""The UDP port a tunnel's wg interface listens on: TUNNEL_PORT_BASE + slot."""
+	return TUNNEL_PORT_BASE + slot_index
+
+
+def tunnel_overlay_link(slot_index: int) -> tuple[str, str]:
+	"""(host_side, client_side) /127 overlay CIDRs for a tunnel, indexed by its
+	per-server slot. A point-to-point link inside ATLAS_TUNNEL_SUPERNET: the host
+	end is the lower address (addresses the host's wg interface), the client end
+	the upper (the address the VM routes its replies back to, carried in the
+	client's wg `Address`). A /127 is the RFC 6164 point-to-point form — both
+	addresses are usable. Mirrors derive_ipv4_link's per-host-unique allocation.
+
+	Example: slot 0 -> ('fd00:a71a:5000::/127', 'fd00:a71a:5000::1/127')."""
+	supernet = ipaddress.IPv6Network(ATLAS_TUNNEL_SUPERNET)
+	base = int(supernet.network_address) + slot_index * 2
+	link = ipaddress.IPv6Network((base, 127))
+	if not supernet.supernet_of(link):
+		raise frappe.ValidationError("No tunnel overlay capacity on server")
 	hosts = list(link.hosts())
 	return (
 		f"{hosts[0]}/{link.prefixlen}",
