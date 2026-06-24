@@ -325,7 +325,14 @@ def allocate_tunnel_slot(server_name: str) -> int:
 	rows whose status is not Revoked — a Revoked tunnel has released its slot back
 	to the pool (its port + overlay are free to reuse), exactly as a Terminated VM
 	releases its /128. Locks the Server row for the scan so two concurrent requests
-	cannot claim the same slot, mirroring allocate_ipv6."""
+	cannot claim the same slot, mirroring allocate_ipv6.
+
+	This row lock — not a DB `unique` index — is what makes slot allocation
+	race-safe, and a static unique (server, slot_index) index would be *wrong*: a
+	reused slot collides with the lingering Revoked row that still carries it (revoke
+	keeps slot_index; it does not delete the row). Contrast the Firewall unique index
+	on virtual_machine, which is safe only because remove_firewall deletes the row
+	outright, leaving nothing to collide with."""
 	frappe.get_doc("Server", server_name, for_update=True)
 	used = {
 		index
