@@ -11,23 +11,24 @@
 # with NO hand-rolled boot unit, ZFS drop-in, or nginx surgery. Everything the
 # old build.sh hand-rolled is now bench-cli's job.
 #
-# Run as ROOT (the controller SSHes in as root). build.sh creates the unprivileged
-# `frappe` user the proven recipe uses and runs every bench step AS frappe — the
-# systemd boot persistence (linger) is per-user, so it needs a real lingering
-# non-root user, which is why root can't bake this.
+# Run as ROOT (the controller SSHes in as root). build.sh runs install.sh as root
+# once to create the unprivileged `frappe` user (+ passwordless sudoers) the proven
+# recipe uses, then runs install.sh and every bench step AS frappe — the systemd boot
+# persistence (linger) is per-user, so it needs a real lingering non-root user, which
+# is why root can't bake the bench itself.
 #
 # TWO MODES (first arg, default `site`):
 #   * site  — bake a fully-created Frappe + ERPNext site under the fixed name
-#             `site.local` and leave it serving. deploy-site.py renames
-#             `sites/site.local` → `sites/<fqdn>` + `bench setup nginx` per clone,
-#             so the DOMAIN MAPS TO THE SITE URL.
+#             `site.local` and leave it serving. deploy-site.py `bench rename-site`s
+#             `site.local` → `<fqdn>` per clone (rename + nginx + production setup
+#             in one), so the DOMAIN MAPS TO THE SITE URL.
 #   * admin — bake only the bench + the admin app (no site). deploy sets
-#             `[admin].domain = <fqdn>` + `bench setup nginx` per clone, so the
+#             `[admin].domain = <fqdn>` + `bench setup production` per clone, so the
 #             DOMAIN MAPS TO THE ADMIN URL.
 # Both modes share one recipe up to the site step; the mode only decides whether
 # a site is baked. The per-clone rename / admin-domain mapping lives in
-# deploy-site.py — after a warm clone we rename the admin domain and mv the site,
-# and `bench setup nginx` regenerates nginx to map either correctly.
+# deploy-site.py — `bench rename-site` (site) or `bench setup production` (admin)
+# regenerates nginx to map either correctly.
 #
 # Idempotent (spec taste #16: retry = re-run): install.sh is clone-or-pull,
 # `bench init` is idempotent, and every step below skips when its output exists.
@@ -39,17 +40,21 @@ set -euo pipefail
 # proxy/build.sh follows). The Frappe branch + the production/MariaDB/ZFS shape
 # are pinned in bench.toml.
 #
-# Pinned at/after dd14ad4 "Serve sites and admin over IPv6" — that commit makes
-# bench-cli's nginx emit `listen [::]:80` for every site + admin vhost, so the
-# Atlas v6-only inbound path (the proxy/probe reach the VM over its public /128)
-# is served by bench-cli itself. No v6-listener / default_server surgery here.
+# Pinned at 03a4272 (main @ 2026-06-25). This ref carries the three things this
+# build/deploy flow now depends on: (1) the two-path install.sh — run as root it
+# creates the bench user + sudoers, run as the user it installs bench-cli (so we no
+# longer hand-roll useradd/sudoers); (2) `bench rename-site` (deploy-site.py renames
+# the baked site through it — ABSENT before commit 0bc54f2, so an older pin breaks
+# the deploy); (3) nginx emits `listen [::]:80` for every site + admin vhost (since
+# dd14ad4), so the Atlas v6-only inbound path is served by bench-cli itself — no
+# v6-listener / default_server surgery here.
 #
 # BENCH_CLI_REF / ERPNEXT_BRANCH are ENV OVERRIDES: the controller
 # (atlas.atlas.image_builder) exports them per recipe so one committed build.sh
 # bakes any Frappe version (v15 / v16 / nightly). The Frappe branch + Python
 # version are pinned in bench.toml (rendered by the controller before upload).
 # The defaults below keep a direct `build.sh` run (no env) reproducible at v16. ---
-BENCH_CLI_REF="${BENCH_CLI_REF:-f36a06c541162aec80dd7b9894ccb4691597b9d3}"  # default: main @ 2026-06-18 (incl. IPv6 listeners dd14ad4)
+BENCH_CLI_REF="${BENCH_CLI_REF:-03a4272068f78a402d407c4ae9b071be5e00a14b}"  # default: main @ 2026-06-25 (two-path install.sh + rename-site + IPv6 listeners)
 ERPNEXT_BRANCH="${ERPNEXT_BRANCH:-version-16}"  # default: v16; controller overrides for v15 / develop
 
 BENCH_USER="frappe"
@@ -57,7 +62,6 @@ BENCH_HOME="/home/$BENCH_USER"
 BENCH_CLI_DIR="$BENCH_HOME/bench-cli"
 BENCH_NAME="atlas"
 BENCH_DIR="$BENCH_CLI_DIR/benches/$BENCH_NAME"
-ADMIN_VENV="$BENCH_CLI_DIR/.admin-venv"
 
 # The baked site (site mode only). A clone already carries a fully-created
 # Frappe + ERPNext site under this name; deploy-site.py renames it to the per-VM
@@ -113,33 +117,29 @@ apt-get install -y --no-install-recommends \
 	dkms zfsutils-linux zfs-dkms "linux-headers-$(uname -r)"
 modprobe zfs
 
-# --- 3. Create the bench user (bench-setup.md §3): uid 1000, empty password,
-# passwordless sudo. install.sh and `bench` run as this user; its lingering
-# systemd --user units are what make the golden boot serving. Idempotent. ---
-if ! id -u "$BENCH_USER" >/dev/null 2>&1; then
-	useradd -ms /bin/bash -u 1000 -U -p '' "$BENCH_USER"
-fi
-usermod -aG sudo "$BENCH_USER"
-echo "$BENCH_USER ALL=(ALL) NOPASSWD: ALL" >/etc/sudoers.d/"$BENCH_USER"
-chmod 0440 /etc/sudoers.d/"$BENCH_USER"
-
-# --- 4. Install bench-cli (bench-setup.md §4). install.sh clones bench-cli to
-# ~/bench-cli, installs uv + Node, adds bench-cli to PATH in ~/.bashrc, sets up
-# the .admin-venv (flask/psutil/pymysql), and — the NOPASSWD sudoers file already
-# exists, so its own sudoers/Node steps run non-interactively. We then check out
-# the pinned ref so the golden is reproducible (install.sh tracks moving main).
+# --- 3. Install bench-cli — install.sh creates the bench user too (bench-setup.md
+# §3+§4). install.sh has two paths (bench-cli @ 03a4272 install.sh): run AS ROOT it
+# creates the `$BENCH_USER` (`useradd -m`, adds to sudo) + writes a visudo-validated
+# `/etc/sudoers.d/$BENCH_USER` (passwordless), then STOPS; run AS THAT USER it clones
+# bench-cli to ~/bench-cli, installs uv + Node + tzdata, adds bench-cli to PATH, and
+# sets up the .admin-venv (flask/psutil/pymysql/gunicorn). So we no longer hand-roll
+# useradd/usermod/sudoers — the root call does it (no explicit uid; frappe takes the
+# next free uid). We then check out the pinned ref so the golden is reproducible
+# (install.sh tracks moving main).
 #
-# Idempotent: run install.sh only on a FRESH guest (no bench-cli dir yet). A
-# re-run must NOT re-invoke install.sh: it `git pull`s to self-update, which
-# FATALs on the detached HEAD the pin below leaves behind ("You are not currently
-# on a branch"). Re-running just re-fetches + re-pins the ref, which is all the
-# golden's reproducibility needs. ---
+# Idempotent: the root call is a no-op-ish re-run (user exists → skips useradd,
+# rewrites the same sudoers); the user call runs install.sh only on a FRESH guest (no
+# bench-cli dir yet) — a re-run must NOT re-invoke it, as install.sh `git pull`s to
+# self-update and FATALs on the detached HEAD the pin below leaves ("not currently on
+# a branch"). Re-running just re-fetches + re-pins the ref. ---
+INSTALL_URL="https://raw.githubusercontent.com/frappe/bench-cli/$BENCH_CLI_REF/install.sh"
+curl -fsSL "$INSTALL_URL" | bash -s -- --user "$BENCH_USER" -y
 if [ ! -d "$BENCH_CLI_DIR/.git" ]; then
-	as_frappe "curl -fsSL https://raw.githubusercontent.com/frappe/bench-cli/$BENCH_CLI_REF/install.sh | bash"
+	as_frappe "curl -fsSL '$INSTALL_URL' | bash"
 fi
 as_frappe "git -C '$BENCH_CLI_DIR' fetch --quiet origin && git -C '$BENCH_CLI_DIR' checkout --quiet '$BENCH_CLI_REF'"
 
-# --- 5. Create the bench + drop our pinned bench.toml (bench-setup.md §5).
+# --- 4. Create the bench + drop our pinned bench.toml (bench-setup.md §5).
 # `bench new` scaffolds benches/<name>/ non-interactively (name positional, no
 # prompts); we overwrite its generated bench.toml with the committed one so the
 # image's config is ours, not bench-cli's template. Idempotent: skip `bench new`
@@ -149,17 +149,22 @@ if [ ! -f "$BENCH_DIR/bench.toml" ]; then
 fi
 install -m 0644 -o "$BENCH_USER" -g "$BENCH_USER" "$SRC_DIR/bench.toml" "$BENCH_DIR/bench.toml"
 
-# --- 6. `bench init` (bench-setup.md §6). The heavy, idempotent step that sets
+# --- 5. `bench init` (bench-setup.md §6). The heavy, idempotent step that sets
 # up EVERYTHING from bench.toml: the ZFS pool + datasets (volume.enabled), the
 # DEDICATED mariadb@atlas instance (provisioned, secured, enabled-at-boot) + Redis,
 # the uv venv, the Frappe clone, Node deps, the admin frontend, and — because
 # [production].nginx = true + process_manager = "systemd" — the production process
-# units + nginx config + dns_multitenant = 1. We `source .admin-venv/bin/activate`
-# first so bench-cli finds pymysql (it lives in the admin venv, not system python),
-# exactly as bench-setup.md does. ---
-as_frappe "source '$ADMIN_VENV/bin/activate' && bench -b '$BENCH_NAME' init"
+# units + nginx config + dns_multitenant = 1.
+#
+# This is the HEADLESS bake path: `bench init` does the full setup non-interactively
+# from bench.toml. (The new interactive `bench start` → browser setup-wizard flow in
+# bench-setup-manual.md is for an operator at a terminal; a bake has no browser, so
+# we keep `bench init`.) The old `source .admin-venv/bin/activate` pymysql workaround
+# is gone — current bench-cli runs `bench init` inside its managed admin venv itself,
+# so pymysql is found without a manual activate. ---
+as_frappe "bench -b '$BENCH_NAME' init"
 
-# --- 6b. Install the in-guest routing client (spec/18 Component D). The thin
+# --- 5b. Install the in-guest routing client (spec/18 Component D). The thin
 # "push" half of one-way self-service subdomain routing: the bench-cli new-site flow
 # runs `atlas-route register <label>` BEFORE creating the site (the authoritative
 # reservation; aborts on a non-zero exit) and `atlas-route deregister <label>` after
@@ -171,7 +176,7 @@ as_frappe "source '$ADMIN_VENV/bin/activate' && bench -b '$BENCH_NAME' init"
 # admin), since a bench in either mode can spin up routable sites. ---
 install -m 0755 "$SRC_DIR/atlas-route-client.py" /usr/local/bin/atlas-route
 
-# --- 7. Site mode only: bake a fully-created Frappe + ERPNext site, taking the
+# --- 6. Site mode only: bake a fully-created Frappe + ERPNext site, taking the
 # heaviest per-signup costs (`bench new-site` + `install-app erpnext`) once here.
 # admin mode bakes no site — the clone's domain maps to the admin app instead. ---
 if [ "$MODE" = "site" ]; then
@@ -214,7 +219,7 @@ else
 	as_frappe "bench -b '$BENCH_NAME' start"
 fi
 
-# --- 8. Stamp the resolved input commits. The Frappe branch (and ERPNext, and
+# --- 7. Stamp the resolved input commits. The Frappe branch (and ERPNext, and
 # bench-cli's main) can be a MOVING target — `develop` for the nightly variant — so
 # we record the exact commit each app was actually built from on `ATLAS_BUILD_*=`
 # lines. These are captured in the `bench-build` Task's stdout, which the Image
@@ -228,7 +233,7 @@ if [ "$MODE" = "site" ]; then
 	echo "ATLAS_BUILD_ERPNEXT_SHA=$(git_sha "$BENCH_DIR/apps/erpnext")"
 fi
 
-# --- 9. Trim build cruft so golden copies are lean. The stack is LEFT RUNNING.
+# --- 8. Trim build cruft so golden copies are lean. The stack is LEFT RUNNING.
 # The e2e re-asserts the bake over guest-SSH after the snapshot boots. ---
 apt-get clean
 rm -rf /var/lib/apt/lists/* "$BENCH_HOME/.cache" 2>/dev/null || true

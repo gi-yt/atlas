@@ -24,7 +24,7 @@ name = "atlas"
 python = "3.14"
 http_port = 8000
 socketio_port = 9000
-socketio_backend = "python"
+socketio_backend = "node"
 
 [[apps]]
 name = "frappe"
@@ -117,16 +117,17 @@ domain = ""
 pool = "bench-pool"
 backing = "image"
 
+# Keep our PINNED size (15G). bench-cli auto-sizes the image from the host's free
+# disk when it generates a bench.toml (the manual-session droplet had lots of free
+# space, so it chose 55G) — but our build VM disk budget is fixed, so we pin 15G
+# and do NOT adopt the session's auto-chosen value.
 [volume.image]
 size = "15G"
 path = "/var/lib/bench-zfs/bench-pool.img"
 
-[volume.benches]
+# Single dataset (current bench-cli schema) — replaces the old split
+# [volume.benches] / [volume.mariadb] tables. bench code + MariaDB datadir live on
+# datasets under this one reservation/quota.
+[volume.dataset]
 reservation = "1G"
 quota = "9G"
-data_dir = "/home/bench"
-
-[volume.mariadb]
-reservation = "1G"
-quota = "6G"
-data_dir = "/var/lib/mysql"
