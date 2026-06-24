@@ -17,9 +17,9 @@ no_cache = 1
 
 def get_context(context):
 	"""Hand the form the domain suffix (so it can preview `<label>.<domain>`). A
-	logged-in user skips signup — bounce them to their dashboard."""
+	logged-in user skips signup — bounce them off the public form."""
 	if frappe.session.user != "Guest":
-		frappe.local.flags.redirect_location = "/dashboard"
+		frappe.local.flags.redirect_location = "/app"
 		raise frappe.Redirect
 	# Best-effort: if no Root Domain is configured the suffix preview is blank
 	# (the API still fails loud on submit). Don't 500 the public page over it.

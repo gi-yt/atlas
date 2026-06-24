@@ -151,7 +151,7 @@ after the email is proven.
   every owned doctype: a non-owner or guest gets one neutral "not found or not
   yours" message — never another user's site or password.
 - **Account model.** Fulfilment creates (or reuses) a real `User` — account-light:
-  one verified account, one Site per signup, more Sites later through the SPA. The
+  one verified account, one Site per signup, more Sites later through Central. The
   `Atlas User` role is **`desk_access = 0`** (the role fixture): a fulfilled user
   is a **Website User**, kept off Desk. (If the role ever drifts to desk access,
   Frappe would promote the user to System User — the fixture value is load-bearing.)
@@ -311,8 +311,8 @@ bench would need.
 password (`Site.BAKED_ADMIN_PASSWORD`, in lockstep with build.sh's
 `BAKED_ADMIN_PASSWORD`) — the deploy no longer resets it per VM. It is stored
 encrypted in `Site.admin_password` (`Password` field) by the orchestration *before*
-the readiness wait so it survives a later http-gate timeout, and shown to the owner
-in the SPA so they can sign in (and rotate it). The db root password is never
+the readiness wait so it survives a later http-gate timeout, and surfaced to the
+owner (via Central) so they can sign in (and rotate it). The db root password is never
 surfaced (single-tenant, localhost-only). Rotating the per-site password lazily
 (first login / a background job) is deferred — the signup path does zero password
 work, which is what removed the ~28s `bench frappe` boot.

@@ -30,9 +30,11 @@ keep it the source of truth.
   Atlas stays policy-unaware — it attributes each resource to a `Tenant`
   ([02-doctypes.md § Tenant](./02-doctypes.md#tenant)) for grouping and enforces
   only **physical capacity**. Two Atlas-local roles remain: the operator
-  (System Manager) and the legacy **Atlas User** who owns the machines they
-  create in the dashboard SPA (see [11-user-ui.md](./11-user-ui.md)); the SPA is
-  transitional and will be retired once Central fronts the user experience.
+  (System Manager) and the owner-scoped **Atlas User** who owns the machines they
+  create (see [11-user-ui.md](./11-user-ui.md)). The frappe-ui dashboard SPA that
+  first introduced the Atlas User has been retired now that Central fronts the
+  user experience; the owner-scoping stays, because self-serve signup users
+  depend on it until signup moves behind Central.
 - No CLI. We will build one later on top of the same Frappe APIs.
 - No private networking between VMs, no overlay. No inbound IPv4 to the
   guest and no per-VM public IPv4 (outbound v4 is via host NAT44).
@@ -55,41 +57,41 @@ keep it the source of truth.
   and are never operator-facing artifacts or transportable between hosts.
   (Disk snapshots — instant copy-on-write LVM thin snapshots of the VM's
   disk — are supported; same doc.)
-- No autoscaling or scheduling. The operator picks the server in Desk; a user
-  creating a machine in the SPA gets the first Active server with room (a
+- No autoscaling or scheduling. The operator picks the server in Desk; an
+  owner-scoped user creating a machine gets the first Active server with room (a
   default, not a scheduler — see [11-user-ui.md](./11-user-ui.md)). "Room" is
   oversubscribable: a host's effective vCPU budget is its physical total times
   `Atlas Settings.overprovision_factor` (default 1), and a host whose size we
   can't price counts as unlimited.
 - No metrics or alerting. `journalctl` is enough.
-- Two UIs, two audiences. **Operators** use Desk (`/app/atlas`) — the whole
-  fleet, providers, servers, image sync, ad-hoc tasks. **Users** use a small
-  frappe-ui SPA at `/dashboard` that exposes only their own Virtual Machines,
-  Images (read-only, shared), and Snapshots; Server, Task, and the Settings
-  Singles are invisible and access-denied to them. The SPA defines no new server-side
-  logic or API — it drives the existing whitelisted methods through standard
-  Frappe endpoints. See [11-user-ui.md](./11-user-ui.md). (Earlier iterations
-  said "no web UI of our own; Desk is the UI" — that held for the operator-only
-  PoC; the user SPA is the deliberate, scoped reversal documented in 11.)
+- One in-app UI, two audiences. **Operators** use Desk (`/app/atlas`) — the
+  whole fleet, providers, servers, image sync, ad-hoc tasks. **Users** are
+  owner-scoped `Atlas User` accounts that can touch only their own Virtual
+  Machines, Images (read-only, shared), and Snapshots; Server, Task, and the
+  Settings Singles are invisible and access-denied to them. That boundary lives
+  in the **permission layer**, so it holds for any client. A frappe-ui SPA at
+  `/dashboard` was the user surface for one iteration and has been **retired**
+  now that Central is the front door. See [11-user-ui.md](./11-user-ui.md).
 - **Central is the front door.** Above Atlas sits **Central**
   ([16-central.md](./16-central.md)) — the global control plane that owns
   identity, teams, and billing and is the face of all customer actions. Central
   drives a regional Atlas by **logging in as a single service user and calling
-  the same whitelisted methods** the SPA does, passing the target `Tenant` in
-  the request payload. Atlas exposes no separate command API; Central is just an
-  authenticated client of the existing Frappe endpoints. The operator Desk and
-  the user SPA continue to work; the SPA is on a path to retirement as Central's
-  own console takes over the user surface.
+  the existing whitelisted methods**, passing the target `Tenant` in the request
+  payload. Atlas exposes no separate command API; Central is just an
+  authenticated client of the existing Frappe endpoints. The operator Desk
+  continues to work; Central's console is now the user-facing surface, which is
+  why the `/dashboard` SPA was removed.
 
 ## Operating principles
 
-1. **Desk is the operator UI; the SPA is the user UI.** Every *operator*
-   operation is a DocType, a button on a DocType, or a server method on a
-   DocType, rendered in Desk — no custom operator pages. *Users* get a
-   separate frappe-ui SPA at `/dashboard` ([11-user-ui.md](./11-user-ui.md))
-   that is a thin client over those same DocTypes and whitelisted methods: it
-   adds no server-side logic and no API of its own, and it is scoped by
-   permissions to the user's own resources.
+1. **Desk is the operator UI.** Every *operator* operation is a DocType, a
+   button on a DocType, or a server method on a DocType, rendered in Desk — no
+   custom operator pages. *Users* are owner-scoped `Atlas User` accounts
+   ([11-user-ui.md](./11-user-ui.md)): the same DocTypes and whitelisted methods,
+   scoped by the permission layer to the user's own resources, with no
+   user-specific server-side logic or API of their own. (A frappe-ui SPA at
+   `/dashboard` was their surface for one iteration; it was retired when Central
+   became the front door — the owner-scoping it relied on stays.)
 2. **The Frappe site is the source of truth.** A server is a cache; we can
    rebuild its on-disk state from the Frappe database. We do not scrape state
    back from the server.
@@ -99,8 +101,8 @@ keep it the source of truth.
    line out); a couple of trivial shell scripts (e.g. `reboot-server.sh`)
    remain. See [04-tasks.md](./04-tasks.md).
 4. **One virtual machine per server slot.** The operator picks the server
-   when provisioning in Desk. No scheduler. A *user* creating a machine in the
-   SPA does not pick a server — the controller fills the first Active server
+   when provisioning in Desk. No scheduler. An owner-scoped *user* creating a
+   machine does not pick a server — the controller fills the first Active server
    with room and the default image ([11-user-ui.md](./11-user-ui.md),
    `placement.py`); the operator still owns which servers are Active. That is a
    default, not a scheduler.
@@ -128,7 +130,7 @@ keep it the source of truth.
 8. [Images](./08-images.md)
 9. [Roadmap and deferred decisions](./09-roadmap.md)
 10. [Desk UI (operator)](./10-desk-ui.md)
-11. [User UI — the dashboard SPA](./11-user-ui.md)
+11. [User UI — the owner-scoped end-user boundary](./11-user-ui.md)
 12. [The reverse proxy](./12-proxy.md)
 13. [TLS & domain layer](./13-tls.md)
 14. [Self-serve sites](./14-self-serve.md)

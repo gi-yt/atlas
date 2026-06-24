@@ -52,11 +52,11 @@ ordinary authenticated Frappe client:
   service user (a Frappe API key/secret), the same `token key:secret` header the
   telemetry client uses in reverse. It is *not* a per-customer login.
 - **Existing whitelisted methods are the command surface.** Central calls the
-  same methods the dashboard SPA does — `Virtual Machine.provision` /
+  standard controller methods — `Virtual Machine.provision` /
   `start` / `stop` / `restart` / `pause` / `resume` / `snapshot` / `rebuild` /
   `resize` / `terminate`, document insert via `/api/v2/document`,
-  `run_doc_method` — with the exact argument shape the SPA sends. Atlas adds no
-  inbound command endpoint.
+  `run_doc_method` — the same surface Desk drives. Atlas adds no inbound command
+  endpoint.
 - **Tenant travels in the payload.** Central passes the target `Tenant`
   ([02-doctypes.md § Tenant](./02-doctypes.md#tenant)) as a field on the create
   call. The controller stamps it `set_only_once` / immutable; it is

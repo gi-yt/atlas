@@ -77,12 +77,11 @@ doctype_js = {
 # here, so the residual one-click launcher cost is acceptable.
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 
-# The user-facing SPA (frappe-ui) is served at /dashboard. The Vue app owns
-# every sub-path under it; the host page is atlas/www/dashboard.html, built
-# from atlas/frontend. Operators use Desk (/app/atlas); users use this.
-# See spec/11-user-ui.md.
+# The user-facing SPA (formerly served at /dashboard) has been retired — Central
+# is now the customer-facing front door (spec/16-central.md). Operators use Desk
+# (/app/atlas); the only remaining web surface here is the self-serve signup
+# on-ramp (/signup → /verify → /site-status). See spec/11-user-ui.md.
 website_route_rules = [
-	{"from_route": "/dashboard/<path:app_path>", "to_route": "dashboard"},
 	# The verified-signup landing page reads better at /site-status, but a www
 	# page with a controller must be named with an importable module name
 	# (atlas/www/site_status.py — a hyphen there can't be imported, so get_context
@@ -128,8 +127,11 @@ website_route_rules = [
 
 # Fixtures
 # --------
-# The Atlas User role (the SPA's user audience). Scoped to just this role so a
-# migrate doesn't sweep every Role on the site. See spec/11-user-ui.md.
+# The Atlas User role — the owner-scoped end-user audience (self-serve signup
+# creates these users; see atlas/atlas/doctype/site_request). The SPA that first
+# introduced this role is retired, but the role and its row-level scoping stay
+# until signup moves to Central. Scoped to just this role so a migrate doesn't
+# sweep every Role on the site. See spec/11-user-ui.md.
 fixtures = [
 	{"dt": "Role", "filters": [["name", "=", "Atlas User"]]},
 ]
@@ -180,10 +182,11 @@ after_migrate = "atlas.install.after_migrate"
 
 # Permissions
 # -----------
-# Row-level access for the Atlas User audience (the dashboard SPA). Operators
-# (System Manager) are unrestricted; users see only their own machines /
-# snapshots / SSH keys, and — for the inline Activity panel — only the Tasks of
-# a machine they own. See atlas/atlas/permissions.py and spec/11-user-ui.md.
+# Row-level access for the Atlas User audience (self-serve signup users; the SPA
+# that first relied on this is retired but the scoping stays). Operators (System
+# Manager) are unrestricted; users see only their own machines / snapshots / SSH
+# keys, and — for the inline Activity panel — only the Tasks of a machine they
+# own. See atlas/atlas/permissions.py and spec/11-user-ui.md.
 
 permission_query_conditions = {
 	"Virtual Machine": "atlas.atlas.permissions.owner_only",
