@@ -124,6 +124,31 @@ def confirm_tunnel() -> dict:
 
 
 @frappe.whitelist()
+def deprovision_tunnel() -> dict:
+	"""Tear down this Atlas's tunnel + management firewall — the inverse of
+	provision_tunnel. Reverts the firewall first (firewall-revert.py: restore public
+	access, drop the persisted ruleset, disable the boot unit), then tears wg0
+	(tunnel-down.py), then clears the tunnel fields in Central Settings. Both scripts
+	are idempotent (best-effort, `check=False`), so this is safe to re-run.
+
+	Central calls this over the tunnel while Active: firewall-revert reopens the public
+	interface and tunnel-down then drops wg0, so the HTTP response races the teardown.
+	The work has already committed host-side regardless; Central tolerates the dropped
+	connection and re-verifies over the now-public base_url (see central remove_tunnel).
+	"""
+	frappe.only_for("System Manager")
+	run_local_task(script="firewall-revert.py", variables={})
+	run_local_task(script="tunnel-down.py", variables={})
+
+	settings = frappe.get_single("Central Settings")
+	settings.tunnel_status = "Inactive"
+	for field in ("tunnel_ip", "tunnel_cidr", "hub_public_key", "hub_endpoint", "wg_public_key", "wg_listen_port"):
+		settings.set(field, None)
+	settings.save(ignore_permissions=True)
+	return {"tunnel_status": "Inactive"}
+
+
+@frappe.whitelist()
 def tunnel_status() -> dict:
 	"""Read-back of the tunnel fields for diagnostics."""
 	frappe.only_for("System Manager")

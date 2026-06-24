@@ -140,6 +140,36 @@ class IntegrationTestCentralLink(IntegrationTestCase):
 			frappe.db.get_single_value("Central Settings", "tunnel_status"), "Active"
 		)
 
+	# ----- deprovision_tunnel ----------------------------------------------
+
+	@patch.object(central_link, "run_local_task")
+	def test_deprovision_tunnel_tears_down_and_clears(self, run_local_task) -> None:
+		run_local_task.side_effect = [_task(TUNNEL_UP_RESULT), _task()]
+		central_link.provision_tunnel(**PAYLOAD)  # seed an Active-ish provisioned state
+
+		run_local_task.reset_mock()
+		run_local_task.side_effect = None  # drop the exhausted provision sequence
+		run_local_task.return_value = _task()
+		out = central_link.deprovision_tunnel()
+
+		self.assertEqual(out, {"tunnel_status": "Inactive"})
+		# firewall reverted BEFORE the tunnel drops, so a remote caller stays reachable.
+		scripts = [call.kwargs["script"] for call in run_local_task.call_args_list]
+		self.assertEqual(scripts, ["firewall-revert.py", "tunnel-down.py"])
+
+		settings = frappe.get_single("Central Settings")
+		self.assertEqual(settings.tunnel_status, "Inactive")
+		self.assertFalse(settings.tunnel_ip)
+		self.assertFalse(settings.wg_public_key)
+		self.assertFalse(settings.hub_public_key)
+
+	@patch.object(central_link, "run_local_task")
+	def test_deprovision_requires_system_manager(self, run_local_task) -> None:
+		frappe.set_user(_make_plain_user())
+		with self.assertRaises(frappe.PermissionError):
+			central_link.deprovision_tunnel()
+		run_local_task.assert_not_called()
+
 	# ----- tunnel_status ---------------------------------------------------
 
 	@patch.object(central_link, "run_local_task")
