@@ -51,6 +51,7 @@ REGION = "blr1"
 def _ensure_root_domain() -> None:
 	"""A single active Root Domain `blr1.frappe.dev` (region blr1) — the active region
 	the endpoints resolve against. Mirrors test_api_signup."""
+	frappe.db.set_single_value("Atlas Settings", "region", REGION)
 	frappe.db.set_single_value("Route53 Settings", "domain_provider_type", "Route53")
 	frappe.db.set_single_value("Atlas Settings", "tls_provider_type", "Let's Encrypt")
 	if not frappe.db.exists("Root Domain", ROOT_DOMAIN):

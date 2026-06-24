@@ -17,7 +17,19 @@ IMMUTABLE_AFTER_INSERT = ("domain", "region")
 
 class RootDomain(Document):
 	def before_insert(self) -> None:
+		self._denormalize_region()
 		self._denormalize_provider_types()
+
+	def _denormalize_region(self) -> None:
+		"""Freeze this Atlas's region (`Atlas Settings.region`, the single source of
+		truth) onto the row, so a later instance-region change never re-points an
+		existing domain's proxy-fleet join key. The operator does not type it; an
+		explicit value (a migration backfill, or a test) is honoured. Mirrors
+		`_denormalize_provider_types`."""
+		if not self.region:
+			from atlas.atlas.placement import atlas_region
+
+			self.region = atlas_region()
 
 	def _denormalize_provider_types(self) -> None:
 		"""Freeze the active DNS / TLS vendor types onto the row, so a later vendor

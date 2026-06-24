@@ -16,7 +16,12 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
-from atlas.atlas.placement import active_root_domain, default_bench_snapshot, warm_bench_snapshot_for_server
+from atlas.atlas.placement import (
+	active_root_domain,
+	atlas_region,
+	default_bench_snapshot,
+	warm_bench_snapshot_for_server,
+)
 from atlas.atlas.sizes import SIZE_PRESETS
 from atlas.atlas.subdomain_label import (
 	RESERVED_SUBDOMAINS,
@@ -123,12 +128,13 @@ class Site(Document):
 	# ----- routing identity (Contract A) ---------------------------------
 
 	def _apply_region_default(self) -> None:
-		"""Resolve the region from the single active Root Domain (the user never
-		picks it). No-op when already set (a retry, or an operator who supplied
-		it). The domain suffix is read back from the same row in
-		_set_name_from_routing."""
+		"""Resolve the region from `Atlas Settings.region` (the single source of
+		truth; the user never picks it). No-op when already set (a retry, or an
+		operator who supplied it). The domain suffix is read from the active Root
+		Domain in _set_name_from_routing — that row's region is denormalized from the
+		same Atlas Settings.region, so the two stay consistent."""
 		if not self.region:
-			self.region = active_root_domain().region
+			self.region = atlas_region()
 
 	def _set_name_from_routing(self) -> None:
 		"""Build the one routing string: `<subdomain>.<region domain>`, the FQDN

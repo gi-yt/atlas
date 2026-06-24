@@ -21,7 +21,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import add_to_date, get_datetime, now_datetime
 
-from atlas.atlas.placement import active_root_domain
+from atlas.atlas.placement import atlas_region
 from atlas.atlas.subdomain_label import normalize, validate_label, validate_reserved
 
 # How long a verification token stays valid, measured from the request's
@@ -43,7 +43,7 @@ class SiteRequest(Document):
 		validate_reserved(self.subdomain)
 		self.subdomain = normalize(self.subdomain)
 		if not self.region:
-			self.region = active_root_domain().region
+			self.region = atlas_region()
 		if not self.token:
 			self.token = frappe.generate_hash(length=32)
 		if not self.status:

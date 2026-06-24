@@ -5,6 +5,8 @@
  "editable_grid": 0,
  "engine": "InnoDB",
  "field_order": [
+  "section_break_instance",
+  "region",
   "section_break_provider",
   "provider_type",
   "column_break_provider",
@@ -23,6 +25,18 @@
   "ssh_private_key_path"
  ],
  "fields": [
+  {
+   "fieldname": "section_break_instance",
+   "fieldtype": "Section Break",
+   "label": "Instance"
+  },
+  {
+   "fieldname": "region",
+   "fieldtype": "Data",
+   "label": "Region",
+   "reqd": 1,
+   "description": "This Atlas instance's single region (e.g. blr1, nyc3). The one source of truth for region: the proxy-fleet join key Subdomain/Site/Port Mapping/proxy VMs share, the label that separates this bench's servers in a shared cloud account, and the region announced to Central at Register. Root Domain denormalizes it at insert."
+  },
   {
    "fieldname": "section_break_provider",
    "fieldtype": "Section Break",

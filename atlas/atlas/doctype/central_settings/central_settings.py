@@ -25,7 +25,6 @@ class CentralSettings(Document):
 		enabled: DF.Check
 		last_event_status: DF.SmallText | None
 		last_sync: DF.Datetime | None
-		region: DF.Data | None
 		registered_on: DF.Datetime | None
 		url: DF.Data
 	# end: auto-generated types
@@ -75,11 +74,14 @@ class CentralSettings(Document):
 		"""The registration payload Central matches against its operator-created
 		Atlas Instance row. Central keys on region; base_url is sent so the operator
 		can confirm the row points at this Atlas. Field names match Central's
-		`central.api.atlas.register` contract."""
-		region = self.region or frappe.conf.get("atlas_do_region")
-		if not region:
-			frappe.throw(_("Set a Region (or atlas_do_region in site config) before registering"))
+		`central.api.atlas.register` contract.
+
+		The region is the single `Atlas Settings.region` source of truth
+		(`placement.atlas_region`) — Central Settings no longer carries its own
+		region copy. Fails loud when unset."""
+		from atlas.atlas.placement import atlas_region
+
 		return {
-			"region": region,
+			"region": atlas_region(),
 			"base_url": frappe.utils.get_url(),
 		}

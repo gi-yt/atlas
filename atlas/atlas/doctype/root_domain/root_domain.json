@@ -32,9 +32,9 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Region",
-   "reqd": 1,
+   "read_only": 1,
    "set_only_once": 1,
-   "description": "The proxy fleet this domain fronts. Join key to Virtual Machine.region (is_proxy=1)."
+   "description": "The proxy fleet this domain fronts. Join key to Virtual Machine.region (is_proxy=1). Denormalized from Atlas Settings.region at insert (the single source of truth) — the operator does not type it; switching the instance region never re-points an existing domain's region."
   },
   {
    "fieldname": "column_break_header",

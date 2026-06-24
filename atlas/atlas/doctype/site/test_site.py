@@ -57,7 +57,8 @@ def _make_atlas_user(email: str) -> str:
 
 def _ensure_root_domain() -> None:
 	# The active DNS / TLS vendor types live on the Settings singles; Root Domain
-	# denormalizes them at insert.
+	# denormalizes them at insert. Site reads region from Atlas Settings.region.
+	frappe.db.set_single_value("Atlas Settings", "region", REGION)
 	frappe.db.set_single_value("Route53 Settings", "domain_provider_type", "Route53")
 	frappe.db.set_single_value("Atlas Settings", "tls_provider_type", "Let's Encrypt")
 	if not frappe.db.exists("Root Domain", ROOT_DOMAIN):

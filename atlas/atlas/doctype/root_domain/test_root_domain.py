@@ -26,6 +26,7 @@ def _make(domain: str, region: str):
 
 class TestRootDomain(IntegrationTestCase):
 	def setUp(self) -> None:
+		frappe.db.set_single_value("Atlas Settings", "region", "blr1")
 		frappe.db.set_single_value("Route53 Settings", "domain_provider_type", "Route53")
 		frappe.db.set_single_value("Atlas Settings", "tls_provider_type", "Let's Encrypt")
 		for name in frappe.get_all("TLS Certificate", pluck="name"):
@@ -70,6 +71,14 @@ class TestRootDomain(IntegrationTestCase):
 		).insert(ignore_permissions=True)
 		self.assertEqual(domain.domain_provider_type, "Route53")
 		self.assertEqual(domain.tls_provider_type, "Let's Encrypt")
+
+	def test_region_denormalized_from_atlas_settings_when_omitted(self) -> None:
+		# before_insert fills region from Atlas Settings.region (set in setUp) — the
+		# single source of truth; the operator does not type it on the row.
+		domain = frappe.get_doc({"doctype": "Root Domain", "domain": "auto1.frappe.dev"}).insert(
+			ignore_permissions=True
+		)
+		self.assertEqual(domain.region, "blr1")
 
 	def test_blank_types_fail_loud(self) -> None:
 		# With the Settings singles unset, the denormalization leaves blanks and the

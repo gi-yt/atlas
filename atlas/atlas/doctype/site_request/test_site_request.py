@@ -35,6 +35,7 @@ def _ensure_atlas_user_role() -> None:
 
 
 def _ensure_root_domain() -> None:
+	frappe.db.set_single_value("Atlas Settings", "region", REGION, update_modified=False)
 	frappe.db.set_single_value("Route53 Settings", "domain_provider_type", "Route53", update_modified=False)
 	frappe.db.set_single_value("Atlas Settings", "tls_provider_type", "Let's Encrypt", update_modified=False)
 	if not frappe.db.exists("Root Domain", ROOT_DOMAIN):

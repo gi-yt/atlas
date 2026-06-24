@@ -34,7 +34,10 @@ Site config keys (set with `bench --site <site> set-config -p <key> <value>`):
 DigitalOcean providers also need:
 
     atlas_do_token                DO personal access token
-    atlas_do_region               e.g. "blr1"
+    atlas_do_region               e.g. "blr1". Seeds Atlas Settings.region (this
+                                  Atlas's single region, the source of truth) and
+                                  DigitalOcean Settings.region (the DO API region).
+                                  atlas_tls_region overrides the former.
     atlas_do_default_size         vendor-native slug, e.g. "s-2vcpu-4gb-intel"
                                   (Atlas prefixes "DigitalOcean/" internally)
     atlas_do_default_image        vendor-native slug, e.g. "ubuntu-24-04-x64"
@@ -385,7 +388,23 @@ def ensure_provider() -> str:
 			f"atlas_provider_type must be DigitalOcean, Scaleway or Self-Managed, got {provider_type!r}"
 		)
 
-	# Atlas Settings — active provider_type + SSH triplet.
+	# Atlas Settings — region (the single source of truth) + active provider_type +
+	# SSH triplet. Seed region BEFORE any provision call: provision_region() (server
+	# naming) reads it, and it must be present from the first bootstrap step. Prefer
+	# the explicit atlas_tls_region; else fall back to the active vendor's own region
+	# key (DO region / Scaleway zone) — Atlas pins one region per vendor.
+	region = (
+		frappe.conf.get("atlas_tls_region")
+		or frappe.conf.get("atlas_do_region")
+		or frappe.conf.get("atlas_scw_zone")
+	)
+	if not region:
+		frappe.throw(
+			"Set atlas_tls_region (or the active vendor's region key: atlas_do_region / "
+			"atlas_scw_zone) — Atlas Settings.region is required."
+		)
+	frappe.db.set_single_value("Atlas Settings", "region", region, update_modified=False)
+	print(f"[bootstrap] set Atlas Settings.region = {region!r}")
 	frappe.db.set_single_value("Atlas Settings", "provider_type", provider_type, update_modified=False)
 	print(f"[bootstrap] set Atlas Settings.provider_type = {provider_type!r}")
 	frappe.db.set_single_value(
