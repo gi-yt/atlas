@@ -36,10 +36,7 @@ function render_intro(frm) {
 	if (frm.is_new()) {
 		frm.set_intro(
 			__(
-				"On your machine run <code>wg genkey | tee privatekey | wg pubkey > publickey</code>, " +
-					"paste the <b>public</b> key below, pick the VM, and Save. Then Bring up opens the " +
-					"tunnel and Show client config gives you the connection details. Your private key " +
-					"never leaves your machine."
+				"On your machine run <code>wg genkey | tee privatekey | wg pubkey > publickey</code>, paste the <b>public</b> key below, pick the VM, and Save. Then Bring up opens the tunnel and Show client config gives you the connection details. Your private key never leaves your machine."
 			),
 			"blue"
 		);
@@ -92,10 +89,7 @@ function open_config_dialog(frm, cfg) {
 				fieldname: "summary",
 				fieldtype: "HTML",
 				options: `<p class="text-muted small">${__(
-					"This tunnel reaches <b>{0}</b> at <code>{1}</code> and nothing else. Save the block " +
-						"below as <code>/etc/wireguard/atlas.conf</code> and replace " +
-						"<code>&lt;your client private key&gt;</code> with the contents of your " +
-						"<code>privatekey</code> file — Atlas never sees it.",
+					"This tunnel reaches <b>{0}</b> at <code>{1}</code> and nothing else. Save the block below as <code>/etc/wireguard/atlas.conf</code> and replace <code>&lt;your client private key&gt;</code> with the contents of your <code>privatekey</code> file — Atlas never sees it.",
 					[
 						frappe.utils.escape_html(frm.doc.virtual_machine),
 						frappe.utils.escape_html(cfg.allowed_ips),
@@ -134,8 +128,7 @@ function confirm_revoke(frm) {
 	frappe.atlas.confirm_destructive({
 		title: __("Revoke this tunnel?"),
 		body_html: `<p>${__(
-			"Tears down the WireGuard interface on the host and frees its slot. The client " +
-				"loses access immediately. This cannot be undone — issue a new tunnel to reconnect."
+			"Tears down the WireGuard interface on the host and frees its slot. The client loses access immediately. This cannot be undone — issue a new tunnel to reconnect."
 		)}</p>`,
 		match_string: frm.doc.virtual_machine,
 		match_label: __("Type the Virtual Machine name to confirm"),

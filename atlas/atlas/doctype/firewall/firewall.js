@@ -17,11 +17,7 @@ function render_intro(frm) {
 	if (frm.is_new()) {
 		frm.set_intro(
 			__(
-				"A firewall restricts this VM's <b>public</b> inbound to the ports you list — everything " +
-					"else from the internet is dropped. The VPN tunnel always bypasses it (full access). " +
-					"Pick the VM, add the allowed ports, Save, then Apply to host. An empty list with " +
-					"Enabled on means <b>deny all public</b> (VPN-only). Deleting the firewall reopens the " +
-					"VM to the public internet."
+				"A firewall restricts this VM's <b>public</b> inbound to the ports you list — everything else from the internet is dropped. The VPN tunnel always bypasses it (full access). Pick the VM, add the allowed ports, Save, then Apply to host. An empty list with Enabled on means <b>deny all public</b> (VPN-only). Deleting the firewall reopens the VM to the public internet."
 			),
 			"blue"
 		);
@@ -39,8 +35,7 @@ function render_intro(frm) {
 	if (!(frm.doc.rules || []).length) {
 		frm.set_intro(
 			__(
-				"Deny all public — no public port is open, so only the VPN tunnel reaches this VM. " +
-					"Add ports and Apply to host to open them."
+				"Deny all public — no public port is open, so only the VPN tunnel reaches this VM. Add ports and Apply to host to open them."
 			),
 			frm.doc.status === "Active" ? "green" : "orange"
 		);
@@ -49,8 +44,7 @@ function render_intro(frm) {
 	if (frm.doc.status === "Active") {
 		frm.set_intro(
 			__(
-				"Enforced on {0}. Public traffic reaches only the listed ports; the VPN tunnel bypasses " +
-					"this. Edit and Apply to host to change.",
+				"Enforced on {0}. Public traffic reaches only the listed ports; the VPN tunnel bypasses this. Edit and Apply to host to change.",
 				[frm.doc.server]
 			),
 			"green"
