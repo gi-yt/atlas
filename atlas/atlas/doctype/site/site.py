@@ -68,6 +68,25 @@ IMMUTABLE_AFTER_INSERT = (
 
 
 class Site(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		admin_password: DF.Password | None
+		deploying_started: DF.Datetime | None
+		provisioning_started: DF.Datetime | None
+		region: DF.Data | None
+		running_started: DF.Datetime | None
+		status: DF.Literal["Pending", "Provisioning", "Deploying", "Running", "Failed", "Terminated"]
+		subdomain: DF.Data
+		subdomain_doc: DF.Link | None
+		virtual_machine: DF.Link | None
+	# end: auto-generated types
+
 	def before_insert(self) -> None:
 		"""Fill what the user didn't pick and gate the routing string.
 

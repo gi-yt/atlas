@@ -27,6 +27,19 @@ IMMUTABLE_AFTER_INSERT = (
 
 
 class Tenant(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		central_reference: DF.Data
+		email: DF.Data
+		title: DF.Data | None
+	# end: auto-generated types
+
 	def autoname(self) -> None:
 		self.name = str(uuid.uuid4())
 

@@ -22,6 +22,27 @@ from atlas.atlas import provisioning
 
 
 class AtlasSettings(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		default_bench_snapshot: DF.Link | None
+		default_user_image: DF.Link | None
+		dns_provider_type: DF.Literal["", "Route53", "Cloudflare"]
+		fail_scripts: DF.SmallText | None
+		overprovision_factor: DF.Float
+		provider_type: DF.Literal["", "DigitalOcean", "Scaleway", "Self-Managed", "Fake"]
+		region: DF.Data
+		ssh_private_key_path: DF.Data
+		ssh_public_key: DF.LongText | None
+		tcp_port_pool: DF.Data | None
+		tls_provider_type: DF.Literal["", "Let's Encrypt", "ZeroSSL", "Self-Managed"]
+	# end: auto-generated types
+
 	def validate(self) -> None:
 		self._validate_provider_switch()
 

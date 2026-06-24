@@ -16,6 +16,21 @@ IMMUTABLE_AFTER_INSERT = ("domain", "region")
 
 
 class RootDomain(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		dns_provider_type: DF.Literal["", "Route53", "Cloudflare"]
+		domain: DF.Data
+		is_active: DF.Check
+		region: DF.Data | None
+		tls_provider_type: DF.Literal["", "Let's Encrypt", "ZeroSSL", "Self-Managed"]
+	# end: auto-generated types
+
 	def before_insert(self) -> None:
 		self._denormalize_region()
 		self._denormalize_provider_types()

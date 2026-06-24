@@ -18,6 +18,28 @@ IMMUTABLE_AFTER_INSERT = (
 
 
 class VirtualMachineImage(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		build_mode: DF.Literal["", "site", "admin"]
+		default_disk_gigabytes: DF.Int
+		image_name: DF.Data
+		is_active: DF.Check
+		kernel_filename: DF.Data
+		kernel_sha256: DF.Data | None
+		kernel_url: DF.Data | None
+		rootfs_filename: DF.Data
+		rootfs_sha256: DF.Data | None
+		rootfs_url: DF.Data | None
+		tenant: DF.Link | None
+		title: DF.Data | None
+	# end: auto-generated types
+
 	# The four fields that describe a from-URL image's download. They used to be
 	# `reqd` in the JSON; now that a local (promoted-from-snapshot) image legitimately
 	# leaves them ALL empty, `reqd` is gone and validate() enforces the coherent

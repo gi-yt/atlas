@@ -38,6 +38,19 @@ KNOWN_KEY_TYPES = (
 
 
 class SSHKey(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		fingerprint: DF.Data | None
+		key_name: DF.Data
+		public_key: DF.LongText
+	# end: auto-generated types
+
 	def validate(self) -> None:
 		self.public_key = (self.public_key or "").strip()
 		self.fingerprint = fingerprint(self.public_key)

@@ -35,6 +35,23 @@ ATLAS_USER_ROLE = "Atlas User"
 
 
 class SiteRequest(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		email: DF.Data
+		region: DF.Data | None
+		site: DF.Link | None
+		status: DF.Literal["Pending", "Verified", "Fulfilled", "Expired"]
+		subdomain: DF.Data
+		token: DF.Data | None
+		verified_at: DF.Datetime | None
+	# end: auto-generated types
+
 	def before_insert(self) -> None:
 		"""Gate the label (same Contract-A rules as Site), resolve the region the
 		user never picks, mint the verification token, and start Pending. The Site

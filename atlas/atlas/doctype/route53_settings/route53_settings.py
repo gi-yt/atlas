@@ -15,6 +15,19 @@ from frappe.model.document import Document
 
 
 class Route53Settings(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		access_key_id: DF.Data
+		region: DF.Data | None
+		secret_access_key: DF.Password
+	# end: auto-generated types
+
 	@frappe.whitelist()
 	def test_connection(self) -> dict:
 		"""Test Connection button — Route 53 ListHostedZones via the DNS provider."""
