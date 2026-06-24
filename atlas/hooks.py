@@ -218,6 +218,10 @@ doc_events = {
 		"on_update": "atlas.atlas.central_report.on_vm_update",
 		"on_trash": "atlas.atlas.central_report.on_vm_trash",
 	},
+	"Site": {
+		"after_insert": "atlas.atlas.central_report.on_site_after_insert",
+		"on_update": "atlas.atlas.central_report.on_site_update",
+	},
 	"Virtual Machine Snapshot": {
 		"on_update": "atlas.atlas.central_report.on_snapshot_update",
 	},
