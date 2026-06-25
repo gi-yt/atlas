@@ -158,16 +158,93 @@ def _build_command(recipe: ImageRecipe) -> str:
 	return f"{prefix}chmod +x {entry} && {entry} {shlex.quote(recipe.effective_build_mode)}"
 
 
+# How much streamed live output to keep on the Task row while it runs. A
+# `bench init` log runs to hundreds of KB; the full text still lands in `stdout`
+# at completion, so the live buffer only needs to be the recent tail an operator
+# is actually watching. Kept small to keep each per-poll row write cheap.
+LIVE_OUTPUT_BUFFER_BYTES = 16 * 1024
+
+
+class GuestTaskStream:
+	"""A `proxy-build`/`bench-build` Task that exists as `Running` from the start
+	of the detached build and streams the guest log onto itself as it runs (spec/22).
+
+	The non-streaming path (`_record_guest_task`) inserts the row only on
+	completion, so the operator sees nothing for the 10-20 min the build takes.
+	This pre-inserts the row, exposes `on_log` as the `run_detached` sink — each
+	chunk is appended to `live_output` (bounded tail), the last line surfaced as
+	`progress_line`, committed, and pushed over the `task_log` realtime event — and
+	`finalize` writes the terminal status + authoritative full stdout/stderr.
+
+	The row name is identical in shape to `_record_guest_task`'s, so a streamed
+	build appears in the same Task list as every other guest op; only its timing
+	(visible immediately, tailing live) differs."""
+
+	def __init__(self, virtual_machine: str, script: str, variables: dict) -> None:
+		self.task = frappe.get_doc(
+			{
+				"doctype": "Task",
+				"server": frappe.db.get_value("Virtual Machine", virtual_machine, "server"),
+				"virtual_machine": virtual_machine,
+				"script": script,
+				"status": "Running",
+				"triggered_by": frappe.session.user if frappe.session else "Administrator",
+				"started": frappe.utils.now_datetime(),
+			}
+		)
+		self.task.variables_dict = variables
+		self.task.insert(ignore_permissions=True)
+		# nosemgrep: frappe-manual-commit -- make the Running row visible before the long detached build begins (and so the streamed appends below have a committed row to update)
+		frappe.db.commit()
+		self._buffer = ""
+
+	def on_log(self, chunk: str) -> None:
+		"""run_detached sink: append a freshly-read log tail to the live view."""
+		self._buffer = (self._buffer + chunk)[-LIVE_OUTPUT_BUFFER_BYTES:]
+		last_line = next((line for line in reversed(self._buffer.splitlines()) if line.strip()), "")
+		self.task.db_set("live_output", self._buffer, update_modified=False)
+		self.task.db_set("progress_line", last_line[:140], update_modified=False)
+		# nosemgrep: frappe-manual-commit -- persist each streamed chunk so the desk form's polling fallback (and a crash mid-build) sees progress cross-transaction
+		frappe.db.commit()
+		self.task.publish_log(live_output=self._buffer, progress_line=last_line[:140])
+
+	def finalize(self, stdout: str, stderr: str, exit_code: int) -> str:
+		"""Write the terminal status + the authoritative full output, superseding
+		the streamed tail. Returns the Task name (for the audit-link callback)."""
+		self.task.status = "Success" if exit_code == 0 else "Failure"
+		self.task.stdout = stdout
+		self.task.stderr = stderr
+		self.task.exit_code = exit_code
+		self.task.ended = frappe.utils.now_datetime()
+		self.task.save(ignore_permissions=True)
+		# nosemgrep: frappe-manual-commit -- persist the terminal Task outcome before run_build re-raises on a failed build
+		frappe.db.commit()
+		return self.task.name
+
+
 def run_build(
-	virtual_machine: str, recipe: ImageRecipe, on_task: Callable[[str], None] | None = None
+	virtual_machine: str,
+	recipe: ImageRecipe,
+	on_task: Callable[[str], None] | None = None,
+	stream: bool = False,
 ) -> None:
 	"""Upload the recipe's committed tree into the guest, run its build entrypoint
 	DETACHED, then run the recipe's finalize hook. Records one Task row (named by
 	`recipe.task_script`) and throws on any non-zero exit.
 
-	`on_task`, if given, is called with the recorded Task's name right after it is
-	inserted and BEFORE the throw — so a caller (the Image Build controller) can
-	link the build Task for its audit trail even when the build failed.
+	`on_task`, if given, is called with the build Task's name so a caller (the
+	Image Build controller) can link it for its audit trail. In the non-stream path
+	the row only exists on completion, so this fires once at the end (still BEFORE
+	the throw, so a failed build is linked too). In the STREAM path the Running row
+	exists up front, so `on_task` fires immediately after insert — the Image Build
+	form can then surface the live, tailing Task while the bake runs, not only after
+	it finishes.
+
+	`stream` (spec/22 sample): when True the build Task is created `Running` up
+	front and the guest build log is streamed onto it live via a `GuestTaskStream`
+	sink, instead of the row only appearing on completion. The default (False) is
+	the original behavior byte-for-byte — `_record_guest_task` inserts the finished
+	row and `run_detached` makes no extra SSH calls.
 
 	Idempotent: the committed `build.sh` scripts are idempotent (spec taste #16,
 	retry = re-run), so this doubles as the re-bake verb."""
@@ -179,6 +256,11 @@ def run_build(
 	# first scp hard-fails "REMOTE HOST IDENTIFICATION HAS CHANGED"
 	# (real-provision-traps #1).
 	forget_host(connection.host)
+	sink = GuestTaskStream(virtual_machine, recipe.task_script, {"recipe": recipe.name}) if stream else None
+	if sink and on_task:
+		# Link the Running row NOW so the Image Build form shows the live build Task
+		# during the bake, not only at completion.
+		on_task(sink.task.name)
 	# ExitStack owns the rendered-bench.toml temp file: it must stay on disk across
 	# the whole _stage_tree (which scp's it), and be unlinked on the way out whether
 	# the build succeeds or throws — hence the stack, not a bare `with tempfile`.
@@ -197,17 +279,23 @@ def run_build(
 			_build_command(recipe),
 			log_path=recipe.build_log_path,
 			done_path=recipe.build_done_path,
+			on_log=sink.on_log if sink else None,
 		)
 		if code == 0 and recipe.finalize:
 			# Fast follow-up after a successful build (no detach needed). Its
 			# stdout/stderr/code become the recorded result, so a finalize failure
 			# is a build failure.
 			stdout, stderr, code = recipe.finalize(vm, connection, key_path)
-	task_name = _record_guest_task(
-		virtual_machine, recipe.task_script, {"recipe": recipe.name}, stdout, stderr, code
-	)
-	if on_task:
-		on_task(task_name)
+	if sink:
+		# on_task already fired at insert (above) for the stream path; finalize just
+		# writes the terminal status + authoritative output onto the same row.
+		sink.finalize(stdout, stderr, code)
+	else:
+		task_name = _record_guest_task(
+			virtual_machine, recipe.task_script, {"recipe": recipe.name}, stdout, stderr, code
+		)
+		if on_task:
+			on_task(task_name)
 	if code != 0:
 		frappe.throw(f"{recipe.title} build on {virtual_machine} failed (exit {code}): {stderr[-500:]}")
 

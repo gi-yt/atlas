@@ -181,6 +181,92 @@ class TestRunDetached(IntegrationTestCase):
 						)
 
 
+class TestRunDetachedStreaming(IntegrationTestCase):
+	"""The opt-in `on_log` live-tail (spec/22): each poll reads the bytes the build
+	appended since the last read (`tail -c +<offset>`) and hands them to the sink.
+	With no sink the call sequence is unchanged (covered by TestRunDetached)."""
+
+	def test_no_sink_makes_no_tail_calls(self) -> None:
+		# The default path must be byte-for-byte the old behavior: launch, poll
+		# marker, read log — three run_ssh calls, no `tail -c`.
+		responses = [("", "", 0), ("0\n", "", 0), ("FULL LOG", "", 0)]
+		with patch("atlas.atlas._ssh.transport.run_ssh", side_effect=responses) as run_ssh:
+			with patch("atlas.atlas._ssh.transport.time.sleep"):
+				run_detached(
+					CONNECTION, "/tmp/key", "/x/build.sh", log_path="/x/build.log", done_path="/x/build.done"
+				)
+		commands = [call.args[2] for call in run_ssh.call_args_list]
+		self.assertEqual(len(commands), 3)
+		self.assertFalse(any("tail -c" in command for command in commands))
+
+	def test_streams_growing_tail_by_offset(self) -> None:
+		# Two poll rounds before the marker, the log growing each time. The sink must
+		# receive each new chunk exactly once (offset advances by chunk length), and
+		# the offset request must use the running 1-indexed `tail -c +N`.
+		chunks: list[str] = []
+		# launch, [poll: not-done, tail "aaa"], [poll: not-done, tail "bbb"],
+		# [poll: done "0", tail "" (final drain), full-log read]
+		responses = [
+			("", "", 0),  # launch
+			("", "", 0),  # poll 1: done marker empty
+			("aaa\n", "", 0),  # poll 1: tail
+			("", "", 0),  # poll 2: done marker empty
+			("bbb\n", "", 0),  # poll 2: tail
+			("0\n", "", 0),  # poll 3: done marker present
+			("", "", 0),  # poll 3: final-drain tail (nothing new)
+			("aaa\nbbb\n", "", 0),  # full log read on completion
+		]
+		with patch("atlas.atlas._ssh.transport.run_ssh", side_effect=responses) as run_ssh:
+			with patch("atlas.atlas._ssh.transport.time.sleep"):
+				log, _stderr, code = run_detached(
+					CONNECTION,
+					"/tmp/key",
+					"/x/build.sh",
+					log_path="/x/build.log",
+					done_path="/x/build.done",
+					on_log=chunks.append,
+				)
+		self.assertEqual((log, code), ("aaa\nbbb\n", 0))
+		self.assertEqual(chunks, ["aaa\n", "bbb\n"])
+		# Offsets: first tail at +1 (whole file), second at +5 (after "aaa\n" = 4 bytes).
+		tail_commands = [c.args[2] for c in run_ssh.call_args_list if "tail -c" in c.args[2]]
+		self.assertIn("tail -c +1 ", tail_commands[0])
+		self.assertIn("tail -c +5 ", tail_commands[1])
+
+	def test_sink_exception_does_not_kill_build_and_offset_holds(self) -> None:
+		# A throwing sink must not propagate (it would kill a build it only observes)
+		# and must not advance the offset (so the chunk is retried, not dropped).
+		seen: list[str] = []
+
+		def angry(chunk: str) -> None:
+			if not seen:
+				seen.append(chunk)
+				raise RuntimeError("sink boom")
+			seen.append(chunk)
+
+		responses = [
+			("", "", 0),  # launch
+			("", "", 0),  # poll 1: done empty
+			("hello", "", 0),  # poll 1: tail -> sink raises, offset stays
+			("0\n", "", 0),  # poll 2: done present
+			("hello", "", 0),  # poll 2: final-drain tail -> same window retried
+			("hello", "", 0),  # full log read
+		]
+		with patch("atlas.atlas._ssh.transport.run_ssh", side_effect=responses):
+			with patch("atlas.atlas._ssh.transport.time.sleep"):
+				log, _stderr, code = run_detached(
+					CONNECTION,
+					"/tmp/key",
+					"/x/build.sh",
+					log_path="/x/build.log",
+					done_path="/x/build.done",
+					on_log=angry,
+				)
+		# Build still completes; the chunk that raised was re-offered, not lost.
+		self.assertEqual((log, code), ("hello", 0))
+		self.assertEqual(seen, ["hello", "hello"])
+
+
 class TestUploadFiles(IntegrationTestCase):
 	def test_empty_list_is_noop(self) -> None:
 		with patch("atlas.atlas._ssh.transport.subprocess.run") as run:

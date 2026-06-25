@@ -70,6 +70,8 @@ class Task(Document):
 		duration_milliseconds: DF.Int
 		ended: DF.Datetime | None
 		exit_code: DF.Int
+		live_output: DF.Code | None
+		progress_line: DF.Data | None
 		script: DF.Data
 		server: DF.Link | None
 		started: DF.Datetime | None
@@ -174,6 +176,30 @@ class Task(Document):
 			message={"name": self.virtual_machine, "status": "Failed"},
 			doctype="Virtual Machine",
 			docname=self.virtual_machine,
+		)
+
+	def publish_log(self, live_output: str, progress_line: str) -> None:
+		"""Push the current streamed log buffer to the operators' realtime room.
+
+		The lighter sibling of `_publish_update`: lifecycle transitions
+		(`Pending`→`Running`→…) ride `task_update` and repaint the status pill;
+		the high-frequency between-state log updates ride this `task_log` event so
+		we don't re-serialize the full status payload on every poll. The Task form
+		REPLACES the Live Output panel with `live_output` and shows `progress_line`
+		as the one-line "what's happening now".
+
+		We send the whole (bounded) buffer, not a delta, because the server's
+		`live_output` is already a fixed last-N-KB window it overwrites each poll —
+		sending deltas would let a client that joined late, dropped an event, or
+		reloaded drift out of sync with that window. A full replace is always
+		consistent and the buffer is bounded (LIVE_OUTPUT_BUFFER_BYTES), so the
+		payload stays small. Doc-scoped room, same as `_publish_update`, so only
+		operators viewing this Task are notified."""
+		frappe.publish_realtime(
+			event="task_log",
+			message={"name": self.name, "live_output": live_output, "progress_line": progress_line},
+			doctype="Task",
+			docname=self.name,
 		)
 
 	def _publish_update(self) -> None:

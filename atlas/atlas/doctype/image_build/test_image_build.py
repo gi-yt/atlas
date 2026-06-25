@@ -124,11 +124,16 @@ class TestImageBuildRun(IntegrationTestCase):
 
 	def test_happy_path_reaches_available_and_links_artifacts(self) -> None:
 		build = _new_build("bench-v16")
-		self._run_with_mocks(build)
+		_, _, m_build, _, _, _, _ = self._run_with_mocks(build)
 		build.reload()
 		self.assertEqual(build.status, "Available")
 		self.assertEqual(build.build_virtual_machine, "build-vm-1")
 		self.assertEqual(build.snapshot, "snap-1")
+		# The bake drives run_build with stream=True (spec/22) so the build Task is
+		# created Running up front and tails the in-guest log live on this form,
+		# and with an on_task callback that links build_task to that live row.
+		self.assertTrue(m_build.call_args.kwargs["stream"])
+		self.assertIsNotNone(m_build.call_args.kwargs["on_task"])
 
 	def test_bench_build_auto_registers_when_checked(self) -> None:
 		build = _new_build("bench-v16", auto_register=1)

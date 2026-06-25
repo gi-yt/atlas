@@ -292,6 +292,128 @@ class TestRunBuild(IntegrationTestCase):
 		self.assertEqual(status, ["Failure"])
 
 
+class TestGuestTaskStream(IntegrationTestCase):
+	"""The spec/22 streaming sink: a build Task that exists as Running from the
+	start and tails the guest log onto itself, then finalizes with the full output."""
+
+	def setUp(self) -> None:
+		_ensure_test_server()
+		_ensure_test_image()
+		_purge()
+
+	def test_row_is_running_with_started_on_construction(self) -> None:
+		vm = _new_vm(is_proxy=1, region="blr1")
+		stream = image_builder.GuestTaskStream(vm.name, "proxy-build", {"recipe": "proxy"})
+		row = frappe.get_doc("Task", stream.task.name)
+		self.assertEqual(row.status, "Running")
+		self.assertTrue(row.started)
+		self.assertEqual(row.virtual_machine, vm.name)
+
+	def test_on_log_appends_bounded_tail_and_progress_line(self) -> None:
+		vm = _new_vm(is_proxy=1, region="blr1")
+		stream = image_builder.GuestTaskStream(vm.name, "proxy-build", {"recipe": "proxy"})
+		with patch.object(stream.task, "publish_log") as publish:
+			stream.on_log("step one\n")
+			stream.on_log("step two\n\n")  # trailing blank lines must be skipped
+		row = frappe.get_doc("Task", stream.task.name)
+		self.assertEqual(row.live_output, "step one\nstep two\n\n")
+		# progress_line is the last NON-empty line, not the trailing blank.
+		self.assertEqual(row.progress_line, "step two")
+		# Each chunk was pushed over realtime as it arrived.
+		self.assertEqual(publish.call_count, 2)
+
+	def test_live_output_is_bounded_to_buffer_size(self) -> None:
+		vm = _new_vm(is_proxy=1, region="blr1")
+		stream = image_builder.GuestTaskStream(vm.name, "proxy-build", {"recipe": "proxy"})
+		with patch.object(stream.task, "publish_log"):
+			stream.on_log("x" * (image_builder.LIVE_OUTPUT_BUFFER_BYTES + 5000))
+		row = frappe.get_doc("Task", stream.task.name)
+		self.assertEqual(len(row.live_output), image_builder.LIVE_OUTPUT_BUFFER_BYTES)
+
+	def test_finalize_writes_terminal_status_and_full_output(self) -> None:
+		vm = _new_vm(is_proxy=1, region="blr1")
+		stream = image_builder.GuestTaskStream(vm.name, "proxy-build", {"recipe": "proxy"})
+		with patch.object(stream.task, "publish_log"):
+			stream.on_log("partial tail")
+		name = stream.finalize("FULL AUTHORITATIVE LOG", "warnings", 0)
+		row = frappe.get_doc("Task", name)
+		self.assertEqual(row.status, "Success")
+		self.assertEqual(row.stdout, "FULL AUTHORITATIVE LOG")
+		self.assertEqual(row.stderr, "warnings")
+		self.assertTrue(row.ended)
+
+	def test_finalize_marks_failure_on_nonzero(self) -> None:
+		vm = _new_vm(is_proxy=1, region="blr1")
+		stream = image_builder.GuestTaskStream(vm.name, "proxy-build", {"recipe": "proxy"})
+		name = stream.finalize("oops", "boom", 1)
+		self.assertEqual(frappe.db.get_value("Task", name, "status"), "Failure")
+
+
+class TestRunBuildStreaming(IntegrationTestCase):
+	def setUp(self) -> None:
+		_ensure_test_server()
+		_ensure_test_image()
+		_purge()
+
+	def test_stream_creates_running_row_passes_on_log_and_finalizes(self) -> None:
+		# The proxy recipe has a finalize step whose output supersedes the build's
+		# (existing run_build contract), so assert on a build with no finalize to keep
+		# the streamed stdout == the build output: use the bench recipe, streamed.
+		vm = _new_vm()
+		with _mock_build_ssh(("BUILD OUTPUT", "", 0)) as (_ssh, _scp, run_detached, _fh, _fin):
+			image_builder.run_build(vm.name, _BENCH, stream=True)
+		# run_detached received a real on_log sink (the streaming path), not None.
+		self.assertIsNotNone(run_detached.call_args.kwargs["on_log"])
+		# Exactly one build Task, finalized Success with the full build output —
+		# NOT a second row (the streamed row IS the audit row).
+		rows = frappe.get_all(
+			"Task",
+			filters={"virtual_machine": vm.name, "script": "bench-build"},
+			fields=["status", "stdout"],
+		)
+		self.assertEqual(len(rows), 1)
+		self.assertEqual(rows[0].status, "Success")
+		self.assertEqual(rows[0].stdout, "BUILD OUTPUT")
+
+	def test_default_path_passes_no_on_log_and_records_on_completion(self) -> None:
+		# stream defaults False: run_detached gets on_log=None (byte-for-byte the old
+		# behavior) and the row is the _record_guest_task one.
+		vm = _new_vm()
+		with _mock_build_ssh(("baked", "", 0)) as (_ssh, _scp, run_detached, _fh, _fin):
+			image_builder.run_build(vm.name, _BENCH)
+		self.assertIsNone(run_detached.call_args.kwargs["on_log"])
+
+	def test_stream_on_task_fires_early_with_the_running_row(self) -> None:
+		# The Image Build form links build_task to surface the live Task DURING the
+		# bake, so in the stream path on_task must fire with the Running row's name
+		# before the build finishes — and exactly once (not again at finalize).
+		vm = _new_vm()
+		seen: list[str] = []
+
+		def link(task_name: str) -> None:
+			# At link time the row must already exist and be Running (the build is
+			# still notionally in flight; finalize hasn't run yet in production).
+			seen.append(task_name)
+			self.assertTrue(frappe.db.exists("Task", task_name))
+
+		with _mock_build_ssh(("baked", "", 0)):
+			image_builder.run_build(vm.name, _BENCH, on_task=link, stream=True)
+		self.assertEqual(len(seen), 1)
+		# The linked row is the finalized build Task (same name, now Success).
+		self.assertEqual(frappe.db.get_value("Task", seen[0], "status"), "Success")
+
+	def test_stream_on_task_fires_before_throw_on_failure(self) -> None:
+		# A failed streamed build must still have linked its row (the form needs it to
+		# show the failure), and on_task must not fire twice.
+		vm = _new_vm()
+		seen: list[str] = []
+		with _mock_build_ssh(("boom", "", 1)):
+			with self.assertRaises(frappe.ValidationError):
+				image_builder.run_build(vm.name, _BENCH, on_task=seen.append, stream=True)
+		self.assertEqual(len(seen), 1)
+		self.assertEqual(frappe.db.get_value("Task", seen[0], "status"), "Failure")
+
+
 _V15 = get_recipe("bench-v15")
 _V16 = get_recipe("bench-v16")
 _NIGHTLY = get_recipe("bench-nightly")

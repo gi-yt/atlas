@@ -11,6 +11,7 @@ import shlex
 import subprocess
 import tempfile
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -201,6 +202,7 @@ def run_detached(
 	done_path: str,
 	overall_timeout_seconds: int = 1800,
 	poll_seconds: int = 10,
+	on_log: Callable[[str], None] | None = None,
 ) -> tuple[str, str, int]:
 	"""Run a LONG remote command detached from the SSH session, then poll for it.
 
@@ -215,7 +217,17 @@ def run_detached(
 	session, tees output to `log_path`, and stamps the exit code into `done_path` on
 	completion; we then poll for that marker over SHORT, independently-retried SSH
 	calls. A network blip now fails one poll (retried), never the build itself.
-	Callers pass distinct log/done paths so concurrent builds don't collide."""
+	Callers pass distinct log/done paths so concurrent builds don't collide.
+
+	`on_log`, if given, turns the marker poll into a LIVE TAIL: each poll reads the
+	bytes the build appended to `log_path` since the previous read (tracked by a
+	byte offset, fetched with `tail -c +<offset>`) and hands them to the callback —
+	the seam the proxy/bench bake uses to stream output onto the Task row while it
+	runs, instead of only reading the whole log once on completion (spec/22). It is
+	one extra short SSH call per poll and is wholly opt-in: with `on_log=None` this
+	function makes the exact same calls it always did, so every other caller is
+	untouched. The callback is best-effort — it must not raise; a slow or failing
+	sink should never kill the build it is only observing."""
 	# Fresh markers, then launch under setsid+nohup. `sh -c` so the redirect + the
 	# exit-code stamp run in the detached shell; the trailing write captures the
 	# command's own exit status ($?).
@@ -226,6 +238,11 @@ def run_detached(
 	)
 	run_ssh(connection, key_path, launch, timeout_seconds=60)
 
+	# Byte offset of the next unread log byte. `tail -c +N` is 1-indexed (`+1` is
+	# the whole file), so we start at 1 and advance by the length of each chunk we
+	# read. Tracking an offset (not re-reading the whole log) keeps each poll cheap
+	# and the appends non-overlapping, even on a multi-MB bake log.
+	offset = 1
 	deadline = time.monotonic() + overall_timeout_seconds
 	while time.monotonic() < deadline:
 		time.sleep(poll_seconds)
@@ -236,15 +253,53 @@ def run_detached(
 			)
 		except Exception:
 			continue  # transient SSH failure — keep polling, the build runs on
+		if on_log is not None:
+			offset = _stream_log_tail(connection, key_path, log_path, offset, on_log)
 		if done.strip():
 			exit_code = int(done.strip())
 			log, _e, _c = run_ssh(
 				connection, key_path, f"cat {shlex.quote(log_path)} 2>/dev/null || true", timeout_seconds=120
 			)
+			if on_log is not None:
+				# Final drain: emit anything written between the last tail and the
+				# done-marker so the streamed view ends byte-for-byte equal to `log`.
+				_stream_log_tail(connection, key_path, log_path, offset, on_log)
 			return log, "", exit_code
 	raise frappe.ValidationError(
 		f"Detached command on {connection.host} did not finish within {overall_timeout_seconds}s (still running)"
 	)
+
+
+def _stream_log_tail(
+	connection: Connection,
+	key_path: str,
+	log_path: str,
+	offset: int,
+	on_log: Callable[[str], None],
+) -> int:
+	"""Read the bytes appended to `log_path` since `offset` and hand them to
+	`on_log`; return the new offset. A transient SSH failure or a failing sink
+	leaves the offset unchanged so the next poll re-reads the same window — the
+	build is never disturbed by its own observer."""
+	try:
+		tail, _stderr, code = run_ssh(
+			connection,
+			key_path,
+			f"tail -c +{offset} {shlex.quote(log_path)} 2>/dev/null || true",
+			timeout_seconds=30,
+		)
+	except Exception:
+		return offset  # transient SSH failure — retry the same window next poll
+	if code != 0 or not tail:
+		return offset
+	try:
+		on_log(tail)
+	except Exception:
+		# Best-effort: a sink that throws must not advance the offset (so nothing is
+		# silently dropped) and must not propagate (so it can't kill the build).
+		frappe.logger("atlas").warning(f"task log sink raised on {connection.host}; retrying chunk next poll")
+		return offset
+	return offset + len(tail.encode("utf-8", "surrogatepass"))
 
 
 def run_scp(

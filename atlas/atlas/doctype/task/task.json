@@ -24,6 +24,8 @@
   "section_break_inputs",
   "variables",
   "tab_output",
+  "progress_line",
+  "live_output",
   "stdout",
   "stderr"
  ],
@@ -148,6 +150,23 @@
    "fieldname": "tab_output",
    "fieldtype": "Section Break",
    "label": "Output"
+  },
+  {
+   "depends_on": "eval:doc.status == \"Running\"",
+   "description": "Live tail of the running script's output. Superseded by Stdout/Stderr on completion.",
+   "fieldname": "progress_line",
+   "fieldtype": "Data",
+   "label": "Progress",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.status == \"Running\"",
+   "fieldname": "live_output",
+   "fieldtype": "Code",
+   "label": "Live Output",
+   "options": "Text",
+   "read_only": 1,
+   "min_lines": 24
   },
   {
    "fieldname": "stdout",

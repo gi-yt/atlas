@@ -193,8 +193,16 @@ def run(image_build_name: str) -> None:
 		_wait_for_vm_running(vm_name)
 		_set_status(build, "Building")
 		# Link the build Task for the audit trail — set even on a failed build
-		# (on_task fires before run_build throws).
-		run_build(vm_name, recipe, on_task=lambda task_name: build.db_set("build_task", task_name))
+		# (on_task fires before run_build throws). stream=True (spec/22): the build
+		# Task is created Running up front and tails the in-guest build.sh log live, so
+		# the operator on this form sees the bake progress instead of an opaque ~10-20
+		# min "Building" with no Task. on_task links the streamed row the same way.
+		run_build(
+			vm_name,
+			recipe,
+			on_task=lambda task_name: build.db_set("build_task", task_name),
+			stream=True,
+		)
 		# Harvest the resolved input commits build.sh stamped (ATLAS_BUILD_*= lines in
 		# the build Task's stdout) into the build's audit — chiefly so a nightly image,
 		# whose develop branches float, is traceable to the exact frappe/erpnext SHAs

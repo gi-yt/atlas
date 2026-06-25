@@ -164,7 +164,10 @@ def build_proxy(virtual_machine: str) -> None:
 		frappe.throw(f"Virtual Machine {virtual_machine} is not a proxy (is_proxy unset)")
 	if not vm.region:
 		frappe.throw(f"Virtual Machine {virtual_machine} has no region; not a proxy")
-	run_build(virtual_machine, get_recipe("proxy"))
+	# stream=True (spec/22 sample): surface the proxy-build Task as Running and tail
+	# its in-guest nginx+luajit compile live, instead of writing the row only on
+	# completion. The 10-20 min build is exactly the case the streamed view is for.
+	run_build(virtual_machine, get_recipe("proxy"), stream=True)
 
 
 def _remote_parent(remote_path: str) -> str:
