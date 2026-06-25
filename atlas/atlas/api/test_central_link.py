@@ -123,6 +123,37 @@ class IntegrationTestCentralLink(IntegrationTestCase):
 		# No host work attempted on a bad payload.
 		run_local_task.assert_not_called()
 
+	@patch.object(central_link, "run_local_task")
+	def test_provision_tunnel_skip_tunnel_stores_creds_without_host_work(self, run_local_task) -> None:
+		"""Local dev (skip_tunnel): store the creds + atlas_id and enable reporting, but run
+		no host scripts, touch no tunnel fields, and leave the data path on base_url."""
+		frappe.db.set_single_value("Central Settings", "enabled", 0)
+		# Clear any tunnel residue a sibling provision test left in the shared single, so
+		# we assert skip_tunnel never writes these — not that they happen to be empty.
+		frappe.db.set_single_value("Central Settings", "wg_public_key", None)
+		frappe.db.set_single_value("Central Settings", "tunnel_ip", None)
+
+		out = central_link.provision_tunnel(
+			atlas_id="atlas-local",
+			central_url="https://central.example",
+			service_api_key="svc_key",
+			service_api_secret="svc_secret",
+			skip_tunnel=1,
+		)
+
+		self.assertEqual(out, {"skip_tunnel": True, "tunnel_status": "Inactive"})
+		run_local_task.assert_not_called()
+
+		settings = frappe.get_single("Central Settings")
+		self.assertEqual(settings.url, "https://central.example")
+		self.assertEqual(settings.api_key, "svc_key")
+		self.assertEqual(settings.atlas_id, "atlas-local")
+		self.assertTrue(settings.enabled)
+		self.assertEqual(settings.tunnel_status, "Inactive")
+		self.assertFalse(settings.wg_public_key)
+		self.assertFalse(settings.tunnel_ip)
+		self.assertEqual(get_secret("Central Settings", "Central Settings", "api_secret"), "svc_secret")
+
 	# ----- confirm_tunnel --------------------------------------------------
 
 	@patch.object(central_link, "run_local_task")

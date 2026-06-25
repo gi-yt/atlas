@@ -127,6 +127,20 @@ The surface Central drives during registration. **Authn = the Atlas admin token
 (the keypair is generated only if absent, so the Atlas public key is stable across
 re-runs).
 
+### Local development — registering without a tunnel
+
+WireGuard needs two real hosts, a sudoers drop-in, and a public firewall to lock —
+none of which exist on a laptop. For local development Central can register an Atlas
+**without a tunnel**: the operator ticks `skip_tunnel` on the `Atlas Instance` and
+`provision_tunnel` is called with `skip_tunnel` set in the payload. That flag branches
+the method **before any host script runs** — it stores only the pushed Central
+service-user creds + `atlas_id`, sets `enabled` so event reporting works, leaves every
+tunnel field empty, and returns `{ skip_tunnel: True, tunnel_status: "Inactive" }`. No
+`wg0`, no firewall lockdown. The data path stays on the public `base_url` (the same
+fallback used while a real tunnel is `Inactive`). This is a development convenience,
+not a production posture — there is no lockdown, so it carries none of the management
+-plane isolation this document specifies.
+
 ## Atlas host scripts — `atlas/scripts/`
 
 New sudoers-pinned scripts, invoked via `run_local_task`

@@ -58,6 +58,15 @@ def provision_tunnel(**payload) -> dict:
 	peer. Idempotent: re-running re-asserts `wg0` + the firewall with the same keypair.
 	"""
 	frappe.only_for("System Manager")
+
+	# Local development: Central registered us with skip_tunnel, so there is no
+	# WireGuard hub to peer with and no public firewall to lock. Skip every host
+	# script — just store the pushed creds + atlas_id so event reporting works and
+	# the data path stays on the public base_url (tunnel_status never goes Active).
+	if payload.get("skip_tunnel"):
+		_store_local(payload)
+		return {"skip_tunnel": True, "tunnel_status": "Inactive"}
+
 	missing = [key for key in _REQUIRED if not payload.get(key)]
 	if missing:
 		frappe.throw(f"provision_tunnel missing required fields: {', '.join(missing)}")
@@ -106,6 +115,20 @@ def _store_provisioning(payload: dict, result: dict) -> None:
 	settings.wg_public_key = result["wg_public_key"]
 	settings.wg_listen_port = result["listen_port"]
 	settings.tunnel_status = "Provisioning"
+	settings.save(ignore_permissions=True)
+
+
+def _store_local(payload: dict) -> None:
+	"""Local (skip_tunnel) registration: write the pushed Central service-user creds +
+	atlas_id and enable event reporting, but touch no tunnel fields and run no host
+	scripts. The data path stays on the public base_url (tunnel_status=Inactive)."""
+	settings = frappe.get_single("Central Settings")
+	settings.url = payload["central_url"]
+	settings.api_key = payload["service_api_key"]
+	settings.api_secret = payload["service_api_secret"]
+	settings.atlas_id = payload["atlas_id"]
+	settings.enabled = 1
+	settings.tunnel_status = "Inactive"
 	settings.save(ignore_permissions=True)
 
 
