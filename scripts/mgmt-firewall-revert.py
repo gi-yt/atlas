@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 
-import atlas.firewall as firewall
+import atlas.mgmt_firewall as firewall
 from atlas._task import TaskInputs, TaskResult
 
 
@@ -20,7 +20,7 @@ from atlas._task import TaskInputs, TaskResult
 class FirewallRevertInputs(TaskInputs):
 	"""Revert the management-plane firewall (restore open public access)."""
 
-	command: typing.ClassVar[str] = "firewall-revert"
+	command: typing.ClassVar[str] = "mgmt-firewall-revert"
 
 
 @dataclass(frozen=True)

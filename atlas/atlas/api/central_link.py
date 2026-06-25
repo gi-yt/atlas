@@ -1,16 +1,16 @@
 """Atlas inbound provisioning API — the surface Central drives during the reversed
-registration handshake (spec/19-tunnel.md § "Atlas inbound API").
+registration handshake (spec/21-tunnel.md § "Atlas inbound API").
 
 Central authenticates every call with THIS Atlas's admin token (System Manager).
 These three are the only new inbound methods:
 
 - `provision_tunnel` (over the public base_url): bring up the spoke `wg0`
   (tunnel-up.py), lock the public interface with the auto-revert ARMED
-  (firewall-apply.py), then store the pushed Central service-user creds + tunnel
+  (mgmt-firewall-apply.py), then store the pushed Central service-user creds + tunnel
   parameters in Central Settings. Returns this host's wg public key + listen port so
   the hub can add the peer. Idempotent.
 - `confirm_tunnel` (over the tunnel): persist the lockdown + cancel the auto-revert
-  (firewall-confirm.py) and flip `tunnel_status` Active. Arriving over `wg0` is itself
+  (mgmt-firewall-confirm.py) and flip `tunnel_status` Active. Arriving over `wg0` is itself
   the proof of end-to-end reachability that makes the lockdown safe to keep.
 - `tunnel_status`: read-back for diagnostics.
 
@@ -29,7 +29,7 @@ from atlas.atlas.task_results import parse_result
 
 # The spoke private key lives 0600 at this path; tunnel-up.py generates it if absent
 # (sudoers pins cat/install on /etc/wireguard/*) and reuses it on re-provision, so this
-# Atlas's public key is stable. `wg0` is the spoke interface throughout (spec/19-tunnel.md).
+# Atlas's public key is stable. `wg0` is the spoke interface throughout (spec/21-tunnel.md).
 SPOKE_PRIVATE_KEY_PATH = "/etc/wireguard/wg0.key"
 
 _REQUIRED = (
@@ -51,7 +51,7 @@ def provision_tunnel(**payload) -> dict:
 	Central calls this over the public base_url with the Atlas admin token, pushing
 	the hub's identity + this Atlas's allocated tunnel address + the per-Atlas Central
 	service-user creds. We (1) run tunnel-up.py to bring up `wg0` (generating our
-	keypair if absent), (2) firewall-apply.py to default-deny the public interface with
+	keypair if absent), (2) mgmt-firewall-apply.py to default-deny the public interface with
 	the auto-revert ARMED — until confirm_tunnel arrives the host re-opens itself, so a
 	failed handoff can never lock Central out — then (3) store the creds + tunnel params
 	in Central Settings. Returns `{wg_public_key, listen_port, tunnel_ip}` so the hub can
@@ -74,11 +74,11 @@ def provision_tunnel(**payload) -> dict:
 	)
 	result = parse_result(tunnel_task.stdout)
 
-	# Lock the public interface with the auto-revert ARMED. No flags: firewall-apply.py
+	# Lock the public interface with the auto-revert ARMED. No flags: mgmt-firewall-apply.py
 	# discovers the public interface from the default route and uses the default wg port
 	# (51820), revert window, and empty public_allow_ports — confirm_tunnel re-discovers
 	# the same way, so the persisted ruleset will match this live one.
-	run_local_task(script="firewall-apply.py", variables={})
+	run_local_task(script="mgmt-firewall-apply.py", variables={})
 
 	_store_provisioning(payload, result)
 
@@ -114,11 +114,11 @@ def confirm_tunnel() -> dict:
 	"""Persist the lockdown and cancel the auto-revert — called by Central OVER the
 	tunnel. Reaching this method over `wg0` is itself the proof that Central can already
 	talk to Atlas privately, so it is safe to make the public side permanently dark.
-	Runs firewall-confirm.py (cancel the timer + write the fail-closed boot ruleset) and
+	Runs mgmt-firewall-confirm.py (cancel the timer + write the fail-closed boot ruleset) and
 	flips `tunnel_status` Active.
 	"""
 	frappe.only_for("System Manager")
-	run_local_task(script="firewall-confirm.py", variables={})
+	run_local_task(script="mgmt-firewall-confirm.py", variables={})
 	frappe.db.set_single_value("Central Settings", "tunnel_status", "Active")
 	return {"tunnel_status": "Active"}
 
@@ -126,7 +126,7 @@ def confirm_tunnel() -> dict:
 @frappe.whitelist()
 def deprovision_tunnel() -> dict:
 	"""Tear down this Atlas's tunnel + management firewall — the inverse of
-	provision_tunnel. Reverts the firewall first (firewall-revert.py: restore public
+	provision_tunnel. Reverts the firewall first (mgmt-firewall-revert.py: restore public
 	access, drop the persisted ruleset, disable the boot unit), then tears wg0
 	(tunnel-down.py), then clears the tunnel fields in Central Settings. Both scripts
 	are idempotent (best-effort, `check=False`), so this is safe to re-run.
@@ -137,7 +137,7 @@ def deprovision_tunnel() -> dict:
 	connection and re-verifies over the now-public base_url (see central remove_tunnel).
 	"""
 	frappe.only_for("System Manager")
-	run_local_task(script="firewall-revert.py", variables={})
+	run_local_task(script="mgmt-firewall-revert.py", variables={})
 	run_local_task(script="tunnel-down.py", variables={})
 
 	settings = frappe.get_single("Central Settings")

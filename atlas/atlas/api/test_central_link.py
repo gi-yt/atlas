@@ -1,6 +1,6 @@
 # Copyright (c) 2026, Frappe and Contributors
 # See license.txt
-"""Unit tests for the Atlas inbound tunnel-provisioning API (spec/19-tunnel.md).
+"""Unit tests for the Atlas inbound tunnel-provisioning API (spec/21-tunnel.md).
 
 `run_local_task` is mocked — these assert the orchestration (which scripts run, in
 what order), the Central Settings writes, the return shapes, and the System-Manager
@@ -84,7 +84,7 @@ class IntegrationTestCentralLink(IntegrationTestCase):
 		)
 		# tunnel-up THEN firewall-apply (the lockdown only after wg0 is up).
 		scripts = [call.kwargs["script"] for call in run_local_task.call_args_list]
-		self.assertEqual(scripts, ["tunnel-up.py", "firewall-apply.py"])
+		self.assertEqual(scripts, ["tunnel-up.py", "mgmt-firewall-apply.py"])
 		# firewall-apply runs with the auto-revert armed (no flags = defaults).
 		self.assertEqual(run_local_task.call_args_list[1].kwargs["variables"], {})
 
@@ -135,7 +135,7 @@ class IntegrationTestCentralLink(IntegrationTestCase):
 		out = central_link.confirm_tunnel()
 
 		self.assertEqual(out, {"tunnel_status": "Active"})
-		self.assertEqual(run_local_task.call_args.kwargs["script"], "firewall-confirm.py")
+		self.assertEqual(run_local_task.call_args.kwargs["script"], "mgmt-firewall-confirm.py")
 		self.assertEqual(
 			frappe.db.get_single_value("Central Settings", "tunnel_status"), "Active"
 		)
@@ -155,7 +155,7 @@ class IntegrationTestCentralLink(IntegrationTestCase):
 		self.assertEqual(out, {"tunnel_status": "Inactive"})
 		# firewall reverted BEFORE the tunnel drops, so a remote caller stays reachable.
 		scripts = [call.kwargs["script"] for call in run_local_task.call_args_list]
-		self.assertEqual(scripts, ["firewall-revert.py", "tunnel-down.py"])
+		self.assertEqual(scripts, ["mgmt-firewall-revert.py", "tunnel-down.py"])
 
 		settings = frappe.get_single("Central Settings")
 		self.assertEqual(settings.tunnel_status, "Inactive")

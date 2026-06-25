@@ -7,7 +7,7 @@ requests wrapper, one *Error type, dataclasses for the typed responses.
 
 Atlas calls Central's whitelisted methods at `<url>/api/method/central.api.atlas.<name>`
 with a `token <api_key>:<api_secret>` header (spec/16-central.md § "The wire
-contract"). Registration is **Central-initiated** now (spec/19-tunnel.md): Central drives the
+contract"). Registration is **Central-initiated** now (spec/21-tunnel.md): Central drives the
 tunnel handshake and pushes this Atlas's `atlas_id` + the per-Atlas service-user
 creds into `Central Settings` via `provision_tunnel`. Atlas no longer calls
 `register`; it only reports outward:

@@ -7,7 +7,7 @@ persist() without touching the host.
 
 import unittest
 
-from atlas import firewall
+from atlas import mgmt_firewall as firewall
 
 
 class TestMgmtRuleset(unittest.TestCase):

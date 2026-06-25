@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 
-import atlas.firewall as firewall
+import atlas.mgmt_firewall as firewall
 from atlas._task import TaskInputs, TaskResult
 
 
@@ -24,7 +24,7 @@ from atlas._task import TaskInputs, TaskResult
 class FirewallConfirmInputs(TaskInputs):
 	"""Persist the management-plane firewall and cancel the auto-revert."""
 
-	command: typing.ClassVar[str] = "firewall-confirm"
+	command: typing.ClassVar[str] = "mgmt-firewall-confirm"
 	wg_port: int = 51820
 	public_interface: str = ""  # default: discover from the default route
 	public_allow_ports: list[str] = field(default_factory=list)

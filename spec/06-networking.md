@@ -367,7 +367,7 @@ plus loopback, established/related, ICMP, and an operator-configurable
 `public_allow_ports` list (default empty). On `wg0`, accept all. The full design
 (reversed registration, the provisioning handshake, the armed auto-revert that makes
 the lockdown safe to apply remotely, and the fail-closed boot ordering) is in
-[19-tunnel.md](./19-tunnel.md).
+[21-tunnel.md](./21-tunnel.md).
 
 This is a **separate nftables table** from the data-plane `inet atlas` table above:
 

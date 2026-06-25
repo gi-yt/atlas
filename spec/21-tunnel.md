@@ -88,16 +88,16 @@ inbound surface Central drives, below.
 Operator → Central:  admin api_key/secret + base_url + region
 Central:             allocate tunnel_ip; generate atlas_id; create scoped service user
 Central → Atlas:     provision_tunnel(...)        [over public base_url, admin auth]
-Atlas:               tunnel-up.py → firewall-apply.py (auto-revert ARMED) → write Central Settings
+Atlas:               tunnel-up.py → mgmt-firewall-apply.py (auto-revert ARMED) → write Central Settings
 Atlas → Central:     { wg_public_key, listen_port, tunnel_ip }
 Central (hub):       hub-peer-add.py  (Atlas pubkey + endpoint)
 Central → Atlas:     ping at tunnel_ip            [over wg0 — proves reachability]
 Central → Atlas:     confirm_tunnel()             [over wg0]
-Atlas:               firewall-confirm.py (cancel auto-revert, persist) → tunnel_status=Active
+Atlas:               mgmt-firewall-confirm.py (cancel auto-revert, persist) → tunnel_status=Active
 Central:             tunnel_status=Active; data path switches to tunnel_url
 ```
 
-The **auto-revert** is the safety spine: `firewall-apply.py` arms a timer that
+The **auto-revert** is the safety spine: `mgmt-firewall-apply.py` arms a timer that
 restores the prior (open) ruleset and tears the tunnel after N seconds **unless
 `confirm_tunnel` cancels it first**. A failed handoff therefore can never
 permanently lock Central — or the operator — out. See *Lockout safety* below.
@@ -114,12 +114,12 @@ The surface Central drives during registration. **Authn = the Atlas admin token
 | `tunnel_status()` | admin token | — | `{ tunnel_status, tunnel_ip, wg_public_key, wg_listen_port }` |
 
 - **`provision_tunnel`** runs `tunnel-up.py` (generate the Atlas keypair locally if
-  absent; bring up `wg0`), then `firewall-apply.py` with the auto-revert armed, then
+  absent; bring up `wg0`), then `mgmt-firewall-apply.py` with the auto-revert armed, then
   writes the pushed Central service-user creds and tunnel parameters into
   `Central Settings`. It returns the Atlas **public key** + listen port (so the hub
   can add the peer) and the `tunnel_ip` it bound.
 - **`confirm_tunnel`** is called by Central *over the tunnel* (proving end-to-end
-  reachability): it runs `firewall-confirm.py` (cancel the auto-revert, persist the
+  reachability): it runs `mgmt-firewall-confirm.py` (cancel the auto-revert, persist the
   locked ruleset) and flips `tunnel_status` to `Active`.
 - **`tunnel_status`** is a read-back for diagnostics.
 
@@ -141,14 +141,14 @@ bare `python3 -m unittest`; only the apply/teardown functions touch the host.
   `wg-quick@wg0` for reboot persistence. Emits the Atlas **public key** + listen port
   in its `ATLAS_RESULT`.
 - **`tunnel-down.py`** — tear `wg0` down and disable the unit (the rollback path).
-- **`firewall-apply.py`** — load an nftables ruleset that on the public iface
+- **`mgmt-firewall-apply.py`** — load an nftables ruleset that on the public iface
   **drops all inbound except** the `wg` UDP port **plus an operator-configurable
   `public_allow_ports` list** (default **empty**), plus loopback, established/related,
   and ICMP; and **allows all on `wg0`**. Applies with an **armed auto-revert** (see
   below). Persisted via `nftables.service`.
-- **`firewall-revert.py`** — restore the prior ruleset (the rollback path; also what
+- **`mgmt-firewall-revert.py`** — restore the prior ruleset (the rollback path; also what
   the armed timer fires).
-- **`firewall-confirm.py`** — cancel the armed auto-revert and persist the locked
+- **`mgmt-firewall-confirm.py`** — cancel the armed auto-revert and persist the locked
   ruleset as the boot default.
 
 ### The public firewall ruleset
@@ -169,15 +169,15 @@ independent.
 
 ### Lockout safety — armed auto-revert
 
-`firewall-apply.py` never commits a lockdown it can't undo unattended. It:
+`mgmt-firewall-apply.py` never commits a lockdown it can't undo unattended. It:
 
 1. snapshots the current ruleset to a file;
 2. loads the new (locked) ruleset;
 3. **arms a one-shot revert** — a systemd transient timer (`systemd-run
-   --on-active=Ns`) or `at` job — that runs `firewall-revert.py` after **N seconds**
+   --on-active=Ns`) or `at` job — that runs `mgmt-firewall-revert.py` after **N seconds**
    (default 180), restoring the snapshot and tearing `wg0`.
 
-`firewall-confirm.py` **cancels** that timer and rewrites the persisted ruleset to
+`mgmt-firewall-confirm.py` **cancels** that timer and rewrites the persisted ruleset to
 the locked one. So the only way the lockdown becomes permanent is an end-to-end
 `confirm_tunnel` arriving **over the tunnel** — which proves Central can already
 reach Atlas privately. If anything between `provision_tunnel` and `confirm_tunnel`

@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 
-import atlas.firewall as firewall
+import atlas.mgmt_firewall as firewall
 from atlas._task import TaskInputs, TaskResult
 
 
@@ -25,7 +25,7 @@ from atlas._task import TaskInputs, TaskResult
 class FirewallApplyInputs(TaskInputs):
 	"""Apply the management-plane firewall with an armed auto-revert."""
 
-	command: typing.ClassVar[str] = "firewall-apply"
+	command: typing.ClassVar[str] = "mgmt-firewall-apply"
 	wg_port: int = 51820  # the one public inbound port (the wg handshake)
 	public_interface: str = ""  # default: discover from the default route
 	revert_seconds: int = 180  # auto-revert window unless confirmed
