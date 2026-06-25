@@ -169,40 +169,15 @@ PROXY_DISK_GB = 4
 # atlas_acme_directory_url to the production URL for a trusted cert.
 LETS_ENCRYPT_STAGING = "https://acme-staging-v02.api.letsencrypt.org/directory"
 
-# Ubuntu cloud images (noble), pinned to a dated release for immutability.
-# The dated path never changes under us; the floating `release/` pointer does.
-# `kernel_sha256` is the digest of the DOWNLOADED packed vmlinuz — sync-image.sh
-# decompresses the zstd payload to a raw vmlinux on the server (the extracted
-# kernel is a derived artifact, not separately pinned). See spec/08-images.md.
-_NOBLE_RELEASE = "https://cloud-images.ubuntu.com/releases/noble/release-20260518"
-_NOBLE_MINIMAL_RELEASE = "https://cloud-images.ubuntu.com/minimal/releases/noble/release-20260521"
-
-DEFAULT_IMAGE = {
-	"image_name": IMAGE_NAME,
-	"title": "Ubuntu 24.04 server cloud image",
-	"kernel_url": f"{_NOBLE_RELEASE}/unpacked/ubuntu-24.04-server-cloudimg-amd64-vmlinuz-generic",
-	"kernel_filename": "vmlinux-noble-server",
-	"kernel_sha256": "3a33b65c88f98a5563c926d5b163ebe09706e5084ba587a19c1b15bd3e7a82d6",
-	"rootfs_url": f"{_NOBLE_RELEASE}/ubuntu-24.04-server-cloudimg-amd64.squashfs",
-	"rootfs_filename": "ubuntu-24.04-server.ext4",
-	"rootfs_sha256": "bb4bc95d539df92c96ad0ed34c017363e4a7a62772c6af1dc3553e06ce710b74",
-	"default_disk_gigabytes": 4,
-}
-
-# The minimal flavor lives under a different upstream tree and ships the same
-# generic kernel as server (identical digest). Seeded as a second image row so
-# operators can pick the smaller rootfs.
-MINIMAL_IMAGE = {
-	"image_name": MINIMAL_IMAGE_NAME,
-	"title": "Ubuntu 24.04 minimal cloud image",
-	"kernel_url": f"{_NOBLE_MINIMAL_RELEASE}/unpacked/ubuntu-24.04-minimal-cloudimg-amd64-vmlinuz-generic",
-	"kernel_filename": "vmlinux-noble-minimal",
-	"kernel_sha256": "3a33b65c88f98a5563c926d5b163ebe09706e5084ba587a19c1b15bd3e7a82d6",
-	"rootfs_url": f"{_NOBLE_MINIMAL_RELEASE}/ubuntu-24.04-minimal-cloudimg-amd64.squashfs",
-	"rootfs_filename": "ubuntu-24.04-minimal.ext4",
-	"rootfs_sha256": "a288f0bd499e1a747f86fda8ec9822dd99a4e3c0721d89ffd9dd57608ff21072",
-	"default_disk_gigabytes": 4,
-}
+# The base-image catalog (URLs, digests, disk sizes) lives on the doctype
+# controller so the desk "Seed default images" action and this bootstrap path
+# share one source of truth. Re-exported here because `atlas.bootstrap.DEFAULT_IMAGE`
+# / `MINIMAL_IMAGE` is the name the e2e config and tests pin against.
+# See virtual_machine_image.py / spec/08-images.md.
+from atlas.atlas.doctype.virtual_machine_image.virtual_machine_image import (
+	DEFAULT_IMAGE,
+	MINIMAL_IMAGE,
+)
 
 
 def run() -> None:
