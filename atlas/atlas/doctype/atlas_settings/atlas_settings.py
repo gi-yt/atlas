@@ -91,9 +91,12 @@ class AtlasSettings(Document):
 		by that vendor's `setup()`, independently of this value.
 
 		Writes via `set_single_value` (NOT `doc.save()`) so it stays re-runnable. The
-		key path is expanduser'd and must point at a real file; `ssh_public_key` is
-		derived from it via `ssh-keygen -y` when omitted (load-bearing for self-serve —
-		the Site clone path reads the public key off this Single)."""
+		key path is expanduser'd. The file is only *needed* at provision time (the
+		controller SSHes hosts with it), so a missing file here is a soft warning, NOT
+		a hard error — config must persist even when the wizard runs on a box that
+		isn't the eventual controller. `ssh_public_key` is derived from the file via
+		`ssh-keygen -y` when omitted and the file is readable (load-bearing for
+		self-serve — the Site clone path reads the public key off this Single)."""
 		if provider_type not in ("DigitalOcean", "Scaleway", "Self-Managed", "Fake"):
 			frappe.throw(
 				_("provider_type must be DigitalOcean, Scaleway, Self-Managed or Fake, got {0}").format(
@@ -104,14 +107,27 @@ class AtlasSettings(Document):
 			frappe.throw(_("region is required — this Atlas's single region."))
 
 		expanded = os.path.expanduser(ssh_private_key_path)
-		if not os.path.isfile(expanded):
-			frappe.throw(_("ssh_private_key_path expands to {0}, which is not a file").format(expanded))
+		key_present = os.path.isfile(expanded)
+		if not key_present:
+			# Don't abort: warn and persist. A hard throw here used to roll the whole
+			# setup stage back (taking the not-yet-written vendor credentials with it).
+			frappe.msgprint(
+				_(
+					"SSH private key {0} is not a file on this host yet. Saved anyway — "
+					"it must exist on the controller before you provision a Server."
+				).format(expanded),
+				title=_("SSH key not found"),
+				indicator="orange",
+			)
 
 		frappe.db.set_single_value("Atlas Settings", "region", region, update_modified=False)
 		frappe.db.set_single_value("Atlas Settings", "provider_type", provider_type, update_modified=False)
 		frappe.db.set_single_value("Atlas Settings", "ssh_private_key_path", expanded, update_modified=False)
 
-		public_key = ssh_public_key or self._derive_public_key(expanded)
+		# Derive the public key only when the operator didn't supply one AND the
+		# private key is actually readable here; otherwise leave it for a later re-run
+		# (or the explicit field) rather than failing the save.
+		public_key = ssh_public_key or (self._derive_public_key(expanded) if key_present else None)
 		if public_key:
 			frappe.db.set_single_value("Atlas Settings", "ssh_public_key", public_key, update_modified=False)
 		if default_bench_snapshot:

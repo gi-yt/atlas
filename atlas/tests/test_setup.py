@@ -228,12 +228,23 @@ class TestSetupContract(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			setup.run(config)
 
-	def test_missing_key_file_throws(self) -> None:
+	def test_missing_key_file_warns_but_persists(self) -> None:
+		"""A missing key file must NOT abort setup — it used to throw and roll the
+		whole stage back, taking the vendor credentials with it. The file is only
+		needed at provision time, so config (incl. the encrypted token) must persist
+		and the operator gets a warning."""
 		config = _do_config()
+		# An explicit public key, since we can't derive one from a non-existent file.
+		config["provider"]["ssh_public_key"] = "ssh-ed25519 AAAA explicit"
 		config["provider"]["ssh_private_key_path"] = "/no/such/key"
-		with self.assertRaises(frappe.ValidationError) as caught:
-			setup.run(config)
-		self.assertIn("not a file", str(caught.exception))
+		setup.run(config)  # no raise
+		self.assertEqual(frappe.db.get_single_value("Atlas Settings", "provider_type"), "DigitalOcean")
+		self.assertEqual(frappe.db.get_single_value("Atlas Settings", "ssh_private_key_path"), "/no/such/key")
+		# The credential is the canary: it is written LAST, so it only survives if the
+		# missing-file path no longer aborts.
+		self.assertEqual(
+			get_secret("DigitalOcean Settings", "DigitalOcean Settings", "api_token"), "dop_v1_test"
+		)
 
 
 class TestWizardStages(IntegrationTestCase):
