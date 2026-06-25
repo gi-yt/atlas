@@ -100,9 +100,7 @@ class IntegrationTestCentralLink(IntegrationTestCase):
 		self.assertEqual(settings.wg_listen_port, 51820)
 		self.assertEqual(settings.tunnel_status, "Provisioning")
 		# The pushed service-user secret is stored encrypted, readable back.
-		self.assertEqual(
-			get_secret("Central Settings", "Central Settings", "api_secret"), "svc_secret"
-		)
+		self.assertEqual(get_secret("Central Settings", "Central Settings", "api_secret"), "svc_secret")
 
 	@patch.object(central_link, "run_local_task")
 	def test_provision_tunnel_passes_keypath_and_tunnel_params(self, run_local_task) -> None:
@@ -136,9 +134,7 @@ class IntegrationTestCentralLink(IntegrationTestCase):
 
 		self.assertEqual(out, {"tunnel_status": "Active"})
 		self.assertEqual(run_local_task.call_args.kwargs["script"], "mgmt-firewall-confirm.py")
-		self.assertEqual(
-			frappe.db.get_single_value("Central Settings", "tunnel_status"), "Active"
-		)
+		self.assertEqual(frappe.db.get_single_value("Central Settings", "tunnel_status"), "Active")
 
 	# ----- deprovision_tunnel ----------------------------------------------
 

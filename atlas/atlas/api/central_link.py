@@ -142,7 +142,14 @@ def deprovision_tunnel() -> dict:
 
 	settings = frappe.get_single("Central Settings")
 	settings.tunnel_status = "Inactive"
-	for field in ("tunnel_ip", "tunnel_cidr", "hub_public_key", "hub_endpoint", "wg_public_key", "wg_listen_port"):
+	for field in (
+		"tunnel_ip",
+		"tunnel_cidr",
+		"hub_public_key",
+		"hub_endpoint",
+		"wg_public_key",
+		"wg_listen_port",
+	):
 		settings.set(field, None)
 	settings.save(ignore_permissions=True)
 	return {"tunnel_status": "Inactive"}
