@@ -161,8 +161,8 @@ The split follows the project's host-facts-vs-unit-logic rule
   real producer chain — Let's Encrypt **staging** → DNS-01 → certbot →
   `_push_to_proxies` → off-droplet HTTPS — on top of the proxy infra. It needs a
   live Route 53 zone and the controller-host deps, and skips cleanly
-  (`MissingConfig`, before any billable provision) on a site without the
-  `atlas_tls_*` config keys. `proxy_vm` uses a self-signed stand-in cert, not this
+  (`MissingConfig`, before any billable provision) when the e2e fixture has no
+  `tls` block (`$ATLAS_E2E_CONFIG`, see the README). `proxy_vm` uses a self-signed stand-in cert, not this
   chain. The new desk buttons (Issue/Renew, Push to Proxies, Test Connection on
   Route53 Settings / Lets Encrypt Settings) are exercised through the HTTP layer
   in `desk_buttons`.

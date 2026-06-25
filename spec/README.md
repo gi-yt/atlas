@@ -139,18 +139,40 @@ keep it the source of truth.
 
 ## First run on a fresh site
 
-The operator-visible setup order on the desk is:
+Configuration is the **explicit setup contract** in
+[`atlas/setup.py`](../atlas/setup.py): one typed entry point that writes every
+value Atlas needs (the Settings Singles, the `Root Domain`) and **never reads
+`frappe.conf` at runtime**. It has three front-ends, all driving the same
+Layer-1 `setup()` setters:
 
-1. **Atlas Settings** — the active `provider_type` (the vendor this
-   instance provisions through), the active `tls_provider_type`, and the
-   SSH key (public-key body + on-disk private-key path).
-2. **Per-vendor Settings** (e.g. `DigitalOcean Settings`) — API token,
-   region, the vendor's SSH key handle (`ssh_key_id`), default size + image.
-   Skip for `Self-Managed`.
-3. **Server** — provisioned by clicking **Provision Server** on
+- The **Frappe Setup Wizard** — the operator-facing first-run path. On a fresh
+  site the wizard collects the provider type, SSH key, region, vendor
+  credentials, and the optional TLS block, then `setup.get_setup_stages`
+  applies them (`atlas/public/js/setup_wizard.js` + the `setup_wizard_*` hooks).
+  A **Test Connection** button (`setup.wizard_discover`) probes the vendor with
+  the just-typed credentials and turns the slug boxes into pick-lists before
+  anything is saved.
+- `setup.run(config)` — the scripted path: a plain `{provider, tls?}` dict, one
+  JSON document per environment. CI / E2E / fast-deploy call this.
+- `setup.from_site_config()` — the **back-compat adapter** that reads the legacy
+  `atlas_*` site-config keys one place and builds the `config` dict. Existing
+  benches keep their keys; the `seed_settings_from_site_config` patch reads them
+  once at `bench migrate` and seeds the Singles, after which they are no longer
+  read. New benches use the wizard or `setup.run` — they do **not** set
+  `atlas_*` keys.
+
+`setup.run` only **configures**; it never provisions, bakes, or issues (a
+re-runnable config step must not strand billable infra). After config, the
+operator-visible build order on the desk is:
+
+1. **Atlas Settings / per-vendor Settings** — already populated by the wizard
+   (or `setup.run`): active `provider_type`, the SSH key, region, and the
+   vendor's API token / `ssh_key_id` / default size + image (skip the vendor
+   Single for `Self-Managed`).
+2. **Server** — provisioned by clicking **Provision Server** on
    **Atlas Settings**.
-4. **Virtual Machine Image** — the kernel + rootfs pair to install.
-5. **Virtual Machine** — created against a Server and an Image, then
+3. **Virtual Machine Image** — the kernel + rootfs pair to install.
+4. **Virtual Machine** — created against a Server and an Image, then
    **Provision**ed.
 
 To skip the clicking and stand up server → image → VM in one
@@ -160,13 +182,14 @@ shot, run [`atlas/bootstrap.py`](../atlas/bootstrap.py):
 bench --site <site> execute atlas.bootstrap.run
 ```
 
-It reads everything from site config (`atlas_provider_type`,
-`atlas_do_token`, `atlas_ssh_key_id`, …), populates Atlas Settings
-and the matching per-vendor Single, seeds the `Provider Size` /
-`Provider Image` catalogs, and uses only the same whitelisted methods
-the desk buttons call. Requires a `bench worker` running because
-`provision_server` and `sync_to_server` both enqueue background jobs.
-The file's docstring lists every config key.
+`bootstrap.run` is the scripted config-plus-provisioning path: it calls
+`setup.from_site_config()` → `setup.run()` to configure (reading the `atlas_*`
+keys), then layers the provisioning on top — provisions a Server, seeds the
+`Provider Size` / `Provider Image` catalogs, registers + syncs the base image,
+and provisions one VM, using only the whitelisted methods the desk buttons
+call. Requires a `bench worker` running because `provision_server` and
+`sync_to_server` both enqueue background jobs. The file's docstring lists every
+`atlas_*` config key.
 
 To put a site behind a real cert, layer the proxy ([12-proxy.md](./12-proxy.md))
 and TLS ([13-tls.md](./13-tls.md)) setup on top:
@@ -427,3 +450,14 @@ by hand (the DO account also hosts production).
 `_shared.py` re-export shim) under [`atlas/tests/e2e/`](../atlas/tests/e2e)
 are the substrate. Add helpers there when at least two use cases would
 benefit; single-use helpers stay private to their module.
+
+Every e2e input — DO/Scaleway credentials, the SSH key, the TLS account, the
+test region/size/image — comes from **one explicit JSON fixture**, not
+`frappe.conf`. Its path is `$ATLAS_E2E_CONFIG` (default
+`~/.cache/atlas-e2e/config.json`); fill it once per dev box. This is the
+test-side mirror of `setup.run(config)`: the harness drives the same explicit
+contract instead of reading site config, and `bootstrap.restore_credentials`
+re-applies this fixture through the same Layer-1 setters. A missing file or
+absent required key raises `MissingConfig` naming what to add, so a fixture
+without a `tls` / `scaleway` block skips that e2e cleanly. The fixture shape is
+documented in [`_config.py`](../atlas/tests/e2e/_config.py).

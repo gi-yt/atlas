@@ -333,6 +333,6 @@ the tenant-owned aggregate. The Site stores the created Subdomain's name in
   `auto_provision` chain runs on the **background worker** (the same worker the
   VM-provisioning e2e relies on). It asserts the mirror row Central reflects and the
   Tenant stamp on the path. Like `tls_issuance` it owns its run (not in
-  `run_all_smoke`) and skips cleanly (`MissingConfig`) on a site without the
-  `atlas_tls_*` keys, before anything billable. Split per the README "Host facts vs
+  `run_all_smoke`) and skips cleanly (`MissingConfig`) when the e2e fixture has
+  no `tls` block (`$ATLAS_E2E_CONFIG`, see the README), before anything billable. Split per the README "Host facts vs
   unit-covered logic" rule.
