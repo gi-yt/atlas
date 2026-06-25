@@ -33,7 +33,6 @@ from atlas.atlas.task_results import parse_result
 SPOKE_PRIVATE_KEY_PATH = "/etc/wireguard/wg0.key"
 
 _REQUIRED = (
-	"atlas_id",
 	"hub_public_key",
 	"hub_endpoint",
 	"tunnel_ip",
@@ -61,8 +60,8 @@ def provision_tunnel(**payload) -> dict:
 
 	# Local development: Central registered us with skip_tunnel, so there is no
 	# WireGuard hub to peer with and no public firewall to lock. Skip every host
-	# script — just store the pushed creds + atlas_id so event reporting works and
-	# the data path stays on the public base_url (tunnel_status never goes Active).
+	# script — just store the pushed creds so event reporting works and the data
+	# path stays on the public base_url (tunnel_status never goes Active).
 	if payload.get("skip_tunnel"):
 		_store_local(payload)
 		return {"skip_tunnel": True, "tunnel_status": "Inactive"}
@@ -107,7 +106,6 @@ def _store_provisioning(payload: dict, result: dict) -> None:
 	settings.url = payload["central_url"]
 	settings.api_key = payload["service_api_key"]
 	settings.api_secret = payload["service_api_secret"]
-	settings.atlas_id = payload["atlas_id"]
 	settings.tunnel_ip = payload["tunnel_ip"]
 	settings.tunnel_cidr = payload["tunnel_cidr"]
 	settings.hub_public_key = payload["hub_public_key"]
@@ -119,14 +117,13 @@ def _store_provisioning(payload: dict, result: dict) -> None:
 
 
 def _store_local(payload: dict) -> None:
-	"""Local (skip_tunnel) registration: write the pushed Central service-user creds +
-	atlas_id and enable event reporting, but touch no tunnel fields and run no host
-	scripts. The data path stays on the public base_url (tunnel_status=Inactive)."""
+	"""Local (skip_tunnel) registration: write the pushed Central service-user creds and
+	enable event reporting, but touch no tunnel fields and run no host scripts. The data
+	path stays on the public base_url (tunnel_status=Inactive)."""
 	settings = frappe.get_single("Central Settings")
 	settings.url = payload["central_url"]
 	settings.api_key = payload["service_api_key"]
 	settings.api_secret = payload["service_api_secret"]
-	settings.atlas_id = payload["atlas_id"]
 	settings.enabled = 1
 	settings.tunnel_status = "Inactive"
 	settings.save(ignore_permissions=True)

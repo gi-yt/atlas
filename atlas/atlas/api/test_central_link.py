@@ -19,7 +19,6 @@ from atlas.atlas.secrets import get_secret
 PLAIN_USER_EMAIL = "central-link-plain@example.com"
 
 PAYLOAD = {
-	"atlas_id": "atlas-blr",
 	"hub_public_key": "HUBPUBKEY=",
 	"hub_endpoint": "203.0.113.1:51820",
 	"tunnel_ip": "10.88.0.2",
@@ -91,7 +90,6 @@ class IntegrationTestCentralLink(IntegrationTestCase):
 		settings = frappe.get_single("Central Settings")
 		self.assertEqual(settings.url, "https://central.example")
 		self.assertEqual(settings.api_key, "svc_key")
-		self.assertEqual(settings.atlas_id, "atlas-blr")
 		self.assertEqual(settings.tunnel_ip, "10.88.0.2")
 		self.assertEqual(settings.tunnel_cidr, "10.88.0.0/16")
 		self.assertEqual(settings.hub_public_key, "HUBPUBKEY=")
@@ -125,7 +123,7 @@ class IntegrationTestCentralLink(IntegrationTestCase):
 
 	@patch.object(central_link, "run_local_task")
 	def test_provision_tunnel_skip_tunnel_stores_creds_without_host_work(self, run_local_task) -> None:
-		"""Local dev (skip_tunnel): store the creds + atlas_id and enable reporting, but run
+		"""Local dev (skip_tunnel): store the creds and enable reporting, but run
 		no host scripts, touch no tunnel fields, and leave the data path on base_url."""
 		frappe.db.set_single_value("Central Settings", "enabled", 0)
 		# Clear any tunnel residue a sibling provision test left in the shared single, so
@@ -134,7 +132,6 @@ class IntegrationTestCentralLink(IntegrationTestCase):
 		frappe.db.set_single_value("Central Settings", "tunnel_ip", None)
 
 		out = central_link.provision_tunnel(
-			atlas_id="atlas-local",
 			central_url="https://central.example",
 			service_api_key="svc_key",
 			service_api_secret="svc_secret",
@@ -147,7 +144,6 @@ class IntegrationTestCentralLink(IntegrationTestCase):
 		settings = frappe.get_single("Central Settings")
 		self.assertEqual(settings.url, "https://central.example")
 		self.assertEqual(settings.api_key, "svc_key")
-		self.assertEqual(settings.atlas_id, "atlas-local")
 		self.assertTrue(settings.enabled)
 		self.assertEqual(settings.tunnel_status, "Inactive")
 		self.assertFalse(settings.wg_public_key)

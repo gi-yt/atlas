@@ -191,7 +191,7 @@ class TestCentralReport(IntegrationTestCase):
 	def test_deliver_records_error_and_does_not_raise(self) -> None:
 		settings = MagicMock()
 		settings.enabled = 1
-		settings.atlas_id = "atl_1"
+		settings.api_key = "svc_key"
 		settings.client.return_value.post_event.side_effect = CentralError("central down")
 		with (
 			patch.object(central_report.frappe, "get_single", return_value=settings),

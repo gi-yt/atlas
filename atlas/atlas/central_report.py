@@ -90,15 +90,15 @@ def deliver(event_type: str, payload: dict) -> None:
 	settings = frappe.get_single("Central Settings")
 	if not settings.enabled:
 		return
-	if not settings.atlas_id:
-		# Enabled but not yet registered: without an atlas_id Central can't route
-		# the event, so skip rather than POST an unroutable None. Register first.
+	if not settings.api_key:
+		# Enabled but not yet registered: without the scoped service-user creds we
+		# can't authenticate to Central (and the sender is resolved from that identity),
+		# so skip rather than POST unauthenticated. Register first.
 		settings.db_set("status", "skipped: register with Central first", commit=True)
 		return
 	try:
 		settings.client().post_event(
 			{
-				"atlas_id": settings.atlas_id,
 				"type": event_type,
 				"payload": payload,
 				"occurred_at": frappe.utils.now(),

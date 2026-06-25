@@ -21,7 +21,6 @@ class CentralSettings(Document):
 
 		api_key: DF.Data
 		api_secret: DF.Password
-		atlas_id: DF.Data | None
 		enabled: DF.Check
 		hub_endpoint: DF.Data | None
 		hub_public_key: DF.Data | None

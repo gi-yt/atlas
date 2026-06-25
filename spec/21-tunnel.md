@@ -86,7 +86,7 @@ inbound surface Central drives, below.
 
 ```
 Operator → Central:  admin api_key/secret + base_url + region
-Central:             allocate tunnel_ip; generate atlas_id; create scoped service user
+Central:             allocate tunnel_ip; create scoped service user
 Central → Atlas:     provision_tunnel(...)        [over public base_url, admin auth]
 Atlas:               tunnel-up.py → mgmt-firewall-apply.py (auto-revert ARMED) → write Central Settings
 Atlas → Central:     { wg_public_key, listen_port, tunnel_ip }
@@ -109,7 +109,7 @@ The surface Central drives during registration. **Authn = the Atlas admin token
 
 | Method | Auth / transport | Payload | Returns |
 | --- | --- | --- | --- |
-| `provision_tunnel(**payload)` | admin token, over public `base_url` | `atlas_id`, `hub_public_key`, `hub_endpoint`, `tunnel_ip`, `tunnel_cidr`, `central_url`, `service_api_key`, `service_api_secret` | `{ wg_public_key, listen_port, tunnel_ip }` |
+| `provision_tunnel(**payload)` | admin token, over public `base_url` | `hub_public_key`, `hub_endpoint`, `tunnel_ip`, `tunnel_cidr`, `central_url`, `service_api_key`, `service_api_secret` | `{ wg_public_key, listen_port, tunnel_ip }` |
 | `confirm_tunnel()` | admin token, **over the tunnel** | — | `{ tunnel_status }` |
 | `tunnel_status()` | admin token | — | `{ tunnel_status, tunnel_ip, wg_public_key, wg_listen_port }` |
 
@@ -134,7 +134,7 @@ none of which exist on a laptop. For local development Central can register an A
 **without a tunnel**: the operator ticks `skip_tunnel` on the `Atlas Instance` and
 `provision_tunnel` is called with `skip_tunnel` set in the payload. That flag branches
 the method **before any host script runs** — it stores only the pushed Central
-service-user creds + `atlas_id`, sets `enabled` so event reporting works, leaves every
+service-user creds, sets `enabled` so event reporting works, leaves every
 tunnel field empty, and returns `{ skip_tunnel: True, tunnel_status: "Inactive" }`. No
 `wg0`, no firewall lockdown. The data path stays on the public `base_url` (the same
 fallback used while a real tunnel is `Inactive`). This is a development convenience,

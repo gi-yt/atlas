@@ -21,11 +21,11 @@ set of whitelisted HTTP methods (see *The wire contract* below).
 
 1. **Registration (now Central-initiated).** The operator feeds Central an Atlas
    instance's admin key + `base_url` + region, and **Central** orchestrates
-   registration — allocating the `atlas_id`, standing up the tunnel, and pushing a
-   scoped service user back to Atlas ([21-tunnel.md](./21-tunnel.md)). Atlas no
-   longer pushes `register`; it exposes the inbound `provision_tunnel` /
-   `confirm_tunnel` surface Central drives. The `atlas_id` Central assigns is what
-   Atlas stamps on every event so Central can route them to this cluster.
+   registration — standing up the tunnel and pushing a scoped service user back to
+   Atlas ([21-tunnel.md](./21-tunnel.md)). Atlas no longer pushes `register`; it
+   exposes the inbound `provision_tunnel` / `confirm_tunnel` surface Central drives.
+   The authenticated service user is what attributes every inbound event to its
+   cluster — Central resolves the sending Atlas from the session, with no separate id.
 2. **VM Sizes.** Today each Atlas hardcodes its size catalog
    (`atlas/atlas/sizes.py` `SIZE_PRESETS`). Central becomes the source of truth:
    Atlas **fetches sizes** from Central into a local `Central Size` catalog.
@@ -94,8 +94,8 @@ the fleet state the commands above produce.
 
 - **Central Settings** (single) — the credentials and this Atlas's tunnel identity.
   Mirrors `DigitalOcean Settings`. Fields: `url`, `api_key`, `api_secret` (Password),
-  `enabled` (master switch — event reporting is skipped when off), the read-only
-  `atlas_id`, and a read-only `status` breadcrumb (the last register / event-delivery
+  `enabled` (master switch — event reporting is skipped when off), and a read-only
+  `status` breadcrumb (the last register / event-delivery
   outcome — a glance-only convenience; the event *history* belongs to the planned
   `Central Event` log, not the Single). The region is read from `Atlas Settings.region`
   (`placement.atlas_region()`), not a Central Settings field. **Plus a Tunnel section**

@@ -11,7 +11,6 @@
   "column_break_connection",
   "enabled",
   "section_break_registration",
-  "atlas_id",
   "column_break_registration",
   "status",
   "section_break_tunnel",
@@ -69,13 +68,6 @@
    "fieldname": "section_break_registration",
    "fieldtype": "Section Break",
    "label": "Registration"
-  },
-  {
-   "description": "Central's id for this Atlas. Filled by Central during provisioning (provision_tunnel).",
-   "fieldname": "atlas_id",
-   "fieldtype": "Data",
-   "label": "Atlas ID",
-   "read_only": 1
   },
   {
    "fieldname": "column_break_registration",
