@@ -21,6 +21,7 @@ from frappe import _
 from frappe.model.document import Document
 
 from atlas.atlas import provisioning
+from atlas.atlas.providers.fake import require_developer_mode
 
 
 class AtlasSettings(Document):
@@ -209,6 +210,26 @@ class AtlasSettings(Document):
 			domain=domain,
 		)
 		return server_name
+
+	@frappe.whitelist()
+	def generate_demo_data(self, reset: bool = False) -> str:
+		"""Generate Demo Data button (Fake provider only). Enqueue a `long` job that
+		stands up the realistic, varied demo fleet via `atlas.atlas.demo.run` — every
+		Server / Virtual Machine status + feature, snapshots, Reserved IPs, and
+		back-dated Tasks — built on the Fake provider through the real controllers, so
+		the operator can explore the whole lifecycle in Desk with no real cloud.
+		Idempotent; `reset=True` wipes the Fake fleet first. `developer_mode`-gated."""
+		frappe.only_for("System Manager")
+		require_developer_mode()
+		if self.provider_type != "Fake":
+			frappe.throw(_("Generate Demo Data is only available while the active provider is Fake."))
+		frappe.enqueue(
+			"atlas.atlas.demo.run",
+			queue="long",
+			timeout=1800,
+			reset=frappe.parse_json(reset) if isinstance(reset, str) else reset,
+		)
+		return self.provider_type
 
 	@frappe.whitelist()
 	def discover_servers(self) -> list[dict]:

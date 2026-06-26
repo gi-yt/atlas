@@ -14,8 +14,54 @@ frappe.ui.form.on("Atlas Settings", {
 		frappe.atlas.add_action(frm, "Discover Servers", () => open_discover_servers_dialog(frm));
 		frappe.atlas.add_action(frm, "Bake Golden Image", () => confirm_bake(frm));
 		frappe.atlas.add_action(frm, "Ensure Proxy", () => confirm_ensure_proxy(frm));
+
+		// Fake provider only: populate a clickable demo fleet (catalog, images,
+		// servers, VMs + snapshots) so the lifecycle is explorable with no real cloud.
+		if (frm.doc.provider_type === "Fake") {
+			frappe.atlas.add_action(frm, "Generate Demo Data", () => open_demo_data_dialog(frm));
+		}
 	},
 });
+
+// Generate Demo Data (Fake provider only). Kicks off the background job that
+// stands up the varied demo fleet (atlas.atlas.demo.run) — faked, so no real cloud.
+function open_demo_data_dialog(frm) {
+	const dialog = new frappe.ui.Dialog({
+		title: __("Generate demo data"),
+		fields: [
+			{
+				fieldname: "intro",
+				fieldtype: "HTML",
+				options: `<p class="text-muted">${__(
+					"Stands up a realistic, varied fleet on the Fake provider — Servers across " +
+						"every status, Virtual Machines in every state, snapshots, Reserved IPs, " +
+						"and back-dated Tasks. No real cloud, no SSH. Idempotent: a plain run " +
+						"reuses existing demo rows."
+				)}</p>`,
+			},
+			{
+				fieldname: "reset",
+				label: __("Reset (wipe the Fake fleet and rebuild)"),
+				fieldtype: "Check",
+				default: 0,
+				description: __(
+					"Deletes the existing demo Servers / VMs / snapshots / IPs first. Real DigitalOcean / Scaleway rows are never touched."
+				),
+			},
+		],
+		primary_action_label: __("Generate"),
+		primary_action(values) {
+			dialog.hide();
+			frm.call("generate_demo_data", { reset: values.reset ? 1 : 0 }).then(() => {
+				frappe.show_alert({
+					message: __("Generating demo data; watch the Server / Virtual Machine lists."),
+					indicator: "blue",
+				});
+			});
+		},
+	});
+	dialog.show();
+}
 
 // The desk equivalents of bootstrap's `bake_golden_image` / `ensure_proxy` steps:
 // each acts on the newest Active Server and is billable + multi-minute, so the
