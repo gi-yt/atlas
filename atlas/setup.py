@@ -98,7 +98,7 @@ def run(config: dict) -> dict:
 			region=do["region"],
 			default_size=do["default_size"],
 			default_image=do["default_image"],
-			ssh_key_id=do["ssh_key_id"],
+			ssh_key_id=do.get("ssh_key_id") or None,
 		)
 	elif provider_type == "Scaleway":
 		scw = provider["scaleway"]
@@ -214,7 +214,7 @@ def from_site_config() -> dict:
 			"region": require_config("atlas_do_region"),
 			"default_size": require_config("atlas_do_default_size"),
 			"default_image": require_config("atlas_do_default_image"),
-			"ssh_key_id": require_config("atlas_ssh_key_id"),
+			"ssh_key_id": frappe.conf.get("atlas_ssh_key_id"),
 		}
 	elif provider_type == "Scaleway":
 		provider["scaleway"] = {
@@ -294,7 +294,7 @@ def _stage_provider(args: dict) -> None:
 			region=args.get("do_region"),
 			default_size=args.get("do_default_size"),
 			default_image=args.get("do_default_image"),
-			ssh_key_id=args.get("do_ssh_key_id"),
+			ssh_key_id=args.get("do_ssh_key_id") or None,
 		)
 	elif provider_type == "Scaleway":
 		frappe.get_single("Scaleway Settings").setup(
@@ -407,7 +407,7 @@ def _discover_digitalocean(credentials: dict) -> dict:
 			for slug in KNOWN_DIGITALOCEAN_SIZES
 		],
 		"images": [{"value": slug, "label": slug} for slug in KNOWN_DIGITALOCEAN_IMAGES],
-		"ssh_keys": [],  # DO exposes no SSH-key list endpoint in the client today.
+		"ssh_keys": [],
 		"projects": [],
 	}
 	token = credentials.get("api_token")
@@ -415,7 +415,12 @@ def _discover_digitalocean(credentials: dict) -> dict:
 		result["error"] = _("Enter an API Token, then Test Connection.")
 		return result
 	try:
-		auth = DigitalOceanClient(token=token).verify_credentials()
+		client = DigitalOceanClient(token=token)
+		auth = client.verify_credentials()
+		result["ssh_keys"] = [
+			{"value": str(key["id"]), "label": key.get("name") or str(key["id"])}
+			for key in client.list_ssh_keys()
+		]
 	except Exception as exception:  # any failure becomes a red toast, never a traceback
 		result["error"] = str(exception)
 		return result

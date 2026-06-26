@@ -30,7 +30,7 @@ class DigitalOceanSettings(Document):
 		region: str,
 		default_size: str,
 		default_image: str,
-		ssh_key_id: str,
+		ssh_key_id: str | None = None,
 	) -> None:
 		"""Explicit, idempotent setter for DigitalOcean Settings (the contract).
 
@@ -41,6 +41,10 @@ class DigitalOceanSettings(Document):
 		Provider Size / Provider Image rows they Link to are seeded here so the Links
 		resolve. A best-effort `discover()` then upserts the wider live catalog (as
 		bootstrap does); a failure there is non-fatal — the named slugs already exist.
+
+		`ssh_key_id` is optional: if omitted, the provider resolves it at provision time
+		by querying the DO account for a matching public key and uploading one if absent,
+		then caching the id here for subsequent provisions.
 
 		Writes via `set_single_value` / `set_encrypted_password` (NOT `doc.save()`) so
 		it stays re-runnable."""
@@ -54,7 +58,8 @@ class DigitalOceanSettings(Document):
 		frappe.db.set_single_value(
 			"DigitalOcean Settings", "default_image", f"DigitalOcean/{default_image}", update_modified=False
 		)
-		frappe.db.set_single_value("DigitalOcean Settings", "ssh_key_id", ssh_key_id, update_modified=False)
+		if ssh_key_id:
+			frappe.db.set_single_value("DigitalOcean Settings", "ssh_key_id", ssh_key_id, update_modified=False)
 		frappe.utils.password.set_encrypted_password(
 			"DigitalOcean Settings", "DigitalOcean Settings", api_token, "api_token"
 		)

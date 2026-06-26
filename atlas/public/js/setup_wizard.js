@@ -23,7 +23,7 @@ frappe.setup.on("before_load", function () {
 // Fields the wizard discovers rather than asks you to type. Start as empty Selects
 // (so they render as dropdowns, not text); Test Connection fills the options.
 const ATLAS_DISCOVERED = {
-	DigitalOcean: ["do_default_size", "do_default_image"],
+	DigitalOcean: ["do_default_size", "do_default_image", "do_ssh_key_id"],
 	Scaleway: ["scw_default_size", "scw_default_image", "scw_project_id", "scw_ssh_key_id"],
 };
 
@@ -89,11 +89,12 @@ function atlas_setup_slides() {
 				},
 				{
 					fieldname: "do_ssh_key_id",
-					label: __("SSH Key ID"),
-					fieldtype: "Data",
+					label: __("SSH Key (optional)"),
+					fieldtype: "Select",
 					depends_on: "eval:doc.provider_type=='DigitalOcean'",
-					mandatory_depends_on: "eval:doc.provider_type=='DigitalOcean'",
-					description: __("DO's numeric key id or its SHA-256 fingerprint."),
+					description: __(
+						"Pick after Test Connection, or leave blank — Atlas will find or upload the SSH public key automatically."
+					),
 				},
 				{
 					fieldname: "do_default_size",
@@ -427,7 +428,11 @@ function atlas_test_connection(slide, provider_type, opts = {}) {
 function atlas_apply_catalog(slide, provider_type, catalog) {
 	const map =
 		provider_type === "DigitalOcean"
-			? { do_default_size: catalog.sizes, do_default_image: catalog.images }
+			? {
+					do_default_size: catalog.sizes,
+					do_default_image: catalog.images,
+					do_ssh_key_id: catalog.ssh_keys,
+			  }
 			: {
 					scw_default_size: catalog.sizes,
 					scw_default_image: catalog.images,

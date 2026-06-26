@@ -8,6 +8,7 @@ from frappe.tests import IntegrationTestCase
 from atlas.atlas.digitalocean import (
 	DigitalOceanClient,
 	DigitalOceanError,
+	_ssh_key_identity,
 	public_ipv4,
 	public_ipv6,
 	reserved_ip_droplet_id,
@@ -30,6 +31,26 @@ class _FakeResponse:
 
 	def json(self):
 		return self._body
+
+
+class TestSshKeyIdentity(IntegrationTestCase):
+	def test_strips_trailing_comment(self) -> None:
+		self.assertEqual(
+			_ssh_key_identity("ssh-ed25519 AAAA1234 my-laptop"),
+			"ssh-ed25519 AAAA1234",
+		)
+
+	def test_two_tokens_no_comment(self) -> None:
+		self.assertEqual(_ssh_key_identity("ssh-rsa BBBB5678"), "ssh-rsa BBBB5678")
+
+	def test_blank_returns_none(self) -> None:
+		self.assertIsNone(_ssh_key_identity(""))
+
+	def test_one_token_returns_none(self) -> None:
+		self.assertIsNone(_ssh_key_identity("ssh-ed25519"))
+
+	def test_whitespace_only_returns_none(self) -> None:
+		self.assertIsNone(_ssh_key_identity("   "))
 
 
 class TestDigitalOceanClient(IntegrationTestCase):
@@ -249,3 +270,52 @@ class TestDigitalOceanClient(IntegrationTestCase):
 
 	def test_reserved_ip_droplet_id_none_when_floating(self) -> None:
 		self.assertIsNone(reserved_ip_droplet_id({"ip": "203.0.113.5", "droplet": None}))
+
+	# --- SSH keys ------------------------------------------------------------
+
+	def test_list_ssh_keys_returns_array(self) -> None:
+		fake = _FakeResponse(
+			200,
+			{"ssh_keys": [{"id": 1, "name": "atlas-ctrl"}, {"id": 2, "name": "laptop"}]},
+		)
+		with patch("atlas.atlas.digitalocean.requests.request", return_value=fake) as request:
+			keys = self.client.list_ssh_keys()
+		self.assertEqual([k["id"] for k in keys], [1, 2])
+		args, _ = request.call_args
+		self.assertIn("per_page=200", args[1])
+
+	def test_list_ssh_keys_handles_missing_key(self) -> None:
+		fake = _FakeResponse(200, {})
+		with patch("atlas.atlas.digitalocean.requests.request", return_value=fake):
+			self.assertEqual(self.client.list_ssh_keys(), [])
+
+	def test_ensure_ssh_key_reuses_existing_match(self) -> None:
+		pub = "ssh-ed25519 AAAA1234 comment"
+		list_resp = _FakeResponse(
+			200,
+			{"ssh_keys": [{"id": 42, "name": "atlas-ctrl", "public_key": "ssh-ed25519 AAAA1234 other-comment"}]},
+		)
+		with patch("atlas.atlas.digitalocean.requests.request", return_value=list_resp) as request:
+			key_id = self.client.ensure_ssh_key("atlas-ctrl", pub)
+		self.assertEqual(key_id, "42")
+		# Only the list call should have been made — no POST to create.
+		self.assertEqual(request.call_count, 1)
+		args, _ = request.call_args
+		self.assertIn("/account/keys", args[1])
+		self.assertEqual(args[0], "GET")
+
+	def test_ensure_ssh_key_uploads_when_not_found(self) -> None:
+		pub = "ssh-ed25519 AAAA5678 new-key"
+		list_resp = _FakeResponse(200, {"ssh_keys": []})
+		create_resp = _FakeResponse(201, {"ssh_key": {"id": 99, "name": "atlas-ctrl"}})
+		with patch(
+			"atlas.atlas.digitalocean.requests.request", side_effect=[list_resp, create_resp]
+		) as request:
+			key_id = self.client.ensure_ssh_key("atlas-ctrl", pub)
+		self.assertEqual(key_id, "99")
+		# Second call should be the POST /account/keys.
+		post_args, post_kwargs = request.call_args_list[1]
+		self.assertEqual(post_args[0], "POST")
+		self.assertIn("/account/keys", post_args[1])
+		self.assertEqual(post_kwargs["json"]["name"], "atlas-ctrl")
+		self.assertEqual(post_kwargs["json"]["public_key"], pub)

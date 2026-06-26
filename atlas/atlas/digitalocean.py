@@ -7,6 +7,8 @@ Only the endpoints Atlas needs:
 - GET  /droplets/{id}                 — poll
 - DELETE /droplets/{id}               — delete
 - GET  /droplets?tag_name=...         — list by tag, used by the e2e pre-sweep
+- GET  /account/keys                  — list SSH keys
+- POST /account/keys                  — upload an SSH key
 - POST /reserved_ips                  — allocate a reserved IP (to a region)
 - GET  /reserved_ips                  — list reserved IPs (discover/import)
 - GET  /reserved_ips/{ip}             — read one
@@ -105,6 +107,24 @@ class DigitalOceanClient:
 				"some droplets may be missing from discovery"
 			)
 		return droplets
+
+	def list_ssh_keys(self) -> list[dict]:
+		"""All SSH keys registered in the account (first page, per_page 200)."""
+		return self._request("GET", "/account/keys?per_page=200").get("ssh_keys", [])
+
+	def ensure_ssh_key(self, name: str, public_key: str) -> str:
+		"""Return the DO key id for `public_key`, registering it if absent.
+
+		Matched on the `<type> <base64>` core (first two tokens) so a differing
+		trailing comment doesn't cause a duplicate upload. The returned value is the
+		DO numeric key id as a string — usable directly in `create_droplet`."""
+		wanted = _ssh_key_identity(public_key)
+		if wanted:
+			for key in self.list_ssh_keys():
+				if _ssh_key_identity(key.get("public_key") or "") == wanted:
+					return str(key["id"])
+		created = self._request("POST", "/account/keys", json={"name": name, "public_key": public_key})
+		return str(created["ssh_key"]["id"])
 
 	def create_reserved_ip(self, region: str) -> dict:
 		"""Allocate a reserved IP to a region (not yet assigned to a droplet).
@@ -235,3 +255,11 @@ def reserved_ip_droplet_id(reserved_ip: dict) -> int | None:
 def _network_cidr(address: str, prefix_length: int) -> str:
 	network = ipaddress.IPv6Network(f"{address}/{prefix_length}", strict=False)
 	return str(network)
+
+
+def _ssh_key_identity(public_key: str) -> str | None:
+	"""The `<type> <base64>` core of an SSH public key (first two tokens).
+
+	Returns None for blank or malformed input so callers can skip the match."""
+	tokens = public_key.strip().split()
+	return f"{tokens[0]} {tokens[1]}" if len(tokens) >= 2 else None

@@ -19,11 +19,12 @@ Site config keys (set with `bench --site <site> set-config -p <key> <value>`):
     atlas_ssh_private_key_path    absolute path to the SSH private key on disk
                                   (0600, readable by the Frappe user)
     atlas_ssh_key_id              vendor's handle for the uploaded SSH key.
-                                  DigitalOcean: required — accepts DO's numeric key
-                                  id or its SHA-256 fingerprint. Scaleway: optional —
-                                  the IAM SSH-key UUID; if unset the provider
-                                  registers atlas_ssh_public_key with IAM at
-                                  provision time. Self-Managed: unused.
+                                  DigitalOcean: optional — the numeric key id or
+                                  SHA-256 fingerprint. If unset, Atlas finds or
+                                  uploads the public key at provision time and caches
+                                  the id. Scaleway: optional — the IAM SSH-key UUID;
+                                  if unset the provider registers atlas_ssh_public_key
+                                  with IAM at provision time. Self-Managed: unused.
     atlas_ssh_public_key          optional OpenSSH public key body. If omitted it
                                   is DERIVED from atlas_ssh_private_key_path
                                   (ssh-keygen -y) — self-serve needs it set on

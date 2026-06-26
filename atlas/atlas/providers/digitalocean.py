@@ -97,8 +97,9 @@ class DigitalOceanProvider(Provider):
 		size_slug = _strip_prefix(request.size, self.provider_type)
 		image_slug = _strip_prefix(request.image, self.provider_type)
 		ssh_key_ids = []
-		if request.ssh_key and request.ssh_key.vendor_id:
-			ssh_key_ids.append(request.ssh_key.vendor_id)
+		key_id = self._ensure_ssh_key(request)
+		if key_id:
+			ssh_key_ids.append(key_id)
 		droplet = self.client.create_droplet(
 			name=request.title,
 			region=self.region,
@@ -116,6 +117,27 @@ class DigitalOceanProvider(Provider):
 			networking=None,
 			provider_metadata=droplet,
 		)
+
+	def _ensure_ssh_key(self, request: ProvisionRequest) -> str | None:
+		"""Return the DO key id to install, finding or registering the Atlas keypair.
+
+		Order: (1) the cached vendor_id from Settings; (2) a key already uploaded to the
+		account whose body matches `public_key` — avoids duplicate uploads across
+		re-runs; (3) upload a new key named `atlas-<controller-hostname>` and cache the
+		id on DigitalOcean Settings for next time.
+
+		Returns None if there is no public key to work with (Self-Managed path)."""
+		if not (request.ssh_key and request.ssh_key.public_key):
+			return request.ssh_key.vendor_id if request.ssh_key else None
+		if request.ssh_key.vendor_id:
+			return request.ssh_key.vendor_id
+		import socket
+
+		key_name = f"atlas-{socket.gethostname()}"
+		key_id = self.client.ensure_ssh_key(key_name, request.ssh_key.public_key)
+		# Cache so subsequent provisions skip the list_ssh_keys round-trip.
+		frappe.db.set_single_value("DigitalOcean Settings", "ssh_key_id", key_id, update_modified=False)
+		return key_id
 
 	def describe(self, provider_resource_id: str) -> ProvisionResult:
 		droplet = self.client.get_droplet(int(provider_resource_id))
