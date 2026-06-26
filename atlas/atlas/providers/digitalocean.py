@@ -55,10 +55,7 @@ DIGITALOCEAN_MONTHLY_COST_USD: dict[str, int] = {
 
 KNOWN_DIGITALOCEAN_SIZES: tuple[str, ...] = tuple(DIGITALOCEAN_MONTHLY_COST_USD.keys())
 
-KNOWN_DIGITALOCEAN_IMAGES: tuple[str, ...] = (
-	"ubuntu-24-04-x64",
-	"ubuntu-22-04-x64",
-)
+KNOWN_DIGITALOCEAN_IMAGES: tuple[str, ...] = ("ubuntu-24-04-x64",)
 
 
 @register

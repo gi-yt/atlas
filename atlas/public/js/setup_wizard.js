@@ -81,6 +81,7 @@ function atlas_setup_slides() {
 					fieldname: "do_region",
 					label: __("DigitalOcean Region"),
 					fieldtype: "Data",
+					default: "blr1",
 					depends_on: "eval:doc.provider_type=='DigitalOcean'",
 					mandatory_depends_on: "eval:doc.provider_type=='DigitalOcean'",
 					description: __(
@@ -100,20 +101,24 @@ function atlas_setup_slides() {
 					fieldname: "do_default_size",
 					label: __("Default Size"),
 					fieldtype: "Select",
+					options: "s-2vcpu-4gb",
+					default: "s-2vcpu-4gb",
 					depends_on: "eval:doc.provider_type=='DigitalOcean'",
 					mandatory_depends_on: "eval:doc.provider_type=='DigitalOcean'",
 					description: __(
-						"Pick after Test Connection, or type a vendor slug, e.g. s-2vcpu-4gb-intel."
+						"Required. Prefilled with a sensible default; Test Connection lets you pick another, or type a vendor slug, e.g. s-2vcpu-4gb."
 					),
 				},
 				{
 					fieldname: "do_default_image",
 					label: __("Default Image"),
 					fieldtype: "Select",
+					options: "ubuntu-24-04-x64",
+					default: "ubuntu-24-04-x64",
 					depends_on: "eval:doc.provider_type=='DigitalOcean'",
 					mandatory_depends_on: "eval:doc.provider_type=='DigitalOcean'",
 					description: __(
-						"Pick after Test Connection, or type a vendor slug, e.g. ubuntu-24-04-x64."
+						"Required. Prefilled with a sensible default; Test Connection lets you pick another, or type a vendor slug, e.g. ubuntu-24-04-x64."
 					),
 				},
 
@@ -236,15 +241,7 @@ function atlas_setup_slides() {
 					fieldtype: "Data",
 					reqd: 1,
 					description: __(
-						"Absolute path on the controller (0600, readable by the Frappe user). The public key is derived from it via ssh-keygen if you leave the next field blank."
-					),
-				},
-				{
-					fieldname: "ssh_public_key",
-					label: __("SSH Public Key (optional)"),
-					fieldtype: "Small Text",
-					description: __(
-						"OpenSSH public key body. Derived from the private key path when omitted."
+						"Absolute path on the controller (0600, readable by the Frappe user). The matching public key is derived from it via ssh-keygen."
 					),
 				},
 				{
@@ -337,12 +334,15 @@ function atlas_setup_slides() {
 // --- Provider slide: default-on-load + Test Connection / auto-fill -----------
 
 function atlas_provider_slide_onload(slide) {
-	// Apply the default provider so its section renders on first paint (Frappe leaves
-	// the doc value empty even when the Select visually shows the first option).
-	if (!slide.get_value("provider_type")) {
-		slide.get_field("provider_type").set_input("DigitalOcean");
-		slide.form.refresh();
-	}
+	// Seed declared `default`s into the doc on first paint. The slide FieldGroup shows
+	// the first/declared option visually but leaves the doc value empty, so a field a
+	// user never touches would post blank and fail its `mandatory_depends_on` — make
+	// "what you see selected" == "what gets posted".
+	["provider_type", "do_region", "do_default_size", "do_default_image"].forEach((fieldname) => {
+		const field = slide.get_field(fieldname);
+		if (field?.df.default && !slide.get_value(fieldname)) field.set_input(field.df.default);
+	});
+	slide.form.refresh();
 
 	slide
 		.get_field("do_test_connection")
