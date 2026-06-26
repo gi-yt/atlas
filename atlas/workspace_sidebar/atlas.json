@@ -254,30 +254,6 @@
    "type": "Link"
   },
   {
-   "child": 1,
-   "collapsible": 1,
-   "icon": "image",
-   "indent": 0,
-   "keep_closed": 0,
-   "label": "Central Image",
-   "link_to": "Central Image",
-   "link_type": "DocType",
-   "show_arrow": 0,
-   "type": "Link"
-  },
-  {
-   "child": 1,
-   "collapsible": 1,
-   "icon": "cpu",
-   "indent": 0,
-   "keep_closed": 0,
-   "label": "Central Size",
-   "link_to": "Central Size",
-   "link_type": "DocType",
-   "show_arrow": 0,
-   "type": "Link"
-  },
-  {
    "child": 0,
    "collapsible": 1,
    "icon": "settings",

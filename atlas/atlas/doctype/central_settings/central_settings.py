@@ -2,11 +2,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
-from atlas.atlas.central import (
-	CentralClient,
-	upsert_central_images,
-	upsert_central_sizes,
-)
+from atlas.atlas.central import CentralClient
 from atlas.atlas.secrets import get_secret
 
 
@@ -39,16 +35,6 @@ class CentralSettings(Document):
 		plain dict the form turns into a toast."""
 		result = self.client().ping()
 		return {"ok": result.ok, "label": result.label, "error": result.error}
-
-	@frappe.whitelist()
-	def fetch_sizes(self) -> dict:
-		"""Pull Central's VM size catalog into Central Size rows."""
-		return upsert_central_sizes(self.client().fetch_sizes())
-
-	@frappe.whitelist()
-	def fetch_images(self) -> dict:
-		"""Pull Central's expected bench images into Central Image rows."""
-		return upsert_central_images(self.client().fetch_images())
 
 	def client(self) -> CentralClient:
 		if not self.url or not self.api_key:

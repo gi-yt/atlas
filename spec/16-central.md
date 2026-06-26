@@ -26,25 +26,19 @@ set of whitelisted HTTP methods (see *The wire contract* below).
    exposes the inbound `provision_tunnel` / `confirm_tunnel` surface Central drives.
    The authenticated service user is what attributes every inbound event to its
    cluster — Central resolves the sending Atlas from the session, with no separate id.
-2. **VM Sizes.** Today each Atlas hardcodes its size catalog
-   (`atlas/atlas/sizes.py` `SIZE_PRESETS`). Central becomes the source of truth:
-   Atlas **fetches sizes** from Central into a local `Central Size` catalog.
-3. **Expected bench images.** Central declares which bench images each Atlas is
-   *expected* to offer (V15, V16, Develop…). Atlas **fetches** that list into a
-   local `Central Image` catalog. Central sets the *expectation*; Atlas still
-   bakes each image with the existing Image Build pipeline — the `bench-v15` /
-   `bench-v16` / `bench-nightly` recipes ([15-image-builder.md](./15-image-builder.md))
-   — and **promotes** each golden to a base image. `Central Image.bake_status`
-   shows expectation-vs-reality per image.
-
-   **The link is an exact name-match.** `upsert_central_images` sets a `Central
-   Image`'s `local_image` (and flips `bake_status` to **Baked**) iff a
-   `Virtual Machine Image` of the **same name** as `Central Image.image_name`
-   exists. So the operator (or the promote default) must name the promoted image
-   exactly `bench-v15` / `bench-v16` / `bench-nightly` — which is what each bench
-   recipe's `promote_image_name` defaults to. A mismatch leaves the `Central Image`
-   orphaned at `Expected`. Nothing else links them: there is no push from Central,
-   no `series`-based fallback — the name is the whole contract.
+2. **VM Sizes.** Central owns the size catalog and **sends the concrete resource
+   values per VM** when it provisions one: `create_vm`
+   (`atlas/atlas/api/provision.py`) takes `vcpus` / `memory_megabytes` /
+   `disk_gigabytes` / `cpu_max_cores` directly off the call. Atlas keeps no local
+   catalog of Central's sizes; `atlas/atlas/sizes.py` `SIZE_PRESETS` remains only
+   as the operator-convenience ladder behind the desk/dashboard New Machine picker.
+3. **Bench images.** Atlas bakes each bench image with the existing Image Build
+   pipeline — the `bench-v15` / `bench-v16` / `bench-nightly` recipes
+   ([15-image-builder.md](./15-image-builder.md)) — and **promotes** each golden to
+   a base image named exactly after its series (`bench-v15` etc., what each recipe's
+   `promote_image_name` defaults to). Central selects the version per VM through the
+   ordinary `image` field on `create_vm`; Atlas keeps no separate expected-image
+   catalog.
 4. **Event reporting.** Atlas reports every Virtual Machine lifecycle event
    (created / status changed / terminated), **Site** lifecycle event (created /
    status changed), Snapshot completion, and Server state change back to Central,
@@ -105,14 +99,10 @@ the fleet state the commands above produce.
   **pushed per-Atlas Central service-user** creds — all written by Central's
   `provision_tunnel`, no longer hand-entered (registration is **Central-initiated**;
   see [21-tunnel.md](./21-tunnel.md)).
-- **Central Size** — a size Central says this Atlas should offer (`slug`,
-  `title`, `vcpus`, `cpu_max_cores`, `memory_megabytes`, `disk_gigabytes`,
-  `monthly_cost_usd`, `enabled`, `central_metadata`). Distinct from
-  `Provider Size` (what the *vendor* sells); the field shape matches
-  `SIZE_PRESETS` so these rows can later replace the hardcoded presets.
-- **Central Image** — a bench image Central expects (`image_name`, `title`,
-  `series`, `enabled`, `local_image` → `Virtual Machine Image`, `bake_status`
-  Expected/Baked/Stale, `central_metadata`).
+
+Atlas keeps **no local catalog of Central's sizes or expected images**: Central
+sends a VM's resource values and `image` per provision call (`create_vm`), so
+there is nothing to fetch and cache.
 
 ## Buttons (Central Settings → Actions ▾)
 
@@ -120,9 +110,6 @@ Each is a whitelisted controller method returning a plain dict for a toast,
 exactly like `DigitalOceanSettings.test_connection`:
 
 - **Test Connection** — `ping()`; green `OK` / red `Failed`.
-- **Fetch Sizes** — `fetch_sizes()`; upserts `Central Size` rows
-  (insert / update / disable-missing, same shape as `provider.upsert_catalog`).
-- **Fetch Images** — `fetch_images()`; upserts `Central Image` rows.
 
 There is **no Register button** anymore: registration is Central-initiated
 ([21-tunnel.md](./21-tunnel.md)). The inbound `provision_tunnel` / `confirm_tunnel`
@@ -180,8 +167,6 @@ per-Atlas service user** ([21-tunnel.md](./21-tunnel.md)). The methods Atlas exp
 | Atlas call | Central method | Returns |
 | --- | --- | --- |
 | `ping` | `central.api.atlas.ping` | `{ label }` |
-| `fetch_sizes` | `central.api.atlas.sizes` | `[ { slug, title, vcpus, cpu_max_cores, memory_megabytes, disk_gigabytes, monthly_cost_usd } ]` |
-| `fetch_images` | `central.api.atlas.images` | `[ { image_name, title, series } ]` |
 | `post_event` | `central.api.atlas.event` | (ignored) |
 
 `register` is gone (registration is Central-initiated). **Central → Atlas

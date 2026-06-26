@@ -1,9 +1,7 @@
 """Unit tests for the Central seam (spec/16-central.md).
 
-Covers the three logic surfaces a host can't add anything to:
+Covers the logic surfaces a host can't add anything to:
   - CentralClient request building (URL, auth header, error wrapping, unwrap).
-  - upsert_central_sizes / upsert_central_images (insert / update / disable;
-    bake_status resolution against Virtual Machine Image).
   - central_report gating, payload shape, and enqueue_after_commit.
 
 No live Central call — requests is monkeypatched.
@@ -19,13 +17,8 @@ from unittest.mock import MagicMock, patch
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from atlas.atlas import central, central_report
-from atlas.atlas.central import (
-	CentralClient,
-	CentralError,
-	CentralImageInfo,
-	CentralSizeInfo,
-)
+from atlas.atlas import central_report
+from atlas.atlas.central import CentralClient, CentralError
 
 
 def _response(status_code=200, body=None, content=True):
@@ -72,72 +65,11 @@ class TestCentralClient(IntegrationTestCase):
 		self.assertFalse(result.ok)
 		self.assertIn("down", result.error)
 
-	def test_fetch_sizes_parses_rows(self) -> None:
-		payload = {
-			"message": {
-				"sizes": [
-					{
-						"slug": "shared-1x",
-						"title": "Shared 1x",
-						"vcpus": 1,
-						"cpu_max_cores": 0.0625,
-						"memory_megabytes": 512,
-						"disk_gigabytes": 10,
-						"monthly_cost_usd": 4,
-					}
-				]
-			}
-		}
-		with patch("atlas.atlas.central.requests.request") as request:
-			request.return_value = _response(body=payload)
-			sizes = self.client.fetch_sizes()
-		self.assertEqual(len(sizes), 1)
-		self.assertEqual(sizes[0].slug, "shared-1x")
-		self.assertEqual(sizes[0].cpu_max_cores, 0.0625)
-
 	def test_post_event_raises_on_error(self) -> None:
 		with patch("atlas.atlas.central.requests.request") as request:
 			request.return_value = _response(status_code=500, body={"exc": "boom"})
 			with self.assertRaises(CentralError):
 				self.client.post_event({"type": "vm.created"})
-
-
-class TestCentralUpsert(IntegrationTestCase):
-	def tearDown(self) -> None:
-		for slug in ("shared-1x", "shared-2x", "old-size"):
-			if frappe.db.exists("Central Size", slug):
-				frappe.delete_doc("Central Size", slug, force=True, ignore_permissions=True)
-		for name in ("bench-v15", "old-image"):
-			if frappe.db.exists("Central Image", name):
-				frappe.delete_doc("Central Image", name, force=True, ignore_permissions=True)
-
-	def test_upsert_sizes_insert_update_disable(self) -> None:
-		# Seed a stale row Central will no longer list -> should be disabled.
-		frappe.get_doc({"doctype": "Central Size", "slug": "old-size", "enabled": 1, "vcpus": 1}).insert(
-			ignore_permissions=True
-		)
-
-		sizes = (
-			CentralSizeInfo("shared-1x", "Shared 1x", 1, 0.0625, 512, 10, 4),
-			CentralSizeInfo("shared-2x", "Shared 2x", 1, 0.125, 1024, 20, 8),
-		)
-		first = central.upsert_central_sizes(sizes)
-		self.assertEqual(first["inserted"], 2)
-		self.assertEqual(first["disabled"], 1)
-		self.assertEqual(frappe.db.get_value("Central Size", "old-size", "enabled"), 0)
-		self.assertEqual(frappe.db.get_value("Central Size", "shared-1x", "memory_megabytes"), 512)
-
-		# Re-run: same rows now update, not insert.
-		second = central.upsert_central_sizes(sizes)
-		self.assertEqual(second["inserted"], 0)
-		self.assertEqual(second["updated"], 2)
-
-	def test_upsert_images_bake_status(self) -> None:
-		images = (CentralImageInfo("bench-v15", "Bench V15", "v15"),)
-		# No matching VM Image yet -> Expected.
-		central.upsert_central_images(images)
-		self.assertEqual(frappe.db.get_value("Central Image", "bench-v15", "bake_status"), "Expected")
-		self.assertFalse(frappe.db.get_value("Central Image", "bench-v15", "local_image"))
 
 
 @contextlib.contextmanager

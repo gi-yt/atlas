@@ -430,7 +430,7 @@ gunicorn, so `/api/status` routes through over the same v6 path the edge proxy u
 **Versioned variants — V15 / V16 / Nightly.** The bench recipe is **not** a single
 golden: three recipes ship — `bench-v15`, `bench-v16`, `bench-nightly` — baked per
 Frappe/Bench release and promoted to base images named exactly `bench-v15` /
-`bench-v16` / `bench-nightly` (the Central Image name-match link,
+`bench-v16` / `bench-nightly` (the name Central selects a version by,
 [15-image-builder.md](./15-image-builder.md), [16-central.md](./16-central.md)).
 They share the **one** committed `bench/` tree and `build.sh`; the only thing that
 varies is the per-version pins, which the controller injects without forking the
@@ -452,7 +452,7 @@ the site + ERPNext and produces the admin-console golden described above. They r
 the same `bench/` tree and version-injection; they differ from their site twins only
 in the mode (and so are cold-only, and never register as the self-serve
 `default_bench_snapshot`). They promote to base images named `bench-v<NN>-admin` — the
-Central name-match link, alongside the site images.
+name Central selects them by, alongside the site images.
 
 ## Verification
 

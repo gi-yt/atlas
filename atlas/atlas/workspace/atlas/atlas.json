@@ -231,7 +231,7 @@
    "hidden": 0,
    "is_query_report": 0,
    "label": "Central",
-   "link_count": 4,
+   "link_count": 2,
    "onboard": 0,
    "type": "Card Break"
   },
@@ -251,26 +251,6 @@
    "label": "Central Settings",
    "link_count": 0,
    "link_to": "Central Settings",
-   "link_type": "DocType",
-   "onboard": 0,
-   "type": "Link"
-  },
-  {
-   "hidden": 0,
-   "is_query_report": 0,
-   "label": "Central Image",
-   "link_count": 0,
-   "link_to": "Central Image",
-   "link_type": "DocType",
-   "onboard": 0,
-   "type": "Link"
-  },
-  {
-   "hidden": 0,
-   "is_query_report": 0,
-   "label": "Central Size",
-   "link_count": 0,
-   "link_to": "Central Size",
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"

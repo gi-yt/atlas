@@ -139,7 +139,7 @@ class TestRecipeRegistry(IntegrationTestCase):
 			self.assertEqual(r.task_script, "bench-build")
 
 	def test_versioned_recipes_promote_to_series_image_name(self) -> None:
-		# The promote default name == the recipe name == the Central Image image_name.
+		# The promote default name == the recipe name (the series image name).
 		for name in ("bench-v15", "bench-v16", "bench-nightly"):
 			self.assertEqual(RECIPES[name].promote_image_name, name)
 
