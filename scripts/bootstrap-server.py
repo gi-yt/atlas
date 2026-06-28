@@ -130,6 +130,29 @@ APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 """
 
+# --- per-VM Firecracker log rotation (prod-host-setup.md "Log files"/"8250
+# Serial Device") ---
+# Firecracker emits log data the GUEST can influence the volume of; the systemd
+# unit `append:`s each VM's stdout+stderr to a per-VM file with no bound. A
+# malicious or merely chatty guest could otherwise fill host storage. logrotate
+# is in the stock Ubuntu cron/timer set, so a drop-in here is the whole fix.
+# copytruncate (not the default move-then-reopen): systemd holds the log file
+# open for the unit's lifetime and there is no signal to make it reopen, so we
+# rotate by copying then truncating the open file in place. Bounded to 7 daily
+# files; a wildcard covers every present and future VM directory.
+LOGROTATE_CONF = """\
+/var/lib/atlas/virtual-machines/*/log/firecracker.log {
+    daily
+    rotate 7
+    maxsize 100M
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+}
+"""
+
 # Step 2 package set, verbatim.
 PACKAGES = [
 	"ca-certificates",
@@ -311,6 +334,13 @@ def main() -> None:
 	run("sudo", "apt-get", "-o", "DPkg::Lock::Timeout=300", "install", "-y", "unattended-upgrades")
 	install_file(UNATTENDED_CONF, "/etc/apt/apt.conf.d/60-atlas-unattended.conf", mode="0644")
 
+	# 7a. Bound the per-VM Firecracker logs (prod-host-setup.md "Log files"). The
+	#     systemd unit `append:`s each VM's stdout+stderr to an unbounded per-VM
+	#     file; a guest can influence the volume. logrotate ships with Ubuntu's
+	#     stock daily timer, so this drop-in is the whole fix — no service to
+	#     enable.
+	install_file(LOGROTATE_CONF, "/etc/logrotate.d/60-atlas-firecracker", mode="0644")
+
 	# 8. Firecracker host controls (prod-host-setup.md): no cross-VM memory side
 	#    channel, no guest RAM on disk. Both idempotent; guarded for absence.
 	#    KSM (page dedup across VMs) is a side channel — turn it off if present.
@@ -334,6 +364,32 @@ def main() -> None:
 			"sudo",
 			"nft",
 			"add chain inet atlas forward { type filter hook forward priority filter; policy accept; }",
+		)
+
+	# 9-imds. Drop guest traffic to the cloud metadata endpoint (169.254.169.254).
+	#     prod-host-setup.md "Filtering Guest Egress Network Traffic": a guest must
+	#     not reach the HOST's IMDS, which on DigitalOcean serves the droplet's own
+	#     metadata (userdata, vendor credentials). The forward chain's policy is
+	#     accept, so without an explicit drop a guest's packet to 169.254.169.254 is
+	#     forwarded out the veth and answered by the host's metadata service. One
+	#     host-wide rule covers every VM (the destination is fixed); vm-network-up.py
+	#     re-asserts it after a reboot, exactly like the masquerade rule. The guest's
+	#     OWN metadata (MMDS) also lives at 169.254.169.254 but is served by
+	#     Firecracker on the tap INSIDE the netns — it never traverses this host
+	#     forward chain, so dropping here does not touch it.
+	if "ip daddr 169.254.169.254" not in run("sudo", "nft", "list", "chain", "inet", "atlas", "forward"):
+		run(
+			"sudo",
+			"nft",
+			"add",
+			"rule",
+			"inet",
+			"atlas",
+			"forward",
+			"ip",
+			"daddr",
+			"169.254.169.254",
+			"drop",
 		)
 
 	# 9a. IPv4 egress: masquerade the per-VM private /30s (carved from

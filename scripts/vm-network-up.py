@@ -80,6 +80,25 @@ def main() -> None:
 			"nft",
 			"add chain inet atlas forward { type filter hook forward priority filter; policy accept; }",
 		)
+	# Re-assert the host IMDS-drop (bootstrap's 9-imds): a guest must never reach the
+	# host's metadata endpoint (169.254.169.254 serves the droplet's own vendor
+	# credentials). Recreated here so the first VM to start after a host reboot
+	# rebuilds it, like the masquerade rule. The guest's own MMDS is served by
+	# Firecracker on the tap inside the netns and never crosses this chain.
+	if "ip daddr 169.254.169.254" not in run("sudo", "nft", "list", "chain", "inet", "atlas", "forward"):
+		run(
+			"sudo",
+			"nft",
+			"add",
+			"rule",
+			"inet",
+			"atlas",
+			"forward",
+			"ip",
+			"daddr",
+			"169.254.169.254",
+			"drop",
+		)
 	if not run_ok("sudo", "nft", "list", "chain", "inet", "atlas", "postrouting"):
 		run(
 			"sudo",

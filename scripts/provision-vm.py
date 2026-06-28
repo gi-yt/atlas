@@ -411,7 +411,16 @@ def _firecracker_config(inputs: "ProvisionInputs") -> str:
 	config = {
 		"boot-source": {
 			"kernel_image_path": "vmlinux",
-			"boot_args": "console=ttyS0 reboot=k panic=1",
+			# 8250.nr_uarts=0 disables the guest 8250 serial device at boot
+			# (prod-host-setup.md "8250 Serial Device"): the device is tied to
+			# Firecracker's stdout, and a guest with serial access can drive
+			# unbounded host log/storage growth. We do NOT pass `console=ttyS0` —
+			# the guest's console writes would otherwise flood firecracker.log. The
+			# host side is bounded too (the systemd unit logrotates the per-VM log);
+			# the guest can technically re-enable the device after boot, so the
+			# bounded-storage half is the load-bearing mitigation. reboot=k / panic=1
+			# keep the guest's reboot+panic behaviour unchanged.
+			"boot_args": "8250.nr_uarts=0 reboot=k panic=1",
 		},
 		"drives": [
 			{
