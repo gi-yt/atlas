@@ -68,7 +68,7 @@ def run_smoke(reuse: bool = True, keep: bool = True, reboot: bool = False) -> No
 def _check_run_task_dialog_happy(server) -> None:
 	"""Re-bootstrap via run_task_dialog — same code path as bootstrap()."""
 	task_name = server.run_task_dialog(
-		script="bootstrap-server.py",
+		script="bootstrap-server",
 		variables={
 			"FIRECRACKER_VERSION": "v1.16.0",
 			"ARCHITECTURE": "x86_64",
@@ -76,7 +76,7 @@ def _check_run_task_dialog_happy(server) -> None:
 	)
 	task = frappe.get_doc("Task", task_name)
 	assert task.status == "Success", task.stderr
-	assert task.script == "bootstrap-server.py"
+	assert task.script == "bootstrap-server"
 	assert task.server == server.name
 
 
@@ -88,13 +88,13 @@ def _check_run_task_dialog_argument_shapes(server) -> None:
 	the throw happens *after* the parse branch.
 	"""
 	with expect_validation_error("unknown script"):
-		server.run_task_dialog(script="not-a-real-script.sh", variables={})
+		server.run_task_dialog(script="not-a-real-script", variables={})
 	with expect_validation_error("unknown script"):
-		server.run_task_dialog(script="not-a-real-script.sh", variables=None)
+		server.run_task_dialog(script="not-a-real-script", variables=None)
 	with expect_validation_error("unknown script"):
-		server.run_task_dialog(script="not-a-real-script.sh", variables='{"X": "1"}')
+		server.run_task_dialog(script="not-a-real-script", variables='{"X": "1"}')
 	with expect_validation_error("variables must"):
-		server.run_task_dialog(script="not-a-real-script.sh", variables="[1, 2]")
+		server.run_task_dialog(script="not-a-real-script", variables="[1, 2]")
 
 
 def _check_task_doctype_validation(server) -> None:
@@ -104,7 +104,7 @@ def _check_task_doctype_validation(server) -> None:
 		{
 			"doctype": "Task",
 			"server": server.name,
-			"script": "noop.sh",
+			"script": "noop",
 			"status": "Pending",
 			"triggered_by": "Administrator",
 		}
@@ -117,7 +117,7 @@ def _check_task_doctype_validation(server) -> None:
 		{
 			"doctype": "Task",
 			"server": server.name,
-			"script": "noop.sh",
+			"script": "noop",
 			"status": "Pending",
 			"triggered_by": "Administrator",
 			"variables": "not json",
@@ -131,7 +131,7 @@ def _check_task_doctype_validation(server) -> None:
 		{
 			"doctype": "Task",
 			"server": server.name,
-			"script": "noop.sh",
+			"script": "noop",
 			"status": "Pending",
 			"triggered_by": "Administrator",
 			"variables": "[1, 2]",
@@ -145,7 +145,7 @@ def _check_task_doctype_validation(server) -> None:
 		{
 			"doctype": "Task",
 			"server": server.name,
-			"script": "noop.sh",
+			"script": "noop",
 			"status": "Pending",
 			"triggered_by": "Administrator",
 		}
@@ -158,7 +158,7 @@ def _check_task_doctype_validation(server) -> None:
 		{
 			"doctype": "Task",
 			"server": server.name,
-			"script": "phase1-probe.sh",
+			"script": "phase1-probe",
 			"status": "Pending",
 			"triggered_by": "Administrator",
 		}
@@ -166,7 +166,7 @@ def _check_task_doctype_validation(server) -> None:
 	doc.variables_dict = {"NAME": "x"}
 	doc.insert(ignore_permissions=True)
 	doc.reload()
-	doc.script = "phase1-fail.sh"
+	doc.script = "phase1-fail"
 	with expect_validation_error("read-only after insert"):
 		doc.save(ignore_permissions=True)
 
@@ -184,11 +184,11 @@ def _check_run_task_unknown_script(server) -> None:
 	with expect_validation_error("not found"):
 		run_task(
 			server=server.name,
-			script="usecase-unknown-script.sh",
+			script="usecase-unknown-script",
 			variables={"X": "1"},
 			timeout_seconds=10,
 		)
-	task = frappe.get_last_doc("Task", filters={"script": "usecase-unknown-script.sh"})
+	task = frappe.get_last_doc("Task", filters={"script": "usecase-unknown-script"})
 	assert task.status == "Failure", task.status
 
 
@@ -197,11 +197,11 @@ def _check_run_task_remote_failure(server) -> None:
 	with expect_validation_error("exited"):
 		run_task(
 			server=server.name,
-			script="phase1-fail.sh",
+			script="phase1-fail",
 			variables={},
 			timeout_seconds=10,
 		)
-	task = frappe.get_last_doc("Task", filters={"script": "phase1-fail.sh"})
+	task = frappe.get_last_doc("Task", filters={"script": "phase1-fail"})
 	assert task.status == "Failure", task.status
 	assert task.exit_code == 7, task.exit_code
 
@@ -211,11 +211,11 @@ def _check_run_task_timeout(server) -> None:
 	with expect_validation_error("timed out"):
 		run_task(
 			server=server.name,
-			script="phase8-sleep.sh",
+			script="phase8-sleep",
 			variables={},
 			timeout_seconds=2,
 		)
-	task = frappe.get_last_doc("Task", filters={"script": "phase8-sleep.sh"})
+	task = frappe.get_last_doc("Task", filters={"script": "phase8-sleep"})
 	assert task.status == "Failure", task.status
 	assert "timed out" in (task.stderr or "").lower(), task.stderr
 
@@ -224,7 +224,7 @@ def _check_reboot(server) -> None:
 	"""server.reboot() returns a Task; SSH drops then comes back."""
 	reboot_task_name = server.reboot()
 	reboot_task = frappe.get_doc("Task", reboot_task_name)
-	assert reboot_task.script == "reboot-server.sh"
+	assert reboot_task.script == "reboot-server"
 	# Either Failure (SSH drops mid-task) or Success (systemctl exits before
 	# the connection is torn down). Both are normal; we care that SSH comes
 	# back.

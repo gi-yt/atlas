@@ -286,7 +286,7 @@ def _assert_issue_task_recorded(domain: str) -> None:
 	up in the same audit list as every host/guest op."""
 	rows = frappe.get_all(
 		"Task",
-		filters={"script": "issue-cert.py", "status": "Success"},
+		filters={"script": "issue-cert", "status": "Success"},
 		fields=["name", "creation"],
 		order_by="creation desc",
 		limit=1,

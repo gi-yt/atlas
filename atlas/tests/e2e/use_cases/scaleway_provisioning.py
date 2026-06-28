@@ -163,7 +163,7 @@ def _server_is_reachable(server_name: str, timeout_seconds: int = 5) -> bool:
 def _assert_bootstrap_succeeded(server_name: str) -> None:
 	tasks = frappe.get_all(
 		"Task",
-		filters={"server": server_name, "script": "bootstrap-server.py", "status": "Success"},
+		filters={"server": server_name, "script": "bootstrap-server", "status": "Success"},
 	)
 	assert tasks, "no successful bootstrap-server.py Task — host bring-up did not complete"
 	server = frappe.get_doc("Server", server_name)
@@ -177,7 +177,7 @@ def _assert_pool_present(server_name: str) -> None:
 	(`POOL BACKING: device`), not a loopback file. On a Scaleway Elastic Metal box
 	`PoolBacking` must pick the NVMe disk(s); a loopback backing means it fell
 	through to the stock-droplet fallback — a host failure on bare metal (§8)."""
-	task = run_task(server=server_name, script="phase-pool-present.sh", variables={}, timeout_seconds=60)
+	task = run_task(server=server_name, script="phase-pool-present", variables={}, timeout_seconds=60)
 	assert task.status == "Success", task.stderr
 	assert "POOL PROBE OK" in task.stdout, task.stdout
 	print(f"[e2e/scw] pool probe output:\n{task.stdout}")
