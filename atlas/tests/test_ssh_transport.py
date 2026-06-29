@@ -10,6 +10,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from atlas.atlas._ssh import transport
+from atlas.atlas._ssh._quote import substitute
 from atlas.atlas._ssh.transport import (
 	PROBE_CONNECT_TIMEOUT_SECONDS,
 	Connection,
@@ -148,7 +149,7 @@ class TestRunDetached(IntegrationTestCase):
 		# finds the marker. launch ok, poll raises, poll returns "0", log read.
 		calls = {"n": 0}
 
-		def flaky(connection, key_path, command, timeout_seconds):
+		def flaky(connection, key_path, command, *params, timeout_seconds, **kwargs):
 			calls["n"] += 1
 			if calls["n"] == 1:
 				return ("", "", 0)  # launch
@@ -229,7 +230,11 @@ class TestRunDetachedStreaming(IntegrationTestCase):
 		self.assertEqual((log, code), ("aaa\nbbb\n", 0))
 		self.assertEqual(chunks, ["aaa\n", "bbb\n"])
 		# Offsets: first tail at +1 (whole file), second at +5 (after "aaa\n" = 4 bytes).
-		tail_commands = [c.args[2] for c in run_ssh.call_args_list if "tail -c" in c.args[2]]
+		# run_ssh now takes a (template, *params) command with {} holes, so render each
+		# call back to the line it would have run before asserting the offset.
+		tail_commands = [
+			substitute(c.args[2], c.args[3:]) for c in run_ssh.call_args_list if "tail -c" in c.args[2]
+		]
 		self.assertIn("tail -c +1 ", tail_commands[0])
 		self.assertIn("tail -c +5 ", tail_commands[1])
 

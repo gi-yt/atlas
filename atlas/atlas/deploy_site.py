@@ -30,12 +30,12 @@ Two functions, two execution sites (spec/14-self-serve.md "What runs where"):
 """
 
 import http.client
-import shlex
 import time
 from pathlib import Path
 
 import frappe
 
+from atlas.atlas._ssh._quote import substitute
 from atlas.atlas._ssh.transport import run_scp, run_ssh, ssh_key_file, wait_for_ssh
 from atlas.atlas.proxy import _record_guest_task, _remote_parent
 from atlas.atlas.ssh import connection_for_guest
@@ -139,19 +139,14 @@ def deploy_site(virtual_machine: str, site_name: str) -> None:
 	_trace("sshd up; uploading deploy-site.py", since=_t)
 
 	with ssh_key_file(connection.ssh_private_key) as key_path:
-		run_ssh(
-			connection,
-			key_path,
-			"mkdir -p " + shlex.quote(_remote_parent(remote_script)),
-			timeout_seconds=60,
-		)
+		run_ssh(connection, key_path, "mkdir -p {}", _remote_parent(remote_script), timeout_seconds=60)
 		run_scp(connection, key_path, local_script, remote_script, timeout_seconds=300)
 		# python3 explicitly: an SSH `command` is non-interactive and the script's
 		# shebang is enough, but the deploy script needs the system python (it drops to
 		# the `frappe` user and shells out to the baked bench-cli, which owns its own uv
 		# venv). Warm: `bench rename-site` (rename + nginx + production setup) + probe.
 		# Cold: also an idempotent `bench start` first.
-		command = f"python3 {shlex.quote(remote_script)} --site-name {shlex.quote(site_name)}"
+		command = substitute("python3 {} --site-name {}", (remote_script, site_name))
 		# The bake MODE is carried on the cloned VM (build_mode, set by
 		# clone_to_new_vm from the golden snapshot). site → rename the baked
 		# `site.local` to the FQDN; admin → set `[admin].domain = <fqdn>`. Empty
@@ -166,7 +161,7 @@ def deploy_site(virtual_machine: str, site_name: str) -> None:
 		# completed for THIS VM before it renames the site — see deploy-site.py's
 		# --warm-vm-uuid.
 		if vm.warm_snapshot:
-			command += f" --warm-vm-uuid {shlex.quote(vm.name)}"
+			command += substitute(" --warm-vm-uuid {}", (vm.name,))
 		_trace(
 			f"running deploy-site.py in guest ({'warm' if vm.warm_snapshot else 'cold'}, mode={build_mode}) …"
 		)

@@ -23,6 +23,7 @@ from pathlib import Path
 
 import frappe
 
+from atlas.atlas._ssh._quote import substitute
 from atlas.atlas._ssh.transport import forget_host, run_detached, run_scp, run_ssh, ssh_key_file
 from atlas.atlas.image_recipes import ImageRecipe
 from atlas.atlas.proxy import _record_guest_task, _remote_parent
@@ -153,9 +154,12 @@ def _build_command(recipe: ImageRecipe) -> str:
 	setsid+nohup), so the version pins ride here — build.sh needs no new arg-parsing
 	beyond MODE, which it already has."""
 	env = _build_env(recipe)
-	prefix = "".join(f"export {k}={shlex.quote(v)} && " for k, v in env.items())
+	# Variable-length env exports — a loop, so quote each value directly (the {} form
+	# is for fixed templates). The entrypoint is a caller-fixed path; only the bake
+	# MODE is data, so it rides a {} hole.
+	prefix = "".join(substitute("export {}={} && ", (k, v)) for k, v in env.items())
 	entry = recipe.remote_entrypoint
-	return f"{prefix}chmod +x {entry} && {entry} {shlex.quote(recipe.effective_build_mode)}"
+	return prefix + substitute(f"chmod +x {entry} && {entry} {{}}", (recipe.effective_build_mode,))
 
 
 # How much streamed live output to keep on the Task row while it runs. A

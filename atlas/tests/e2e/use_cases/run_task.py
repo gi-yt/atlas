@@ -181,7 +181,9 @@ def _check_task_doctype_validation(server) -> None:
 
 def _check_run_task_unknown_script(server) -> None:
 	"""run_task with a missing script raises and finalizes the row Failure."""
-	with expect_validation_error("not found"):
+	# The catalog raises "No script file for verb '<verb>' in [...]" (scripts_catalog
+	# .file_for); match on the stable "script file" phrase, not the older "not found".
+	with expect_validation_error("script file"):
 		run_task(
 			server=server.name,
 			script="usecase-unknown-script",

@@ -20,6 +20,7 @@ import shlex
 
 import frappe
 
+from atlas.atlas._ssh._quote import substitute
 from atlas.atlas._ssh.transport import run_ssh, ssh_key_file
 from atlas.atlas.doctype.subdomain.subdomain import subdomain_map
 from atlas.atlas.placement import atlas_region
@@ -179,11 +180,11 @@ def _write_guest_file(
 ) -> None:
 	"""Write `content` to `path` in the guest via `tee` (content arrives on stdin,
 	never in argv), then chmod. Optionally mkdir -p the parent first."""
-	quoted = shlex.quote(path)
 	command = ""
 	if make_dir:
-		command += f"mkdir -p {shlex.quote(make_dir)} && "
-	command += f"tee {quoted} >/dev/null && chmod {mode} {quoted}"
+		command += substitute("mkdir -p {} && ", (make_dir,))
+	# `mode` is a caller-fixed literal (0644/0600), so it stays inline; `path` is data.
+	command += substitute(f"tee {{}} >/dev/null && chmod {mode} {{}}", (path, path))
 	_stdout, stderr, code = run_ssh(connection, key_path, command, timeout_seconds=60, stdin=content)
 	if code != 0:
 		frappe.throw(f"Writing {path} to guest failed (exit {code}): {stderr[-300:]}")
@@ -197,9 +198,14 @@ def _point_cert_symlink_command(region: str) -> str:
 	is in place. Relative targets (so the link stays valid regardless of where
 	certs/ is mounted) and `-n` so we replace the link, not follow it on a re-run.
 	Idempotent."""
-	return (
-		f"ln -sfn {shlex.quote(f'{region}/fullchain.pem')} {shlex.quote(f'{CERT_DIRECTORY}/fullchain.pem')} && "
-		f"ln -sfn {shlex.quote(f'{region}/privkey.pem')} {shlex.quote(f'{CERT_DIRECTORY}/privkey.pem')}"
+	return substitute(
+		"ln -sfn {} {} && ln -sfn {} {}",
+		(
+			f"{region}/fullchain.pem",
+			f"{CERT_DIRECTORY}/fullchain.pem",
+			f"{region}/privkey.pem",
+			f"{CERT_DIRECTORY}/privkey.pem",
+		),
 	)
 
 

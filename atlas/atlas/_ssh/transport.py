@@ -17,6 +17,8 @@ from pathlib import Path
 
 import frappe
 
+from atlas.atlas._ssh._quote import substitute
+
 KNOWN_HOSTS_PATH = Path("~/.atlas/known_hosts").expanduser()
 REMOTE_STAGING_DIRECTORY = "/tmp/atlas"
 
@@ -152,19 +154,31 @@ def run_ssh(
 	connection: Connection,
 	key_path: str,
 	remote_command: str,
+	*params: object,
 	timeout_seconds: int,
 	stdin: str | None = None,
 	extra_options: list[str] | None = None,
 ) -> tuple[str, str, int]:
-	"""Run one remote command over SSH. `stdin`, if given, is piped to the remote
-	command's stdin — the path the proxy control plane uses to stream a map body
-	to a guest's `curl --unix-socket … --data-binary @-` (design §7.3), without
-	first staging a file on the guest.
+	"""Run one remote command over SSH. `remote_command` reads like a shell line; any
+	interpolated values go through `{}` placeholders that are auto-quoted (`substitute`)
+	so each becomes exactly one token to the REMOTE shell — the same author syntax as the
+	host `run()`. Unlike `run()`, the result is NOT shlex.split: `remote_command` is the
+	command line the remote sshd hands to the remote shell, so it must stay a STRING with
+	the quoted holes intact (Trap 3).
+
+	    run_ssh(conn, key, "test -f {}", path, timeout_seconds=60)
+
+	`timeout_seconds` is keyword-only (it follows `*params`). `stdin`, if given, is piped
+	to the remote command's stdin — the path the proxy control plane uses to stream a map
+	body to a guest's `curl --unix-socket … --data-binary @-` (design §7.3), without first
+	staging a file on the guest.
 
 	`extra_options` are appended after SSH_OPTIONS as additional `-o key=value`
 	flags. ssh honours the LAST occurrence of a repeated option, so a caller can
 	override a default (e.g. ConnectTimeout) for one step without mutating the
 	shared SSH_OPTIONS."""
+	if params:
+		remote_command = substitute(remote_command, params)
 	# StrictHostKeyChecking=accept-new must WRITE the new host key into
 	# ~/.atlas/known_hosts, so the parent dir has to exist — ensure it here so no
 	# caller can forget (cheap + idempotent; the guest control plane in proxy.py
@@ -230,11 +244,15 @@ def run_detached(
 	sink should never kill the build it is only observing."""
 	# Fresh markers, then launch under setsid+nohup. `sh -c` so the redirect + the
 	# exit-code stamp run in the detached shell; the trailing write captures the
-	# command's own exit status ($?).
-	launch = (
-		f"rm -f {shlex.quote(log_path)} {shlex.quote(done_path)}; "
-		f"setsid nohup sh -c {shlex.quote(f'{remote_command} > {log_path} 2>&1; echo $? > {done_path}')} "
-		f">/dev/null 2>&1 < /dev/null &"
+	# command's own exit status ($?). The detached shell body is a single {} param so
+	# it reaches the outer remote shell as ONE token; log/done paths inside it are
+	# quoted via substitute too, so a path with a space survives the inner shell.
+	# `remote_command` is concatenated (NOT templated) so a literal `{}` in it is never
+	# mistaken for a placeholder.
+	inner = remote_command + " > " + substitute("{} 2>&1; echo $? > {}", (log_path, done_path))
+	launch = substitute(
+		"rm -f {} {}; setsid nohup sh -c {} >/dev/null 2>&1 < /dev/null &",
+		(log_path, done_path, inner),
 	)
 	run_ssh(connection, key_path, launch, timeout_seconds=60)
 
@@ -249,7 +267,7 @@ def run_detached(
 		# Short poll: has the marker appeared? A dropped poll just retries next loop.
 		try:
 			done, _stderr, _code = run_ssh(
-				connection, key_path, f"cat {shlex.quote(done_path)} 2>/dev/null || true", timeout_seconds=30
+				connection, key_path, "cat {} 2>/dev/null || true", done_path, timeout_seconds=30
 			)
 		except Exception:
 			continue  # transient SSH failure — keep polling, the build runs on
@@ -258,7 +276,7 @@ def run_detached(
 		if done.strip():
 			exit_code = int(done.strip())
 			log, _e, _c = run_ssh(
-				connection, key_path, f"cat {shlex.quote(log_path)} 2>/dev/null || true", timeout_seconds=120
+				connection, key_path, "cat {} 2>/dev/null || true", log_path, timeout_seconds=120
 			)
 			if on_log is not None:
 				# Final drain: emit anything written between the last tail and the
@@ -285,7 +303,9 @@ def _stream_log_tail(
 		tail, _stderr, code = run_ssh(
 			connection,
 			key_path,
-			f"tail -c +{offset} {shlex.quote(log_path)} 2>/dev/null || true",
+			"tail -c +{} {} 2>/dev/null || true",
+			offset,
+			log_path,
 			timeout_seconds=30,
 		)
 	except Exception:
