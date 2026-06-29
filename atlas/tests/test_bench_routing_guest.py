@@ -323,13 +323,54 @@ class TestGenerateDnsRecords(_ProviderTestCase):
 		# Blank `{}` — a wildcard subdomain we already route needs no user DNS records.
 		self.assertEqual(json.loads(out.getvalue().strip()), {})
 
-	def test_non_wildcard_domain_declines(self) -> None:
-		# Custom-domain record recipes are Phase 2; a non-wildcard name declines for now.
+	def test_custom_domain_prints_controller_recipe(self) -> None:
+		# A custom (non-wildcard) domain asks the controller for the records the user
+		# pastes into THEIR DNS; the binary forwards `domain` + the regional `site`.
+		import io
+		from contextlib import redirect_stdout
+
+		recipe = {
+			"records": [
+				{"type": "CNAME", "name": "shop.acme.com", "value": f"app.{_REGION_DOMAIN}"},
+				{"type": "A", "name": "shop.acme.com", "value": "203.0.113.5"},
+				{"type": "AAAA", "name": "shop.acme.com", "value": "2001:db8::5"},
+				{"type": "CAA", "name": "shop.acme.com", "value": '0 issue "letsencrypt.org"'},
+			]
+		}
+		self._set_responses(dns_records=(200, {"message": recipe}))
 		self._set_config(self.base)
-		rc = self.provider.main(
-			["bench-domain-provider", "generate-dns-records", "shop.acme.com", "shop.acme.com"]
-		)
-		self.assertEqual(rc, 2)
+		out = io.StringIO()
+		with redirect_stdout(out):
+			rc = self.provider.main(
+				[
+					"bench-domain-provider",
+					"generate-dns-records",
+					f"app.{_REGION_DOMAIN}",
+					"shop.acme.com",
+				]
+			)
+		self.assertEqual(rc, 0)
+		self.assertEqual(json.loads(out.getvalue().strip()), recipe)
+		# It POSTed dns_records carrying BOTH the custom domain and the regional site.
+		calls = [c for c in self.server.calls if c[0].endswith("bench_routing.dns_records")]
+		self.assertEqual(len(calls), 1)
+		self.assertIn("domain=shop.acme.com", calls[0][1])
+		self.assertIn(f"site=app.{_REGION_DOMAIN}", calls[0][1])
+
+	def test_custom_domain_transport_failure_fails_open(self) -> None:
+		# Fail-OPEN (the real gate is register): an unreachable controller still prints
+		# {} / exits 0 so a momentary outage doesn't break the Add-Domain UI.
+		import io
+		from contextlib import redirect_stdout
+
+		self._set_config("http://[::1]:1")
+		out = io.StringIO()
+		with redirect_stdout(out):
+			rc = self.provider.main(
+				["bench-domain-provider", "generate-dns-records", f"app.{_REGION_DOMAIN}", "shop.acme.com"]
+			)
+		self.assertEqual(rc, 0)
+		self.assertEqual(json.loads(out.getvalue().strip()), {})
 
 	def test_no_config_fails_open_with_empty_records(self) -> None:
 		import io

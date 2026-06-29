@@ -12,9 +12,11 @@
 # Verbs (the contract pilot drives — domain-provider.md):
 #
 #   bench-domain-provider generate-dns-records <site> <domain>
-#       PRE-FLIGHT, read-only — report the DNS records the user adds at THEIR provider so
-#       the name points here. A wildcard subdomain we already route needs NO records, so
-#       this prints {} and exits 0. (Custom-domain record recipes are Phase 2.) Fail-open.
+#       PRE-FLIGHT, read-only, ADVISORY — report the DNS records the user adds at THEIR
+#       provider so <domain> points here (Atlas writes nothing). A wildcard subdomain we
+#       already route needs NO records, so this prints {} and exits 0. A custom
+#       (non-wildcard) domain gets the recipe from the controller's dns_records(): CNAME→
+#       the site's regional FQDN, A+AAAA→the proxy fleet, CAA→the active CA. Fail-open.
 #
 #   bench-domain-provider register <domain>
 #       BEFORE `bench new-site` — the AUTHORITATIVE reservation. Peels the region wildcard
@@ -251,11 +253,15 @@ def _region_suffix(base_url: str) -> str:
 
 
 def _cmd_generate_dns_records(site: str, domain: str) -> int:
-	"""Pre-flight (read-only): report the DNS records the user must add. A wildcard
-	subdomain we already route needs NONE, so print `{}` and exit 0. The custom-domain
-	record recipe (CNAME→site, A+AAAA→proxy, CAA→LE) is Phase 2. Fail-OPEN per the doc
-	(the real gate is register): a no-config or transport blip still prints `{}`/exits 0
-	so the Add-Domain UI isn't broken by a momentary outage."""
+	"""Pre-flight (read-only): report the DNS records the user adds at THEIR provider so
+	`domain` reaches their Atlas site. ADVISORY only — Atlas writes nothing to any zone.
+
+	A wildcard subdomain we already route needs NONE (the regional wildcard DNS resolves
+	it), so print `{}` and exit 0. A CUSTOM (non-wildcard) domain gets the real recipe
+	(CNAME→the site's regional FQDN, A+AAAA→proxy, CAA→the active CA) from the controller's
+	`dns_records(domain, site)`, printed as a JSON list. Fail-OPEN per the doc (the real
+	gate is `register`): a no-config or transport blip still prints `{}`/exits 0 so the
+	Add-Domain UI isn't broken by a momentary outage."""
 	try:
 		base_url = _read_base_url()
 		suffix = _region_suffix(base_url)
@@ -266,12 +272,20 @@ def _cmd_generate_dns_records(site: str, domain: str) -> int:
 		print(f"bench-domain-provider: generate-dns-records soft outage ({error})", file=sys.stderr)
 		print("{}")
 		return EX_OK
-	# A wildcard subdomain we route: no records for the user to add. A non-wildcard name
-	# would need the Phase-2 recipe; until then report nothing and let `register` decline.
-	if _peel_label(domain, suffix) is None:
-		print(f"bench-domain-provider: {domain} is not a routable wildcard subdomain", file=sys.stderr)
-		return EX_DECLINED
-	print("{}")
+	# A wildcard subdomain we route: no records for the user to add.
+	if _peel_label(domain, suffix) is not None:
+		print("{}")
+		return EX_OK
+	# A custom (non-wildcard) domain: ask the controller for the records the user pastes
+	# into their own DNS so the name points here. The CNAME target is the caller's own
+	# regional `site` FQDN (the controller verifies this VM owns it).
+	try:
+		result = _post(base_url, "dns_records", {"domain": domain, "site": site})
+	except TransportError as error:
+		print(f"bench-domain-provider: generate-dns-records soft outage ({error})", file=sys.stderr)
+		print("{}")
+		return EX_OK
+	print(json.dumps(result))
 	return EX_OK
 
 

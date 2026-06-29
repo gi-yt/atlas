@@ -761,3 +761,83 @@ class TestProxyServers(_RoutingTestCase):
 		)
 		self.assertTrue(audit, "proxy_servers did not audit")
 		self.assertEqual(audit[0]["vm"], "")
+
+
+class TestDnsRecords(_RoutingTestCase):
+	"""Component K — the advisory custom-domain recipe. Atlas writes nothing; the records
+	are what the customer pastes into THEIR DNS so a custom name reaches their Atlas site."""
+
+	def _site_fqdn(self, label: str) -> str:
+		return f"{label}.{ROOT_DOMAIN}"
+
+	def test_cname_targets_the_caller_owned_regional_site(self) -> None:
+		# A proxy supplies the A/AAAA targets; the caller owns the regional `site` it CNAMEs.
+		proxy = _running_vm()
+		proxy.db_set("is_proxy", 1)
+		vm = _running_vm()
+		_make_subdomain("acme", vm.name)
+
+		result = self._as(
+			vm.ipv6_address,
+			bench_routing.dns_records,
+			domain="shop.acme.com",
+			site=self._site_fqdn("acme"),
+		)
+		by_type = {r["type"]: r for r in result["records"]}
+		# CNAME → the caller's OWN regional FQDN (the per-site binding, not the proxy).
+		self.assertEqual(by_type["CNAME"]["value"], self._site_fqdn("acme"))
+		self.assertEqual(by_type["CNAME"]["name"], "shop.acme.com")
+		# AAAA → the proxy fleet (the apex fallback).
+		self.assertEqual(by_type["AAAA"]["value"], proxy.ipv6_address)
+		# CAA → the active issuer (Let's Encrypt in the test root domain).
+		self.assertEqual(by_type["CAA"]["value"], '0 issue "letsencrypt.org"')
+
+	def test_site_the_caller_does_not_own_is_rejected(self) -> None:
+		# We never advise a CNAME to a name this VM has no claim to: `acme` is owned by
+		# ANOTHER VM, so the caller's request for it is a clean reject.
+		owner = _running_vm()
+		_make_subdomain("acme", owner.name)
+		caller = _running_vm()
+		with self.assertRaises(frappe.ValidationError):
+			self._as(
+				caller.ipv6_address,
+				bench_routing.dns_records,
+				domain="shop.acme.com",
+				site=self._site_fqdn("acme"),
+			)
+
+	def test_site_outside_the_region_wildcard_is_rejected(self) -> None:
+		# A `site` not under the active wildcard can't be a name this VM reserved.
+		vm = _running_vm()
+		_make_subdomain("acme", vm.name)
+		with self.assertRaises(frappe.ValidationError):
+			self._as(
+				vm.ipv6_address,
+				bench_routing.dns_records,
+				domain="shop.acme.com",
+				site="acme.elsewhere.example",
+			)
+
+	def test_self_managed_issuer_omits_the_caa_record(self) -> None:
+		# Self-Managed has no public-CA identity → no CAA (a CAA with no issuer would
+		# forbid all issuance, the opposite of intent).
+		frappe.db.set_value("Root Domain", ROOT_DOMAIN, "tls_provider_type", "Self-Managed")
+		self.addCleanup(frappe.db.set_value, "Root Domain", ROOT_DOMAIN, "tls_provider_type", "Let's Encrypt")
+		vm = _running_vm()
+		_make_subdomain("acme", vm.name)
+		result = self._as(
+			vm.ipv6_address,
+			bench_routing.dns_records,
+			domain="shop.acme.com",
+			site=self._site_fqdn("acme"),
+		)
+		self.assertNotIn("CAA", {r["type"] for r in result["records"]})
+
+	def test_unresolved_caller_is_rejected(self) -> None:
+		with self.assertRaises(frappe.ValidationError):
+			self._as(
+				"2001:db8:dead::ffff",
+				bench_routing.dns_records,
+				domain="shop.acme.com",
+				site=self._site_fqdn("acme"),
+			)

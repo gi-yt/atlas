@@ -320,6 +320,89 @@ def proxy_servers() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Component K — the custom-domain DNS recipe (the records the USER adds)
+# ---------------------------------------------------------------------------
+#
+# `generate-dns-records` is purely ADVISORY: Atlas creates nothing in anyone's
+# zone. It answers "which records do I paste into MY DNS provider so my custom
+# domain (shop.acme.com) reaches the site I run on Atlas?" — the Phase-2 custom
+# domain recipe spec/18 deferred. The guest binary formats; this endpoint is the
+# source of truth for the values:
+#
+#   CNAME <custom> -> <the site's REGIONAL FQDN, e.g. app.blr1.frappe.dev>
+#       The preferred record for a subdomain. The custom name aliases the regional
+#       name, which is uniquely RESERVED to this customer (a `Subdomain` row owned
+#       by the caller VM). The regional name already resolves (A/AAAA) to the proxy,
+#       so the customer points once and Atlas can re-IP the proxy fleet without the
+#       customer re-pointing. Crucially this binds the custom domain to the
+#       customer's SITE, not just to the proxy — pointing A/AAAA at the proxy is
+#       something anyone can do (it would not "steal" routing), but a CNAME to the
+#       reserved regional name only routes to the one customer who owns it.
+#   A / AAAA <custom> -> <each proxy's v4 / v6>  (wildcard_targets())
+#       The apex fallback: a zone apex cannot hold a CNAME, so an apex custom domain
+#       must point straight at the proxy IPs. Weaker than the CNAME (no per-site
+#       binding) but unavoidable for an apex.
+#   CAA <custom> 0 issue "<active issuer>"  (the active Root Domain's TLS provider)
+#       Authorizes OUR CA to issue the per-domain cert for the custom name. Omitted
+#       entirely when the active issuer has no public CA identity (Self-Managed).
+
+
+@frappe.whitelist(allow_guest=True)
+@rate_limit(limit=60, seconds=60)
+def dns_records(domain: str, site: str) -> dict:
+	"""The DNS records the customer adds at THEIR provider so `domain` (a custom,
+	non-wildcard name like `shop.acme.com`) reaches their Atlas site (Component K).
+
+	    {"records": [
+	        {"type": "CNAME", "name": "<domain>", "value": "<site regional FQDN>"},
+	        {"type": "A",     "name": "<domain>", "value": "<proxy v4>"}, ...,
+	        {"type": "AAAA",  "name": "<domain>", "value": "<proxy v6>"}, ...,
+	        {"type": "CAA",   "name": "<domain>", "value": "0 issue \\"<issuer>\\""},
+	    ]}
+
+	Read-only and ADVISORY — Atlas writes nothing to any zone; the customer pastes
+	these into their own DNS. Resolves the calling VM by source `/128` (*Caller
+	resolution*) and verifies `site` is a regional FQDN this VM actually OWNS (a
+	`Subdomain` row), so the CNAME target is a name reserved to this customer — the
+	binding that stops another tenant claiming the route by merely pointing at the
+	shared proxy. A `site` the caller does not own, or a `site` not under the active
+	region wildcard, is a clean reject (`frappe.throw`, audited) — we will not advise
+	a CNAME to a name this VM has no claim to.
+
+	The CAA record is omitted when the active issuer has no public-CA identity
+	(Self-Managed `caa_issuer is None`): emitting a CAA with no issuer would forbid
+	all issuance, the opposite of the intent. Audited; the VM is the source address."""
+	from atlas.atlas.proxy import wildcard_targets
+	from atlas.atlas.tls import for_tls_provider_type
+
+	vm = _resolve_caller_vm("dns_records", domain)
+	region_domain = active_root_domain().domain
+	suffix = f".{region_domain}"
+
+	# The CNAME target is the caller's OWN regional FQDN. `site` must be that FQDN
+	# (label under the active wildcard) AND a Subdomain this VM owns — otherwise we
+	# would advise aliasing a name the caller has no claim to.
+	site = (site or "").strip().rstrip(".").lower()
+	label = site[: -len(suffix)] if site.endswith(suffix) else None
+	owned = label and frappe.db.exists("Subdomain", {"subdomain": label, "virtual_machine": vm.name})
+	if not owned:
+		_audit("dns_records", domain, "unowned_site", business_reject=True, vm=vm.name)
+		frappe.throw(f"{site!r} is not a routable site this VM owns")
+
+	ipv4, ipv6 = wildcard_targets()
+	records = [{"type": "CNAME", "name": domain, "value": f"{label}{suffix}"}]
+	records += [{"type": "A", "name": domain, "value": ip} for ip in ipv4]
+	records += [{"type": "AAAA", "name": domain, "value": ip} for ip in ipv6]
+
+	issuer = for_tls_provider_type(active_root_domain().tls_provider_type).caa_issuer
+	if issuer:
+		records.append({"type": "CAA", "name": domain, "value": f'0 issue "{issuer}"'})
+
+	_audit("dns_records", domain, "ok", business_reject=False, vm=vm.name)
+	return {"records": records}
+
+
+# ---------------------------------------------------------------------------
 # Caller resolution (the VM is the source address, never a parameter)
 # ---------------------------------------------------------------------------
 

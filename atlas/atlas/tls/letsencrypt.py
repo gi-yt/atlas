@@ -27,6 +27,7 @@ LETS_ENCRYPT_PRODUCTION = "https://acme-v02.api.letsencrypt.org/directory"
 @register
 class LetsEncryptProvider(TlsProvider):
 	provider_type = "Let's Encrypt"
+	caa_issuer = "letsencrypt.org"
 
 	def __init__(self) -> None:
 		settings = frappe.get_single("Lets Encrypt Settings")

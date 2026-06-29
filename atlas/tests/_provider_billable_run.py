@@ -167,7 +167,7 @@ def run(caller_vm: str = "", proxy_vm: str = "", terminate: bool = False) -> Non
 		_check_host_queries(caller_vm, proxy_vm, domain)
 		_check_register_serves(caller_vm, proxy_vm, domain, fqdn, site_v6)
 		_check_deregister_drops(caller_vm, proxy_vm, fqdn)
-		_check_generate_dns_records(caller_vm, fqdn)
+		_check_generate_dns_records(caller_vm, proxy_vm, fqdn)
 		_check_register_fail_closed(caller_vm)
 	finally:
 		_cleanup(_LABEL)
@@ -242,12 +242,31 @@ def _check_deregister_drops(caller_vm: str, proxy_vm: str, fqdn: str) -> None:
 	print(f"[3] PASS — deregistered {fqdn} is gone from the proxy's live map")
 
 
-def _check_generate_dns_records(caller_vm: str, fqdn: str) -> None:
+def _check_generate_dns_records(caller_vm: str, proxy_vm: str, fqdn: str) -> None:
 	print(f"\n[4] generate-dns-records {fqdn} prints {{}} (wildcard subdomain needs none) ...")
 	out, stderr, code = _guest(caller_vm, f"bench-domain-provider generate-dns-records {fqdn} {fqdn}")
 	assert code == 0, f"generate-dns-records exit {code}: {stderr[-300:]}"
 	assert json.loads(out.strip()) == {}, f"expected {{}}, got {out.strip()!r}"
-	print("[4] PASS — generate-dns-records returned {} for a wildcard subdomain")
+	print("[4a] PASS — generate-dns-records returned {} for a wildcard subdomain")
+
+	# A CUSTOM (non-wildcard) domain gets the advisory recipe. The CNAME target is the
+	# caller's OWN regional site, so re-register the label first (deregister dropped it).
+	print(f"\n[4b] generate-dns-records for a custom domain → CNAME→{fqdn}, A/AAAA→proxy, CAA→CA ...")
+	_out, stderr, code = _guest(caller_vm, f"bench-domain-provider register {fqdn}")
+	assert code == 0, f"re-register for the dns-records check exit {code}: {stderr[-400:]}"
+	frappe.db.commit()  # see [2]: refresh the snapshot past the guest's cross-process commit
+	custom = "shop.example.com"
+	out, stderr, code = _guest(caller_vm, f"bench-domain-provider generate-dns-records {fqdn} {custom}")
+	assert code == 0, f"generate-dns-records (custom) exit {code}: {stderr[-300:]}"
+	records = json.loads(out.strip())["records"]
+	by_type = {r["type"]: r for r in records}
+	assert by_type["CNAME"]["value"] == fqdn, f"CNAME target {by_type['CNAME']} != {fqdn}"
+	proxy_v6 = frappe.db.get_value("Virtual Machine", proxy_vm, "ipv6_address")
+	assert any(r["type"] == "AAAA" and r["value"] == proxy_v6 for r in records), (
+		f"no AAAA → this proxy's v6 {proxy_v6} in {records}"
+	)
+	assert by_type["CAA"]["value"] == '0 issue "letsencrypt.org"', f"CAA {by_type.get('CAA')}"
+	print(f"[4b] PASS — custom domain recipe: CNAME→{fqdn}, AAAA→{proxy_v6}, CAA→letsencrypt.org")
 
 
 def _check_register_fail_closed(caller_vm: str) -> None:

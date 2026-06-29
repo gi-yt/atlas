@@ -417,11 +417,19 @@ route rather than silently falling back to v4) — "no v6 route" is a transport 
   the new contract has **no `list` verb**, guest-side stray clearing has no equivalent —
   pilot drives `deregister` itself on drop, and total teardown is still `terminate()`
   (Component F); the residual just widens slightly (noted in *The shape*).
-- **`generate-dns-records <site> <domain>`** — pre-flight, **read-only**: report the DNS
-  records the user adds at *their* provider so the name points here. A **wildcard
-  subdomain we already route needs none**, so it prints `{}` and exits 0. (The
-  custom-domain record recipe — CNAME→site, A+AAAA→proxy, CAA→LE — is the Phase-2 custom
-  domain feature.) Fail-open per the doc (the real gate is `register`).
+- **`generate-dns-records <site> <domain>`** — pre-flight, **read-only**, **advisory**:
+  report the DNS records the user adds at *their own* provider so a custom name reaches
+  their Atlas site. **Atlas writes nothing to any zone** — this only tells the user what to
+  paste. A **wildcard subdomain we already route needs none**, so it prints `{}` and exits
+  0. A **custom (non-wildcard) domain** (`shop.acme.com`) gets the recipe from the
+  controller endpoint `dns_records(domain, site)` (Component K): **CNAME → the caller's own
+  regional site FQDN** (`<label>.<region domain>`, the per-customer binding — a CNAME to a
+  name *reserved* to this VM, not just to the shared proxy, so no other tenant can claim
+  the route), **A + AAAA → the proxy fleet** (`wildcard_targets()`, the apex fallback where
+  a CNAME is illegal), **CAA → the active issuer** (`0 issue "<caa_issuer>"`, omitted for a
+  Self-Managed issuer with no public CA). The controller resolves the caller VM by source
+  `/128` and verifies it **owns** `site`, refusing to advise a CNAME to a name the caller
+  has no claim to. Fail-open per the doc (the real gate is `register`).
 - **`wildcard-domains`** — host-level: prints the wildcard pattern(s) sites here may be
   named under, `["*.<active region domain>"]` (controller endpoint `wildcard_domains()`).
   Fail-soft (blank + exit 0). pilot constrains site names to these and suggests subdomains.
@@ -719,17 +727,19 @@ unauthenticated plain HTTP any tenant SSRF can read).
 - Multi-region cross-region suffix hardening (single-region today; the
   reconstruct-and-compare rule is specified now so it's correct when a second region
   lands).
-- **Custom (non-wildcard) external domains — Phase 2.** `bench-domain-provider register`
-  today **declines** any name not under the regional wildcard (exit 2), and
-  `generate-dns-records` prints `{}` for a wildcard subdomain. Routing an arbitrary
-  external domain (`shop.acme.com`) end-to-end is a separate, larger feature gated on the
-  explicitly-deferred `ssl_certificate_by_lua` proxy SNI hook ([spec/09](./09-roadmap.md)):
-  it needs per-domain TLS (the per-subdomain custom-domain cert spec/09 left "in place but
-  unbuilt"), full-FQDN routing in the proxy (`router.lua` strips the region suffix today),
-  a new Custom/Site Domain doctype (the dot ban + cap are correct for wildcard labels), an
-  ownership-verification gate before issuance, and the real CNAME/A+AAAA/CAA record recipe
-  behind `generate-dns-records`. The contract for it already exists in pilot's verbs —
-  only the routing/TLS layer is unbuilt.
+- **Custom (non-wildcard) external domains — Phase 2 (record recipe BUILT; routing/TLS
+  pending).** The **advisory record recipe is built**: `generate-dns-records` now answers a
+  custom domain with the controller's `dns_records(domain, site)` (Component K above) —
+  CNAME → the caller's reserved regional site, A+AAAA → the proxy fleet, CAA → the active
+  issuer. The user can already see what to add at their DNS provider. What remains unbuilt
+  is **routing the resulting traffic** end-to-end: `bench-domain-provider register` still
+  **declines** any name not under the regional wildcard (exit 2), so a custom domain has no
+  reservation yet, and the data path is gated on the explicitly-deferred
+  `ssl_certificate_by_lua` proxy SNI hook ([spec/09](./09-roadmap.md)): per-domain TLS (the
+  per-subdomain custom-domain cert spec/09 left "in place but unbuilt"), full-FQDN routing
+  in the proxy (`router.lua` strips the region suffix today), a Custom/Site Domain doctype
+  (the dot ban + cap are correct for wildcard labels), and an ownership-verification gate
+  before issuance. The contract for all of it already exists in pilot's verbs.
 - **Per-token whole-domain routing — a future billable tier.** Beyond the `*-{token}`
   suffix-match (one name → one VM, [vm-url-tokens](../llm/references/vm-url-tokens.md)),
   routing an **entire domain** `*.{token}.{region}.{domain}` to a single VM needs **one
