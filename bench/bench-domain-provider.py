@@ -19,15 +19,18 @@
 #       the site's regional FQDN, A+AAAA→the proxy fleet, CAA→the active CA. Fail-open.
 #
 #   bench-domain-provider register <domain>
-#       BEFORE `bench new-site` — the AUTHORITATIVE reservation. Peels the region wildcard
-#       suffix off <domain> to the bare label, POSTs register(label). Exit 0 = route live;
-#       exit 2 = declined (taken/reserved/at_limit/invalid OR a non-wildcard domain, which
-#       Phase 1 does not route); exit 1 = transport failure. FAIL-CLOSED: an unreachable
-#       controller blocks the create (don't let a site exist with no route).
+#       BEFORE `bench new-site` — the AUTHORITATIVE reservation. A WILDCARD subdomain
+#       (peels to a bare label) POSTs register(label) — terminated at the proxy under the
+#       regional wildcard cert. A CUSTOM domain (does NOT peel — an external FQDN like
+#       shop.acme.com) POSTs register_custom_domain(domain) — SNI passthrough, the VM
+#       terminates with its own cert (spec/18 Phase 2). Exit 0 = route live; exit 2 =
+#       declined (taken/reserved/at_limit/invalid); exit 1 = transport failure. FAIL-CLOSED:
+#       an unreachable controller blocks the create (don't let a site exist with no route).
 #
 #   bench-domain-provider deregister <domain>
 #       AFTER `bench drop-site`, AND as the rollback when new-site fails — best-effort,
-#       ALWAYS exit 0 (a non-zero would throw on an otherwise-successful drop).
+#       ALWAYS exit 0 (a non-zero would throw on an otherwise-successful drop). A wildcard
+#       name POSTs deregister(label); a custom name POSTs deregister_custom_domain(domain).
 #
 #   bench-domain-provider wildcard-domains
 #       HOST-LEVEL — the wildcard pattern(s) sites here may be named under. Prints a JSON
@@ -290,23 +293,22 @@ def _cmd_generate_dns_records(site: str, domain: str) -> int:
 
 
 def _cmd_register(domain: str) -> int:
-	"""register before new-site — the AUTHORITATIVE reservation. Peel the wildcard suffix
-	to the bare label and POST register(label). FAIL-CLOSED (the deliberate change from
-	atlas-route's fail-open): a transport error → exit 1 → pilot aborts the create, so a
-	site never exists with no provisioned route. NotConfigured → exit 0 (not an Atlas
-	bench; pilot proceeds with its built-in behaviour). A non-wildcard domain declines
-	(exit 2) — Phase 1 routes only wildcard subdomains."""
+	"""register before new-site — the AUTHORITATIVE reservation. A WILDCARD subdomain peels
+	to a bare label and POSTs register(label); a CUSTOM domain (does not peel) POSTs
+	register_custom_domain(domain) — SNI passthrough (spec/18 Phase 2). FAIL-CLOSED (the
+	deliberate reversal of atlas-route's fail-open): a transport error → exit 1 → pilot
+	aborts the create, so a site never exists with no provisioned route. NotConfigured →
+	exit 0 (not an Atlas bench; pilot proceeds with its built-in behaviour)."""
 	try:
 		base_url = _read_base_url()
 		suffix = _region_suffix(base_url)
 		label = _peel_label(domain, suffix)
 		if label is None:
-			print(
-				f"bench-domain-provider: {domain} is not a routable subdomain of {suffix.lstrip('.') or 'this host'}",
-				file=sys.stderr,
-			)
-			return EX_DECLINED
-		result = _post(base_url, "register", {"label": label})
+			# A custom external domain (shop.acme.com): reserve it as a Custom Domain. The
+			# proxy passes its TLS through; the VM issues its own cert after the site exists.
+			result = _post(base_url, "register_custom_domain", {"domain": domain})
+		else:
+			result = _post(base_url, "register", {"label": label})
 	except NotConfigured as error:
 		print(f"bench-domain-provider: no routing config ({error}); skipping register", file=sys.stderr)
 		return EX_OK
@@ -316,25 +318,30 @@ def _cmd_register(domain: str) -> int:
 		return EX_TRANSPORT
 	status = (result or {}).get("status")
 	if status == "ok":
-		suffix_echo = (result or {}).get("suffix") or suffix.lstrip(".")
-		print(f"bench-domain-provider: reserved {label}.{suffix_echo}", file=sys.stderr)
+		if label is None:
+			print(f"bench-domain-provider: reserved custom domain {domain}", file=sys.stderr)
+		else:
+			suffix_echo = (result or {}).get("suffix") or suffix.lstrip(".")
+			print(f"bench-domain-provider: reserved {label}.{suffix_echo}", file=sys.stderr)
 		return EX_OK
-	print(f"bench-domain-provider: {_decline_message(status, label, result)}", file=sys.stderr)
+	print(f"bench-domain-provider: {_decline_message(status, label or domain, result)}", file=sys.stderr)
 	return EX_DECLINED
 
 
 def _cmd_deregister(domain: str) -> int:
-	"""deregister after drop / as rollback — best-effort, ALWAYS exit 0. Peel the label
-	and POST deregister(label). NotConfigured / TransportError are swallowed: a non-zero
-	here would throw on an otherwise-successful drop (the lost route is the owner-cleared
-	residual). A non-wildcard domain we never routed is likewise a clean exit 0."""
+	"""deregister after drop / as rollback — best-effort, ALWAYS exit 0. A wildcard name
+	peels to a label and POSTs deregister(label); a CUSTOM domain POSTs
+	deregister_custom_domain(domain) (spec/18 Phase 2). NotConfigured / TransportError are
+	swallowed: a non-zero here would throw on an otherwise-successful drop (the lost route
+	is the owner-cleared residual)."""
 	try:
 		base_url = _read_base_url()
 		suffix = _region_suffix(base_url)
 		label = _peel_label(domain, suffix)
 		if label is None:
-			return EX_OK
-		_post(base_url, "deregister", {"label": label})
+			_post(base_url, "deregister_custom_domain", {"domain": domain})
+		else:
+			_post(base_url, "deregister", {"label": label})
 	except NotConfigured:
 		return EX_OK
 	except TransportError as error:
