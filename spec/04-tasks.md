@@ -575,3 +575,35 @@ whitelisted method that:
 
 A retry is a new Task row, not a mutation of the failed one. The audit
 trail keeps both.
+
+## Why SSH, not HTTP
+
+The transport is SSH and stays SSH. We measured the alternative — a resident
+host server that runs `atlas <verb>` on an HTTP POST instead of an SSH exec — to
+see whether the per-Task SSH handshake was a real cost. It is not: with both
+sides keeping a warm channel (SSH ControlMaster, HTTP keep-alive), HTTP and SSH
+are statistically indistinguishable. The lifecycle wall time is gated by what
+`atlas <verb>` does on the host (cold-booting Firecracker for provision/start,
+tearing down the jail for terminate), not by how the verb is delivered.
+
+VM lifecycle, e2e.local, n=10 each, host-side Task duration (ms):
+
+| operation | SSH avg | HTTP avg |
+| --------- | ------: | -------: |
+| provision |    1739 |     1692 |
+| stop      |     560 |      526 |
+| start     |    1194 |     1145 |
+| terminate |    1426 |     1396 |
+
+Every operation lands within ~3–5% of the other transport — inside the
+run-to-run noise (the within-transport spread exceeds the between-transport
+gap), and the nominal winner flips direction between runs. The gap is on the
+order of ~50 ms per operation.
+
+**Don't switch to HTTP unless we're optimizing at the ~50 ms scale** — and even
+then it is the wrong lever, because the host-side verb cost (the ~1.7 s
+provision, the ~1.4 s terminate) dwarfs it. Note also that the measured HTTP
+path was plaintext; a real deployment would need HTTPS (or the management tunnel),
+whose handshake would only widen the gap against HTTP. SSH already gives us an
+authenticated, encrypted channel for free, so there is no transport win to chase
+here. (The PoC HTTP transport written to take these numbers has been removed.)
