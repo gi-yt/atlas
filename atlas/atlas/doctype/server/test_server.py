@@ -35,7 +35,7 @@ class TestServerBootstrap(IntegrationTestCase):
 			status="Bootstrapping",
 		)
 
-	def test_bootstrap_uploads_helpers_then_runs_script(self) -> None:
+	def test_bootstrap_uploads_helpers_then_install_sh_then_runs_script(self) -> None:
 		from atlas.atlas.doctype.server import server as server_module
 
 		task = fake_task(
@@ -44,16 +44,39 @@ class TestServerBootstrap(IntegrationTestCase):
 		)
 
 		with patch.object(server_module, "upload_files") as upload:
-			with patch.object(server_module, "run_task", return_value=task) as run:
-				with patch.object(
-					server_module,
-					"connection_for_server",
-					return_value=Connection(host="x", ssh_private_key="k"),
-				):
-					self.server.bootstrap()
+			with patch.object(server_module, "run_ssh", return_value=("ok", "", 0)) as run_ssh:
+				with patch.object(server_module, "run_task", return_value=task) as run:
+					with patch.object(
+						server_module,
+						"connection_for_server",
+						return_value=Connection(host="x", ssh_private_key="k"),
+					):
+						self.server.bootstrap()
 
 		upload.assert_called_once()
+		# install.sh is SSHed after the upload, before the bootstrap Task.
+		run_ssh.assert_called_once()
+		self.assertIn("/var/lib/atlas/bin/install.sh", run_ssh.call_args.args[2])
 		run.assert_called_once()
+
+	def test_bootstrap_aborts_if_install_sh_fails(self) -> None:
+		# A non-zero install.sh (broken venv) must fail the bootstrap loudly, before
+		# the bootstrap Task ever runs — the carve-out's deep-gate guarantee, moved
+		# to install.sh.
+		from atlas.atlas.doctype.server import server as server_module
+
+		with patch.object(server_module, "upload_files"):
+			with patch.object(server_module, "run_ssh", return_value=("", "boom", 1)):
+				with patch.object(server_module, "run_task") as run:
+					with patch.object(
+						server_module,
+						"connection_for_server",
+						return_value=Connection(host="x", ssh_private_key="k"),
+					):
+						with self.assertRaises(frappe.ValidationError) as raised:
+							self.server.bootstrap()
+		self.assertIn("install.sh failed", str(raised.exception))
+		run.assert_not_called()
 
 	def test_script_uploads_ship_task_entry_scripts_durably(self) -> None:
 		# The Task entry scripts (provision/start/stop/snapshot-stop) ship to
@@ -61,11 +84,24 @@ class TestServerBootstrap(IntegrationTestCase):
 		from atlas.atlas import scripts_catalog
 
 		destinations = {dest for _src, dest in self.server._script_uploads()}
-		for script in ("provision-vm.py", "start-vm.py", "stop-vm.py", "snapshot-stop-vm.py"):
-			self.assertIn(f"/var/lib/atlas/bin/{script}", destinations)
+		# host_task_scripts() yields VERBS; the FILE (verb→file_for, keeping its
+		# .py/.sh suffix on the host disk) is what ships.
+		for file_name in ("provision-vm.py", "start-vm.py", "stop-vm.py", "snapshot-stop-vm.py"):
+			self.assertIn(f"/var/lib/atlas/bin/{file_name}", destinations)
 		# The durable set covers every host SSH Task entry point.
-		for script in scripts_catalog.host_task_scripts():
-			self.assertIn(f"/var/lib/atlas/bin/{script}", destinations)
+		for verb in scripts_catalog.host_task_scripts():
+			self.assertIn(f"/var/lib/atlas/bin/{scripts_catalog.file_for(verb)}", destinations)
+
+	def test_bootstrap_ships_the_host_pip_manifest_and_install_sh(self) -> None:
+		# install.sh runs `uv pip install /var/lib/atlas/bin`, which needs a
+		# pyproject.toml at that root. The host manifest (host-pyproject.toml) must
+		# ship there for the install — and install.sh itself must ship so the
+		# controller can pipe it over SSH.
+		uploads = dict((dest, src) for src, dest in self.server._script_uploads())
+		self.assertIn("/var/lib/atlas/bin/pyproject.toml", uploads)
+		self.assertTrue(uploads["/var/lib/atlas/bin/pyproject.toml"].endswith("host-pyproject.toml"))
+		self.assertIn("/var/lib/atlas/bin/install.sh", uploads)
+		self.assertTrue(uploads["/var/lib/atlas/bin/install.sh"].endswith("install.sh"))
 
 	def test_bootstrap_parses_result_line(self) -> None:
 		from atlas.atlas.doctype.server import server as server_module
@@ -74,26 +110,30 @@ class TestServerBootstrap(IntegrationTestCase):
 		# the controller parses that, not a bare trailing JSON line.
 		stdout = (
 			"+ some bash trace\n"
-			'ATLAS_RESULT={"firecracker_version": "1.15.1",'
-			' "jailer_version": "1.15.1",'
+			'ATLAS_RESULT={"firecracker_version": "1.16.0",'
+			' "jailer_version": "1.16.0",'
 			' "kernel_version": "6.8.0-31-generic",'
 			' "architecture": "x86_64"}\n'
 		)
 		task = fake_task(name="task-y", stdout=stdout)
 
 		with patch.object(server_module, "upload_files"):
-			with patch.object(server_module, "run_task", return_value=task):
-				with patch.object(
-					server_module,
-					"connection_for_server",
-					return_value=Connection(host="x", ssh_private_key="k"),
-				):
-					self.server.bootstrap()
+			with patch.object(server_module, "run_ssh", return_value=("ok", "", 0)):
+				with patch.object(server_module, "run_task", return_value=task):
+					with patch.object(
+						server_module,
+						"connection_for_server",
+						return_value=Connection(host="x", ssh_private_key="k"),
+					):
+						self.server.bootstrap()
 		self.server.reload()
-		self.assertEqual(self.server.firecracker_version, "1.15.1")
-		self.assertEqual(self.server.jailer_version, "1.15.1")
+		self.assertEqual(self.server.firecracker_version, "1.16.0")
+		self.assertEqual(self.server.jailer_version, "1.16.0")
 		self.assertEqual(self.server.kernel_version, "6.8.0-31-generic")
 		self.assertEqual(self.server.architecture, "x86_64")
+		# A succeeded bootstrap proves the deep sanity gate (atlas --help) passed,
+		# so CLI-readiness is persisted once here — no per-Task venv guard.
+		self.assertEqual(self.server.cli_ready, 1)
 
 	def test_bootstrap_rejects_from_disallowed_status(self) -> None:
 		# `Terminated` is not in BOOTSTRAP_ALLOWED_STATUS. Set in-memory only
@@ -117,7 +157,7 @@ class TestServerBootstrap(IntegrationTestCase):
 			self.assertIn("intro", entry)
 			self.assertIsInstance(entry["fields"], list)
 		# Lifecycle scripts must not leak into the desk picker.
-		hidden = {"provision-vm.py", "start-vm.py", "stop-vm.py", "terminate-vm.py", "restart-vm.py"}
+		hidden = {"provision-vm", "start-vm", "stop-vm", "terminate-vm", "restart-vm"}
 		self.assertFalse(hidden & {entry["name"] for entry in entries})
 
 
@@ -217,7 +257,7 @@ class TestServerSyncImage(IntegrationTestCase):
 		with patch("frappe.enqueue"):
 			task_name = server.sync_image(image.name)
 		task = frappe.get_doc("Task", task_name)
-		self.assertEqual(task.script, "sync-image.py")
+		self.assertEqual(task.script, "sync-image")
 		self.assertEqual(task.server, server.name)
 
 

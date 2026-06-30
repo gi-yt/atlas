@@ -6,9 +6,15 @@ no openssl, no host. These cover everything in the issue-cert task except the tw
 subprocess calls (certbot, openssl), which the entry point makes via _run.run."""
 
 import os
+import shlex
 import unittest
 
 from atlas import certs
+
+
+def _argv(domain, acme, email, authenticator):
+	return shlex.split(certs.certbot_command(domain, acme, email, authenticator))
+
 
 DOMAIN = "blr1.frappe.dev"
 ACME = "https://acme-staging-v02.api.letsencrypt.org/directory"
@@ -17,7 +23,7 @@ EMAIL = "ops@frappe.dev"
 
 class TestCertbotArgv(unittest.TestCase):
 	def test_issues_the_wildcard_for_the_domain(self):
-		argv = certs.certbot_argv(DOMAIN, ACME, EMAIL, "route53")
+		argv = _argv(DOMAIN, ACME, EMAIL, "route53")
 		self.assertEqual(argv[:2], ["certbot", "certonly"])
 		self.assertIn("--non-interactive", argv)
 		# The cert is the wildcard *.<domain>, requested via -d.
@@ -26,21 +32,21 @@ class TestCertbotArgv(unittest.TestCase):
 
 	def test_renders_the_dns_authenticator_flag(self):
 		# The plain authenticator name becomes the --dns-<name> certbot flag.
-		argv = certs.certbot_argv(DOMAIN, ACME, EMAIL, "route53")
+		argv = _argv(DOMAIN, ACME, EMAIL, "route53")
 		self.assertIn("--dns-route53", argv)
 
 	def test_no_credentials_in_argv(self):
 		# Credentials travel via the environment; nothing AWS-shaped is in argv.
-		argv = certs.certbot_argv(DOMAIN, ACME, EMAIL, "route53")
+		argv = _argv(DOMAIN, ACME, EMAIL, "route53")
 		self.assertFalse(any("AWS" in token or "secret" in token.lower() for token in argv))
 
 	def test_account_email_and_server_are_passed(self):
-		argv = certs.certbot_argv(DOMAIN, ACME, EMAIL, "route53")
+		argv = _argv(DOMAIN, ACME, EMAIL, "route53")
 		self.assertEqual(argv[argv.index("-m") + 1], EMAIL)
 		self.assertEqual(argv[argv.index("--server") + 1], ACME)
 
 	def test_config_dir_is_per_domain_under_atlas_home(self):
-		argv = certs.certbot_argv(DOMAIN, ACME, EMAIL, "route53")
+		argv = _argv(DOMAIN, ACME, EMAIL, "route53")
 		config = argv[argv.index("--config-dir") + 1]
 		self.assertTrue(config.endswith(os.path.join(".atlas", "certbot", DOMAIN)))
 

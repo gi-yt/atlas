@@ -52,14 +52,6 @@ def region_server_title(role: str | None = None) -> str:
 	return "-".join(parts)
 
 
-def _provider_settings(provider_type: str):
-	"""The per-vendor Settings Single for a provider type, or None when the
-	provider has none (the Fake provider). Vendors with an API always have one."""
-	if not frappe.db.exists("DocType", f"{provider_type} Settings"):
-		return None
-	return frappe.get_single(f"{provider_type} Settings")
-
-
 def provision_server(provider_type: str, title: str, dialog_fields: dict[str, Any]) -> str:
 	"""Insert a Server row and enqueue bootstrap.
 
@@ -111,14 +103,15 @@ def provision_server(provider_type: str, title: str, dialog_fields: dict[str, An
 			}
 		).insert(ignore_permissions=True)
 	else:
-		# Vendors with an API read their per-vendor Settings Single for the
-		# default size/image. The Fake provider (developer_mode) has no Settings
-		# Single — it defaults size/image inside provision() — so fall back to the
-		# dialog values when no Settings DocType exists. DO/Scaleway are unchanged
-		# (their Single exists, so the defaults still apply).
-		settings = _provider_settings(provider_type)
-		size = dialog_fields.get("size") or (settings.default_size if settings else "")
-		image = dialog_fields.get("image") or (settings.default_image if settings else "")
+		# The dialog value wins; otherwise fall back to the catalog row marked
+		# `is_default` for this provider_type (the Provision Server modal prefills the
+		# same row, so this is just the no-override path). The Fake provider
+		# (developer_mode) has no catalog default — it defaults size/image inside
+		# provision() — so this resolves to "" and the dialog value carries.
+		from atlas.atlas.setup_catalog import default_name
+
+		size = dialog_fields.get("size") or default_name("Provider Size", provider_type)
+		image = dialog_fields.get("image") or default_name("Provider Image", provider_type)
 		request = ProvisionRequest(
 			title=title,
 			size=size,
@@ -254,6 +247,19 @@ def upsert_catalog(provider_type: str, capabilities) -> dict:
 	seen_size_names: set[str] = set()
 	seen_image_names: set[str] = set()
 
+	# A discover() hint only takes effect when no row of this provider_type is
+	# already marked default — an operator/config choice (set after discover) and a
+	# later manual flip always win. Resolve "already has a default" once, up front,
+	# so re-discovering never clobbers an existing default.
+	size_default_taken = bool(
+		frappe.db.exists("Provider Size", {"provider_type": provider_type, "is_default": 1})
+	)
+	image_default_taken = bool(
+		frappe.db.exists("Provider Image", {"provider_type": provider_type, "is_default": 1})
+	)
+	hinted_default_size = next((s.slug for s in capabilities.sizes if s.is_default), None)
+	hinted_default_image = next((i.slug for i in capabilities.images if i.is_default), None)
+
 	for size in capabilities.sizes:
 		size_name = f"{provider_type}/{size.slug}"
 		seen_size_names.add(size_name)
@@ -324,5 +330,14 @@ def upsert_catalog(provider_type: str, capabilities) -> dict:
 		if name not in seen_image_names:
 			frappe.db.set_value("Provider Image", name, "enabled", 0)
 			disabled += 1
+
+	# Adopt the provider's default hint only into an empty slot (nothing already
+	# default). set_default saves through the row controller, enforcing one default.
+	from atlas.atlas.setup_catalog import set_default
+
+	if hinted_default_size and not size_default_taken:
+		set_default("Provider Size", provider_type, hinted_default_size)
+	if hinted_default_image and not image_default_taken:
+		set_default("Provider Image", provider_type, hinted_default_image)
 
 	return {"inserted": inserted, "updated": updated, "disabled": disabled}

@@ -72,76 +72,56 @@ def main() -> None:
 	# install, but they're not persisted across host reboots by default. Recreating
 	# here keeps each VM's network self-contained. The first VM unit to start after
 	# a host reboot rebuilds both the v6 forward chain and the v4 egress NAT.
-	if not run_ok("sudo", "nft", "list", "table", "inet", "atlas"):
-		run("sudo", "nft", "add", "table", "inet", "atlas")
-	if not run_ok("sudo", "nft", "list", "chain", "inet", "atlas", "forward"):
+	if not run_ok("sudo nft list table inet atlas"):
+		run("sudo nft add table inet atlas")
+	if not run_ok("sudo nft list chain inet atlas forward"):
 		run(
-			"sudo",
-			"nft",
-			"add chain inet atlas forward { type filter hook forward priority filter; policy accept; }",
+			"sudo nft add chain inet atlas forward {}",
+			"{ type filter hook forward priority filter; policy accept; }",
 		)
-	if not run_ok("sudo", "nft", "list", "chain", "inet", "atlas", "postrouting"):
+	# Re-assert the host IMDS-drop (bootstrap's 9-imds): a guest must never reach the
+	# host's metadata endpoint (169.254.169.254 serves the droplet's own vendor
+	# credentials). Recreated here so the first VM to start after a host reboot
+	# rebuilds it, like the masquerade rule. The guest's own MMDS is served by
+	# Firecracker on the tap inside the netns and never crosses this chain.
+	if "ip daddr 169.254.169.254" not in run("sudo nft list chain inet atlas forward"):
+		run("sudo nft add rule inet atlas forward ip daddr 169.254.169.254 drop")
+	if not run_ok("sudo nft list chain inet atlas postrouting"):
 		run(
-			"sudo",
-			"nft",
-			"add chain inet atlas postrouting { type nat hook postrouting priority srcnat; policy accept; }",
+			"sudo nft add chain inet atlas postrouting {}",
+			"{ type nat hook postrouting priority srcnat; policy accept; }",
 		)
-	postrouting = run("sudo", "nft", "list", "chain", "inet", "atlas", "postrouting")
+	postrouting = run("sudo nft list chain inet atlas postrouting")
 	if "ip saddr 100.64.0.0/16" not in postrouting:
 		run(
-			"sudo",
-			"nft",
-			"add",
-			"rule",
-			"inet",
-			"atlas",
-			"postrouting",
-			"ip",
-			"saddr",
-			"100.64.0.0/16",
-			"oifname",
+			"sudo nft add rule inet atlas postrouting ip saddr 100.64.0.0/16 oifname {} masquerade",
 			ipv4_uplink,
-			"masquerade",
 		)
 
 	# Sysctls cleared on reboot if not persisted via /etc/sysctl.d. Bootstrap writes
 	# /etc/sysctl.d/60-atlas.conf, but a defensive re-apply costs nothing. Forwarding
 	# (v6 and v4) now also carries traffic across the veth seam.
 	run(
-		"sudo",
-		"sysctl",
-		"-q",
-		"-w",
-		"net.ipv6.conf.all.forwarding=1",
-		"net.ipv6.conf.all.proxy_ndp=1",
-		"net.ipv4.ip_forward=1",
+		"sudo sysctl -q -w net.ipv6.conf.all.forwarding=1 net.ipv6.conf.all.proxy_ndp=1 net.ipv4.ip_forward=1",
 		check=False,
 	)
 
 	# 1. Network namespace. Clean re-create so a restart starts from a known state
 	#    (deleting the namespace takes its tap + the namespace-side veth with it).
-	run("sudo", "ip", "netns", "del", atlas_netns, check=False)
-	run("sudo", "ip", "link", "del", host_veth, check=False)
-	run("sudo", "ip", "netns", "add", atlas_netns)
+	run("sudo ip netns del {}", atlas_netns, check=False)
+	run("sudo ip link del {}", host_veth, check=False)
+	run("sudo ip netns add {}", atlas_netns)
 
 	# 2. veth pair: one end stays on the host, the other moves into the namespace.
-	run("sudo", "ip", "link", "add", host_veth, "type", "veth", "peer", "name", namespace_veth)
-	run("sudo", "ip", "link", "set", namespace_veth, "netns", atlas_netns)
+	run("sudo ip link add {} type veth peer name {}", host_veth, namespace_veth)
+	run("sudo ip link set {} netns {}", namespace_veth, atlas_netns)
 
 	# 3. The namespace forwards between the veth (uplink side) and the tap (guest
 	#    side) for both families, so it needs its own forwarding sysctls —
 	#    namespaces have independent network sysctls and default to forwarding off.
 	run(
-		"sudo",
-		"ip",
-		"netns",
-		"exec",
+		"sudo ip netns exec {} sysctl -q -w net.ipv6.conf.all.forwarding=1 net.ipv4.ip_forward=1",
 		atlas_netns,
-		"sysctl",
-		"-q",
-		"-w",
-		"net.ipv6.conf.all.forwarding=1",
-		"net.ipv4.ip_forward=1",
 		check=False,
 	)
 
@@ -151,61 +131,26 @@ def main() -> None:
 	#    inside the namespace. Route the VM's /128 to the tap so replies reach the
 	#    guest; the v4 /30 is reached by its connected route.
 	run(
-		"sudo",
-		"ip",
-		"netns",
-		"exec",
+		"sudo ip netns exec {} ip tuntap add {} mode tap vnet_hdr",
 		atlas_netns,
-		"ip",
-		"tuntap",
-		"add",
 		tap_device,
-		"mode",
-		"tap",
-		"vnet_hdr",
 	)
-	run("sudo", "ip", "netns", "exec", atlas_netns, "ip", "link", "set", tap_device, "up")
+	run("sudo ip netns exec {} ip link set {} up", atlas_netns, tap_device)
 	run(
-		"sudo",
-		"ip",
-		"netns",
-		"exec",
+		"sudo ip netns exec {} ip -6 addr add fe80::1/64 dev {} nodad",
 		atlas_netns,
-		"ip",
-		"-6",
-		"addr",
-		"add",
-		"fe80::1/64",
-		"dev",
 		tap_device,
-		"nodad",
 	)
 	run(
-		"sudo",
-		"ip",
-		"netns",
-		"exec",
+		"sudo ip netns exec {} ip -6 route replace {} dev {}",
 		atlas_netns,
-		"ip",
-		"-6",
-		"route",
-		"replace",
 		f"{virtual_machine_ipv6}/128",
-		"dev",
 		tap_device,
 	)
 	run(
-		"sudo",
-		"ip",
-		"netns",
-		"exec",
+		"sudo ip netns exec {} ip -4 addr replace {} dev {}",
 		atlas_netns,
-		"ip",
-		"-4",
-		"addr",
-		"replace",
 		ipv4_host_cidr,
-		"dev",
 		tap_device,
 	)
 
@@ -214,69 +159,28 @@ def main() -> None:
 	#    that exists only on this veth pair (isolated per namespace), purely to carry
 	#    the guest's masqueraded v4 to the host. The namespace's default routes for
 	#    both families point at the host end.
-	run("sudo", "ip", "link", "set", host_veth, "up")
-	run("sudo", "ip", "-6", "addr", "add", "fe80::2/64", "dev", host_veth, "nodad")
-	run("sudo", "ip", "-4", "addr", "replace", "169.254.0.1/30", "dev", host_veth)
-	run("sudo", "ip", "netns", "exec", atlas_netns, "ip", "link", "set", namespace_veth, "up")
+	run("sudo ip link set {} up", host_veth)
+	run("sudo ip -6 addr add fe80::2/64 dev {} nodad", host_veth)
+	run("sudo ip -4 addr replace 169.254.0.1/30 dev {}", host_veth)
+	run("sudo ip netns exec {} ip link set {} up", atlas_netns, namespace_veth)
 	run(
-		"sudo",
-		"ip",
-		"netns",
-		"exec",
+		"sudo ip netns exec {} ip -6 addr add fe80::3/64 dev {} nodad",
 		atlas_netns,
-		"ip",
-		"-6",
-		"addr",
-		"add",
-		"fe80::3/64",
-		"dev",
-		namespace_veth,
-		"nodad",
-	)
-	run(
-		"sudo",
-		"ip",
-		"netns",
-		"exec",
-		atlas_netns,
-		"ip",
-		"-4",
-		"addr",
-		"replace",
-		"169.254.0.2/30",
-		"dev",
 		namespace_veth,
 	)
 	run(
-		"sudo",
-		"ip",
-		"netns",
-		"exec",
+		"sudo ip netns exec {} ip -4 addr replace 169.254.0.2/30 dev {}",
 		atlas_netns,
-		"ip",
-		"-6",
-		"route",
-		"replace",
-		"default",
-		"via",
-		"fe80::2",
-		"dev",
 		namespace_veth,
 	)
 	run(
-		"sudo",
-		"ip",
-		"netns",
-		"exec",
+		"sudo ip netns exec {} ip -6 route replace default via fe80::2 dev {}",
 		atlas_netns,
-		"ip",
-		"-4",
-		"route",
-		"replace",
-		"default",
-		"via",
-		"169.254.0.1",
-		"dev",
+		namespace_veth,
+	)
+	run(
+		"sudo ip netns exec {} ip -4 route replace default via 169.254.0.1 dev {}",
+		atlas_netns,
 		namespace_veth,
 	)
 
@@ -286,28 +190,14 @@ def main() -> None:
 	#    the masquerade conntrack, but the explicit /30 route lets the host reach the
 	#    guest's private v4 directly too.
 	run(
-		"sudo",
-		"ip",
-		"-6",
-		"route",
-		"replace",
+		"sudo ip -6 route replace {} via fe80::3 dev {}",
 		f"{virtual_machine_ipv6}/128",
-		"via",
-		"fe80::3",
-		"dev",
 		host_veth,
 	)
-	run("sudo", "ip", "-6", "neigh", "replace", "proxy", virtual_machine_ipv6, "dev", uplink)
+	run("sudo ip -6 neigh replace proxy {} dev {}", virtual_machine_ipv6, uplink)
 	run(
-		"sudo",
-		"ip",
-		"-4",
-		"route",
-		"replace",
+		"sudo ip -4 route replace {} via 169.254.0.2 dev {}",
 		f"{ipv4_guest_address}/32",
-		"via",
-		"169.254.0.2",
-		"dev",
 		host_veth,
 	)
 
@@ -316,34 +206,14 @@ def main() -> None:
 	#    100.64.0.0/16 -> uplink) is created in the nft scaffold above and covers the
 	#    guest's v4 egress once it reaches the host via the veth.
 	run(
-		"sudo",
-		"nft",
-		"add",
-		"rule",
-		"inet",
-		"atlas",
-		"forward",
-		"ip6",
-		"daddr",
+		"sudo nft add rule inet atlas forward ip6 daddr {} oifname {} accept",
 		virtual_machine_ipv6,
-		"oifname",
 		host_veth,
-		"accept",
 	)
 	run(
-		"sudo",
-		"nft",
-		"add",
-		"rule",
-		"inet",
-		"atlas",
-		"forward",
-		"ip6",
-		"saddr",
+		"sudo nft add rule inet atlas forward ip6 saddr {} iifname {} accept",
 		virtual_machine_ipv6,
-		"iifname",
 		host_veth,
-		"accept",
 	)
 
 	# 8. Inbound v4: if a Reserved IP is attached, 1:1-NAT it to the guest's /30,

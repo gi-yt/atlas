@@ -10,7 +10,7 @@ from frappe.utils.password import get_decrypted_password, set_encrypted_password
 
 from atlas.atlas import scripts_catalog
 from atlas.atlas.providers.fake_tasks import is_fake_server
-from atlas.atlas.ssh import connection_for_server, run_task, upload_files
+from atlas.atlas.ssh import connection_for_server, run_ssh, run_task, ssh_key_file, upload_files
 from atlas.atlas.task_results import parse_result
 
 IMMUTABLE_AFTER_INSERT = (
@@ -36,6 +36,7 @@ class Server(Document):
 		from frappe.types import DF
 
 		architecture: DF.Data | None
+		cli_ready: DF.Check
 		firecracker_version: DF.Data | None
 		image: DF.Link | None
 		ipv4_address: DF.Data | None
@@ -59,6 +60,16 @@ class Server(Document):
 	# /var/lib/atlas/bin (their sys.path shim adds that dir). The package itself
 	# replaces the old durable lvm.sh — there is no shell helper library anymore.
 	BOOTSTRAP_UPLOAD_SOURCES: ClassVar[list[tuple[str, str]]] = [
+		# The pip-install manifest: bootstrap-server.py runs `uv pip install
+		# /var/lib/atlas/bin` into the Atlas venv, which needs a pyproject.toml at
+		# that root. host-pyproject.toml's wheel package root is `atlas` (the flat
+		# durable layout), distinct from the dev scripts/pyproject.toml.
+		("host-pyproject.toml", "/var/lib/atlas/bin/pyproject.toml"),
+		# install.sh creates the uv venv + `atlas` console script over SSH right
+		# after this upload, BEFORE the bootstrap Task (which then runs as a normal
+		# `atlas bootstrap-server` verb). Shipped durably so the controller has a
+		# local copy to pipe over SSH — no public URL needed.
+		("install.sh", "/var/lib/atlas/bin/install.sh"),
 		("vm-network-up.py", "/var/lib/atlas/bin/vm-network-up.py"),
 		("vm-network-down.py", "/var/lib/atlas/bin/vm-network-down.py"),
 		# vm-disk-up.py re-activates the VM's thin-snapshot disk LV and refreshes
@@ -150,22 +161,31 @@ class Server(Document):
 
 	@frappe.whitelist()
 	def bootstrap(self) -> str:
-		"""Upload helpers + unit, run bootstrap-server.py. Returns Task name."""
+		"""Upload helpers + units, create the Atlas venv (install.sh), then run the
+		bootstrap-server verb. Returns Task name.
+
+		Ordering is load-bearing: install.sh's `uv pip install` needs the uploaded
+		/var/lib/atlas/bin, and the bootstrap Task now runs as `atlas bootstrap-server`
+		on the venv install.sh creates — so it's upload → install.sh → bootstrap Task.
+		"""
 		if self.status not in self.BOOTSTRAP_ALLOWED_STATUS:
 			frappe.throw(f"Cannot bootstrap from status {self.status}")
 
-		# A Fake server has no host to scp the durable package onto; the
-		# bootstrap-server.py Task below is faked too and still records the host
-		# versions, so the row ends up Active exactly as a real bootstrap leaves it.
+		# A Fake server has no host to scp the durable package onto or SSH install.sh
+		# into; the bootstrap-server Task below is faked too and still records the
+		# host versions, so the row ends up Active exactly as a real bootstrap leaves
+		# it. Skip both the upload AND install.sh for it, in lockstep.
 		if not is_fake_server(self.name):
-			upload_files(connection_for_server(self), self._bootstrap_uploads())
+			connection = connection_for_server(self)
+			upload_files(connection, self._bootstrap_uploads())
+			self._run_install_sh(connection)
 
 		task = run_task(
 			server=self.name,
-			script="bootstrap-server.py",
+			script="bootstrap-server",
 			variables={
-				"FIRECRACKER_VERSION": "v1.15.1",
 				"SSHPIPER_VERSION": "v1.5.4",
+				"FIRECRACKER_VERSION": "v1.16.0",
 				"ARCHITECTURE": "x86_64",
 				"ATLAS_URL": frappe.utils.get_url(),
 				"SSHPIPER_LOOKUP_SERVER": self.name,
@@ -175,6 +195,21 @@ class Server(Document):
 		self._absorb_bootstrap_output(task.stdout)
 		self.save(ignore_permissions=True)
 		return task.name
+
+	def _run_install_sh(self, connection) -> None:
+		"""Run scripts/install.sh on the host over SSH, AFTER the upload — it creates
+		the uv venv + `atlas` console script and runs the deep sanity gate. This is
+		what removes the bootstrap carve-out: once it returns, `bootstrap-server` runs
+		as a normal `atlas <verb>` on the venv. Not recorded as a Task (it's bootstrap
+		plumbing, like upload_files); raises on a non-zero exit so a broken venv fails
+		the bootstrap HERE, before the bootstrap Task or any unit points at it."""
+		command = "bash /var/lib/atlas/bin/install.sh"
+		with ssh_key_file(connection.ssh_private_key) as key_path:
+			stdout, stderr, exit_code = run_ssh(connection, key_path, command, timeout_seconds=600)
+		if exit_code != 0:
+			frappe.throw(
+				f"install.sh failed on {self.name} (exit {exit_code}): {stderr[-500:] or stdout[-500:]}"
+			)
 
 	@frappe.whitelist()
 	def sync_scripts(self) -> int:
@@ -199,7 +234,7 @@ class Server(Document):
 	def reboot(self) -> str:
 		"""Run reboot-server.sh as a Task. SSH drops mid-Task — Task ends in
 		Failure; the operator confirms reboot by waiting and reconnecting."""
-		return self.run_task_dialog(script="reboot-server.sh", variables={})
+		return self.run_task_dialog(script="reboot-server", variables={})
 
 	@frappe.whitelist()
 	def run_task_dialog(self, script: str, variables: dict | str | None = None) -> str:
@@ -267,12 +302,16 @@ class Server(Document):
 				continue
 			uploads.append((str(entry), f"/var/lib/atlas/bin/atlas/{entry.name}"))
 		# The durable Task entry scripts: every host SSH Task (provision-vm.py,
-		# start/stop/snapshot-stop, …). Shipping them here lets the runner invoke
-		# each in place instead of scp'ing it per Task — the scp was the dominant
-		# latency of an otherwise-instant start/stop. Computed from disk
-		# (scripts_catalog) so a new Task script ships with no edit here.
-		for script in scripts_catalog.host_task_scripts():
-			uploads.append((str(directory / script), f"/var/lib/atlas/bin/{script}"))
+		# start/stop/snapshot-stop, …). `host_task_scripts()` yields VERBS; the FILE
+		# (verb→file_for, e.g. provision-vm.py) is what ships — the file keeps its
+		# suffix on the host disk, where `uv pip install` registers the console
+		# entry and the runner reaches it as `atlas <verb>`. Shipping them here lets
+		# the runner invoke each in place instead of scp'ing it per Task — the scp
+		# was the dominant latency of an otherwise-instant start/stop. Computed from
+		# disk (scripts_catalog) so a new Task script ships with no edit here.
+		for verb in scripts_catalog.host_task_scripts():
+			file_name = scripts_catalog.file_for(verb)
+			uploads.append((str(directory / file_name), f"/var/lib/atlas/bin/{file_name}"))
 		return uploads
 
 	def _unit_uploads(self) -> list[tuple[str, str]]:
@@ -292,11 +331,25 @@ class Server(Document):
 		# `ATLAS_RESULT=<json>` line; parse_result pulls it out (the host still
 		# also writes /var/lib/atlas/bootstrap.json as the on-disk source of
 		# truth). Replaces the old "last non-empty stdout line is the JSON" scrape.
+		#
+		# The result also carries `python_version` (the resolved Atlas venv python).
+		# It is deliberately NOT absorbed onto a Server field: it is derived state —
+		# `/var/lib/atlas/venv/bin/python --version` on the host and the bootstrap
+		# script's PY_VERSION constant are both live truth, so persisting a copy
+		# would only drift. It rides the bootstrap log (this Task's stdout) for
+		# visibility; nothing reads it back.
 		parsed = parse_result(stdout)
 		self.firecracker_version = parsed["firecracker_version"]
 		self.jailer_version = parsed["jailer_version"]
 		self.kernel_version = parsed["kernel_version"]
 		self.architecture = parsed["architecture"]
+		# Reaching here means the bootstrap Task succeeded — and run_task raises on
+		# any failure, so bootstrap-server.py's deep sanity gate (which runs
+		# `atlas --help` to prove the console script dispatches) passed. Persist
+		# CLI-readiness once, here, instead of paying a per-Task `test -e` round
+		# trip: a legacy/unbootstrapped host has cli_ready=0 and the operator sees
+		# the re-bootstrap signal. Fail-fast moved from per-Task to once-at-bootstrap.
+		self.cli_ready = 1
 
 	def _ensure_sshpiper_api_key(self) -> str:
 		key = get_decrypted_password("Server", self.name, "sshpiper_api_key", raise_exception=False)

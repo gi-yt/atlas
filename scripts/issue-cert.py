@@ -53,20 +53,21 @@ class IssueCertResult(TaskResult):
 def main() -> None:
 	inputs = IssueCertInputs.from_args()
 
-	argv = certs.certbot_argv(
-		domain=inputs.domain,
-		acme_directory_url=inputs.acme_directory_url,
-		account_email=inputs.account_email,
-		dns_authenticator=inputs.dns_authenticator,
+	run(
+		certs.certbot_command(
+			domain=inputs.domain,
+			acme_directory_url=inputs.acme_directory_url,
+			account_email=inputs.account_email,
+			dns_authenticator=inputs.dns_authenticator,
+		)
 	)
-	run(*argv)
 
 	fullchain = certs.fullchain_path(inputs.domain)
 	privkey = certs.privkey_path(inputs.domain)
 	if not os.path.isfile(fullchain):
 		sys.exit(f"certbot reported success but {fullchain} is missing")
 
-	dates = run("openssl", "x509", "-noout", "-dates", "-in", fullchain)
+	dates = run("openssl x509 -noout -dates -in {}", fullchain)
 	not_before, not_after = certs.parse_openssl_dates(dates)
 
 	IssueCertResult(

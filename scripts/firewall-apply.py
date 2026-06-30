@@ -50,7 +50,7 @@ def main() -> None:
 		virtual_machine_ipv6 = read_network_env(paths.network_env).require("VIRTUAL_MACHINE_IPV6")
 		remove_firewall(virtual_machine_ipv6)
 		# Best-effort — a clear may run after terminate already rm -rf'd the dir.
-		run("sudo", "rm", "-f", paths.firewall_env, check=False)
+		run("sudo rm -f {}", paths.firewall_env, check=False)
 		print(f"Firewall cleared on {inputs.virtual_machine_name}; VM is fully public.")
 		return
 

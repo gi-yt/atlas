@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import os
 
+from atlas._run import _substitute
+
 
 def atlas_home() -> str:
 	"""The Atlas controller home, `~/.atlas`. Matches the SSH transport's
@@ -38,40 +40,34 @@ def privkey_path(domain: str) -> str:
 	return os.path.join(live_dir(domain), "privkey.pem")
 
 
-def certbot_argv(
+def certbot_command(
 	domain: str,
 	acme_directory_url: str,
 	account_email: str,
 	dns_authenticator: str,
-) -> list[str]:
-	"""The full certbot argv to issue (or renew) `*.<domain>` non-interactively
-	over DNS-01. `dns_authenticator` is the DNS plugin name (e.g. `route53`),
+) -> str:
+	"""The full certbot command line to issue (or renew) `*.<domain>`
+	non-interactively over DNS-01, rendered as a single auto-quoted string for
+	`_run.run`. `dns_authenticator` is the DNS plugin name (e.g. `route53`),
 	rendered here as the `--dns-<name>` flag — keeping the `--` spelling on the
 	script side means the value crossing the CLI is a plain name argparse can't
 	mistake for an option. Credentials travel via the environment, never argv, so
 	they never appear in `ps`. Idempotent: certbot renews-or-skips a still-valid
 	lineage."""
 	config = certbot_config_dir(domain)
-	return [
-		"certbot",
-		"certonly",
-		"--non-interactive",
-		"--agree-tos",
-		"-m",
-		account_email,
-		"--server",
-		acme_directory_url,
-		f"--dns-{dns_authenticator}",
-		"-d",
-		f"*.{domain}",
-		"--config-dir",
-		config,
-		"--work-dir",
-		os.path.join(config, "work"),
-		"--logs-dir",
-		os.path.join(config, "logs"),
-		"--keep-until-expiring",
-	]
+	return _substitute(
+		"certbot certonly --non-interactive --agree-tos -m {} --server {} {} -d {}"
+		" --config-dir {} --work-dir {} --logs-dir {} --keep-until-expiring",
+		(
+			account_email,
+			acme_directory_url,
+			f"--dns-{dns_authenticator}",
+			f"*.{domain}",
+			config,
+			os.path.join(config, "work"),
+			os.path.join(config, "logs"),
+		),
+	)
 
 
 def parse_openssl_dates(stdout: str) -> tuple[str, str]:

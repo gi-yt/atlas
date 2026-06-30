@@ -354,9 +354,9 @@ class TestImageBuildPromote(IntegrationTestCase):
 		self.assertIn("no snapshot", str(raised.exception))
 
 	def test_versioned_build_default_names_to_series_image(self) -> None:
-		# The Central Image catalog links by exact name-match, so a versioned bench
-		# build's promoted image defaults to the SERIES name (bench-v15 / -v16 /
-		# -nightly), not the <recipe>-<build name> slug.
+		# A versioned bench build's promoted image defaults to the SERIES name
+		# (bench-v15 / -v16 / -nightly), not the <recipe>-<build name> slug, so
+		# customers pick the version through the VM `image` field.
 		from unittest.mock import MagicMock
 
 		for recipe in ("bench-v15", "bench-v16", "bench-nightly"):

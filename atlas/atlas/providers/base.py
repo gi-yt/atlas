@@ -70,12 +70,18 @@ class SizeInfo:
 	slug: str
 	monthly_cost_usd: int | None
 	provider_metadata: dict | None = None
+	# The provider's opinionated default for the Provision Server modal. Only one
+	# size per discover() should set it. `upsert_catalog` honours the hint solely
+	# when no row of this provider_type is already marked default — an explicit
+	# operator/config choice (and a later manual flip) always wins.
+	is_default: bool = False
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class ImageInfo:
 	slug: str
 	provider_metadata: dict | None = None
+	is_default: bool = False
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

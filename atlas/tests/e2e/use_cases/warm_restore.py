@@ -248,7 +248,7 @@ def _tamper(server_name: str, memory_directory: str, mode: str) -> None:
 
 	task = run_task(
 		server=server_name,
-		script="warm-signature-tamper.sh",
+		script="warm-signature-tamper",
 		variables={"MEMORY_DIRECTORY": memory_directory, "MODE": mode},
 		timeout_seconds=30,
 	)
@@ -262,7 +262,7 @@ def _guest_facts(server_name: str, virtual_machine_name: str, wait_seconds: int 
 	vm = frappe.get_doc("Virtual Machine", virtual_machine_name)
 	task = run_task(
 		server=server_name,
-		script="warm-guest-facts.sh",
+		script="warm-guest-facts",
 		variables={
 			"VIRTUAL_MACHINE_IPV6": vm.ipv6_address,
 			"SSH_PRIVATE_KEY": ephemeral_private_key(),

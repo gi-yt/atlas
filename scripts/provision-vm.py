@@ -31,7 +31,8 @@
 #                               --cgroup-arg memory.max=… --cgroup-arg "cpu.max=Q P".
 #                               The launcher prefixes each with --cgroup (see NOTE).
 #   resource_arg (repeatable) - one resource-limit VALUE per flag; the launcher
-#                               prefixes each with --resource-limit.
+#                               prefixes each with --resource-limit. Optional —
+#                               omit on a hand run to default to no-file=1024.
 #   snapshot_rootfs_path  - optional; a snapshot's /dev/atlas/<name> device path
 #                           (clone path); empty for a base-image provision
 
@@ -41,7 +42,14 @@ import os
 import shlex
 import sys
 import typing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+# Jailer `--resource-limit` fallback when --resource-arg is omitted (break-glass
+# hand run). The controller passes the VM's full resource triple via
+# atlas.networking.resource_limit_args(), but that is effectively the constant
+# `no-file=1024` today, so an operator needn't type it. Kept here as a VALUE (the
+# launcher prefixes --resource-limit); 1024 mirrors networking.MAX_OPEN_FILES.
+DEFAULT_RESOURCE_ARGS = ["no-file=1024"]
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 
@@ -65,17 +73,33 @@ class ProvisionInputs(TaskInputs):
 	vcpus: int
 	memory_mb: int
 	disk_gb: int  # final rootfs size for this VM
-	mac_address: str
-	tap_device: str
-	virtual_machine_ipv6: str  # the VM's address inside the server's /124
-	ipv4_host_cidr: str  # host side of the per-VM NAT44 /30
-	ipv4_guest_cidr: str  # guest side of the same /30
-	ipv4_gateway: str  # host side address (no mask), the guest's v4 gateway
 	ssh_public_key: str  # injected into the rootfs
-	atlas_fc_uid: int  # per-VM uid the jailer drops Firecracker to (gid == uid)
-	atlas_netns: str  # per-VM network namespace name
-	host_veth: str  # host-side veth interface name
-	namespace_veth: str  # namespace-side veth interface name
+	# --- DERIVED flags. Every field below is a controller-allocated value, NOT
+	# defaultable: a wrong value mis-wires the jail/network. They stay REQUIRED; the
+	# break-glass ergonomic is the `help=` recipe naming the atlas.networking function
+	# that computes each, so an operator can reproduce them by hand. (See spec/06.)
+	mac_address: str = field(metadata={"help": "derived: atlas.networking.derive_mac(uuid)"})
+	tap_device: str = field(metadata={"help": "derived: atlas.networking.derive_tap(uuid)"})
+	virtual_machine_ipv6: str = field(
+		metadata={"help": "controller-allocated: atlas.networking.allocate_ipv6(server) (DB row-lock scan)"}
+	)
+	ipv4_host_cidr: str = field(
+		metadata={"help": "derived: atlas.networking.derive_ipv4_link(ipv6)[0] (host side of the NAT44 /30)"}
+	)
+	ipv4_guest_cidr: str = field(
+		metadata={"help": "derived: atlas.networking.derive_ipv4_link(ipv6)[1] (guest side of the /30)"}
+	)
+	ipv4_gateway: str = field(
+		metadata={"help": "derived: host side of ipv4_host_cidr without the mask (the guest's v4 gateway)"}
+	)
+	atlas_fc_uid: int = field(metadata={"help": "derived: atlas.networking.derive_uid(uuid) (gid == uid)"})
+	atlas_netns: str = field(metadata={"help": "derived: atlas.networking.derive_netns(uuid)"})
+	host_veth: str = field(
+		metadata={"help": "derived: atlas.networking.derive_veth_pair(uuid)[0] (host-side veth)"}
+	)
+	namespace_veth: str = field(
+		metadata={"help": "derived: atlas.networking.derive_veth_pair(uuid)[1] (namespace-side veth)"}
+	)
 	# Jailer cgroup/resource limits as REPEATABLE VALUE flags: --cgroup-arg
 	# memory.max=… --cgroup-arg "cpu.max=100000 100000". Each flag carries the
 	# VALUE only; _jailer_launch prefixes each with --cgroup / --resource-limit.
@@ -86,8 +110,26 @@ class ProvisionInputs(TaskInputs):
 	# constant the launcher owns anyway. This still kills the shell's mapfile
 	# hack — a value with an internal space (cpu.max's "<quota> <period>") is one
 	# argv token, no word-splitting. TaskInputs renders a list field as append.
-	cgroup_arg: list  # cgroup VALUES; launcher emits `--cgroup <value>` per item
-	resource_arg: list  # resource-limit VALUES; launcher emits `--resource-limit <value>`
+	#
+	# cgroup_arg stays REQUIRED: it encodes the VM's real memory/cpu limits; an empty
+	# cgroup set would silently un-bound the VM, so failing loud is correct.
+	cgroup_arg: list = field(
+		metadata={
+			"help": "REQUIRED cgroup VALUES (launcher emits `--cgroup <value>`); "
+			"derived: atlas.networking.cgroup_args(memory_mb, cpu_max_cores, cpu_mode)"
+		}
+	)
+	# resource_arg DEFAULTS to [] → DEFAULT_RESOURCE_ARGS at use, so a hand run can
+	# omit it (it is effectively the constant no-file=1024). The controller still
+	# passes the full set from atlas.networking.resource_limit_args(); the default is
+	# additive and never alters that path.
+	resource_arg: list = field(
+		default_factory=list,
+		metadata={
+			"help": "resource-limit VALUES (launcher emits `--resource-limit <value>`); "
+			f"omit to default to {DEFAULT_RESOURCE_ARGS}"
+		},
+	)
 	# One optional source override: a snapshot rootfs path (clone path). Empty
 	# means provision from the base image. Mirrors the shell's "${VAR:-}".
 	snapshot_rootfs_path: str = ""  # a snapshot's /dev/atlas/<name> device path
@@ -166,8 +208,8 @@ def main() -> None:
 	# stale RAM with it. Drop it so the next start cold-boots. For a warm clone,
 	# a still-present marker proves the staged pair was never consumed (the
 	# guest never ran), so re-staging below is safe on an idempotent re-run.
-	marker_was_pending = run_ok("sudo", "test", "-f", paths.memory_snapshot_marker)
-	run("sudo", "rm", "-rf", paths.memory_snapshot_directory)
+	marker_was_pending = run_ok("sudo test -f {}", paths.memory_snapshot_marker)
+	run("sudo rm -rf {}", paths.memory_snapshot_directory)
 
 	# 1. Per-VM disk LV. An instant CoW thin snapshot of an origin LV — the
 	#    pristine image's base LV normally, or a snapshot LV when cloning
@@ -240,7 +282,7 @@ def main() -> None:
 	# 3. Kernel inside the jail. Hard-link (not copy) the immutable image kernel
 	#    so we don't duplicate it per VM; same filesystem (/var/lib/atlas), so
 	#    the link always succeeds. Read-only is fine for the jailed process.
-	run("sudo", "ln", "-f", f"{image}/{inputs.kernel_filename}", paths.kernel)
+	run("sudo ln -f {} {}", f"{image}/{inputs.kernel_filename}", paths.kernel)
 
 	# 4. Firecracker config inside the jail, with jail-RELATIVE paths — they are
 	#    resolved by the jailed process after chroot, so they are relative to the
@@ -277,7 +319,7 @@ def main() -> None:
 	#    chown re-touches the rootfs.ext4 block node's inode (already uid-owned
 	#    from step 4b) — correct and harmless; it chowns the node, not the LV it
 	#    points at. Do this last, after every file is in place.
-	run("sudo", "chown", "-R", f"{uid}:{uid}", paths.jail_chroot_base)
+	run("sudo chown -R {} {}", f"{uid}:{uid}", paths.jail_chroot_base)
 
 	# 5b. Warm clone: stage the golden memory pair behind a READY marker, AFTER
 	#     the recursive chown — the pair is HARD-LINKED from the durable artifact
@@ -321,8 +363,8 @@ def main() -> None:
 	#    anyway (VirtualMachine.provision), so nothing downstream needs the unit
 	#    active by the time this Task returns. A failing ExecStartPre now surfaces
 	#    async via the unit's own state (Restart=always); it is not lost.
-	run("sudo", "systemctl", "enable", paths.systemd_unit)
-	run("sudo", "systemctl", "start", "--no-block", paths.systemd_unit)
+	run("sudo systemctl enable {}", paths.systemd_unit)
+	run("sudo systemctl start --no-block {}", paths.systemd_unit)
 
 	print(f"Provisioned {inputs.virtual_machine_name}.")
 
@@ -336,7 +378,7 @@ def _guard_uid_collision(uid: int, own_rootfs_node: str) -> None:
 	for other_jail in glob.glob(pattern):
 		if other_jail == own_rootfs_node:  # our own (idempotent re-run)
 			continue
-		owner = run("sudo", "stat", "-c", "%u", other_jail).strip()
+		owner = run("sudo stat -c %u {}", other_jail).strip()
 		if owner == str(uid):
 			sys.exit(f"uid {uid} already owned by {other_jail}; uid collision — terminate that VM or re-roll")
 
@@ -396,14 +438,14 @@ def _mmds_metadata(inputs: "ProvisionInputs", ssh_public_key: str) -> str:
 def _stage_warm_pair(warm_snapshot_directory: str, paths: VirtualMachinePaths, uid: int) -> None:
 	"""Hard-link the durable golden pair into the clone jail and arm the marker."""
 	install_directory(paths.memory_snapshot_directory, mode="0700")
-	run("sudo", "chown", f"{uid}:{uid}", paths.memory_snapshot_directory)
+	run("sudo chown {} {}", f"{uid}:{uid}", paths.memory_snapshot_directory)
 	for name in ("vmstate.bin", "mem.bin"):
 		source = f"{warm_snapshot_directory}/{name}"
-		if not run_ok("sudo", "test", "-s", source):
+		if not run_ok("sudo test -s {}", source):
 			sys.exit(f"warm snapshot file missing or empty: {source}; re-bake the warm golden")
-		run("sudo", "ln", "-f", source, f"{paths.memory_snapshot_directory}/{name}")
-	run("sudo", "cp", f"{warm_snapshot_directory}/host-signature.json", paths.memory_snapshot_signature)
-	run("sudo", "touch", paths.memory_snapshot_marker)
+		run("sudo ln -f {} {}", source, f"{paths.memory_snapshot_directory}/{name}")
+	run("sudo cp {} {}", f"{warm_snapshot_directory}/host-signature.json", paths.memory_snapshot_signature)
+	run("sudo touch {}", paths.memory_snapshot_marker)
 
 
 def _firecracker_config(inputs: "ProvisionInputs") -> str:
@@ -414,7 +456,16 @@ def _firecracker_config(inputs: "ProvisionInputs") -> str:
 	config = {
 		"boot-source": {
 			"kernel_image_path": "vmlinux",
-			"boot_args": "console=ttyS0 reboot=k panic=1",
+			# 8250.nr_uarts=0 disables the guest 8250 serial device at boot
+			# (prod-host-setup.md "8250 Serial Device"): the device is tied to
+			# Firecracker's stdout, and a guest with serial access can drive
+			# unbounded host log/storage growth. We do NOT pass `console=ttyS0` —
+			# the guest's console writes would otherwise flood firecracker.log. The
+			# host side is bounded too (the systemd unit logrotates the per-VM log);
+			# the guest can technically re-enable the device after boot, so the
+			# bounded-storage half is the load-bearing mitigation. reboot=k / panic=1
+			# keep the guest's reboot+panic behaviour unchanged.
+			"boot_args": "8250.nr_uarts=0 reboot=k panic=1",
 		},
 		"drives": [
 			{
@@ -510,7 +561,10 @@ def _jailer_launch(inputs: "ProvisionInputs", paths: VirtualMachinePaths) -> str
 	# owned here instead of carried in the input.
 	for value in inputs.cgroup_arg:
 		jailer_lines.append(f"    --cgroup {shlex.quote(value)} \\")
-	for value in inputs.resource_arg:
+	# resource_arg defaults to [] (an operator omitting the flag on a hand run); fall
+	# back to the constant no-file limit so the jail is still descriptor-bounded. The
+	# controller always passes a non-empty set, so its path is unaffected.
+	for value in inputs.resource_arg or DEFAULT_RESOURCE_ARGS:
 		jailer_lines.append(f"    --resource-limit {shlex.quote(value)} \\")
 	jailer_lines += [
 		f"    --chroot-base-dir {paths.jail_chroot_base} \\",

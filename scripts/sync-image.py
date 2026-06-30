@@ -12,19 +12,32 @@
 import os
 import sys
 import typing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 
-from atlas._run import install_directory, install_file, run, run_input
+from atlas._run import _substitute, install_directory, install_file, run, run_input, shell
 from atlas._task import TaskInputs
 from atlas.lvm import ThinPool
 from atlas.paths import image_directory
 
+# Where the controller stages the guest atlas-network.service sidecar before a
+# sync-image Task (SCRIPT_SIDECARS in script_uploads.py). This is ALWAYS the path
+# for a controller-driven sync, so SyncImageInputs.guest_network_unit defaults to
+# it — an operator hand-running the verb needn't pass --guest-network-unit (they
+# either point it at a real file or rely on this staged path being populated).
+STAGED_GUEST_NETWORK_UNIT = "/tmp/atlas/atlas-network.service"
+
 
 @dataclass(frozen=True)
 class SyncImageInputs(TaskInputs):
-	"""Download + normalize a kernel/rootfs pair into an Atlas base image."""
+	"""Download + normalize a kernel/rootfs pair into an Atlas base image.
+
+	Every required flag is flat image data (urls, filenames, sha256, disk-gb) an
+	operator reads off the image's spec — there are no controller-only required
+	flags, so this verb is operator-typable for break-glass. The verb stages the
+	guest `atlas-network.service` as a sidecar; --guest-network-unit defaults to that
+	staged path and only needs overriding for a hand run pointing at a real file."""
 
 	command: typing.ClassVar[str] = "sync-image"
 	image_name: str  # directory name under /var/lib/atlas/images
@@ -35,7 +48,17 @@ class SyncImageInputs(TaskInputs):
 	rootfs_filename: str  # destination ext4 filename, e.g. ubuntu-24.04.ext4
 	rootfs_sha256: str  # hex digest of the *source squashfs*, not the ext4
 	default_disk_gb: int  # size of the pristine ext4
-	guest_network_unit: str  # server path to the guest atlas-network.service
+	# Server path to the guest atlas-network.service. Defaults to the controller's
+	# staged sidecar path so a hand run can omit it; pass a real file to override.
+	guest_network_unit: str = field(
+		default=STAGED_GUEST_NETWORK_UNIT,
+		metadata={
+			"help": (
+				"server path to the guest atlas-network.service to bake into the image; "
+				f"defaults to the controller's staged sidecar at {STAGED_GUEST_NETWORK_UNIT}"
+			)
+		},
+	)
 
 
 # Minimal /etc/hosts. Per-VM hostname mapping (the 127.0.1.1 line) is added at
@@ -133,10 +156,10 @@ def _download_kernel(inputs: SyncImageInputs, image_dir: str) -> None:
 		return
 
 	packed_path = f"{kernel_path}.vmlinuz"
-	run("sudo", "rm", "-f", f"{packed_path}.part", packed_path)
-	run("sudo", "curl", "-fsSL", "--output", f"{packed_path}.part", inputs.kernel_url)
-	run_input("sudo", "sha256sum", "-c", "-", stdin=f"{inputs.kernel_sha256}  {packed_path}.part")
-	run("sudo", "mv", f"{packed_path}.part", packed_path)
+	run("sudo rm -f {} {}", f"{packed_path}.part", packed_path)
+	run("sudo curl -fsSL --output {} {}", f"{packed_path}.part", inputs.kernel_url)
+	run_input("sudo sha256sum -c -", stdin=f"{inputs.kernel_sha256}  {packed_path}.part")
+	run("sudo mv {} {}", f"{packed_path}.part", packed_path)
 
 	# Decompress the embedded vmlinux. The Ubuntu kernel is a PE/EFI bzImage
 	# whose payload is a zstd frame followed by a 4-byte size trailer, so plain
@@ -147,36 +170,36 @@ def _download_kernel(inputs: SyncImageInputs, image_dir: str) -> None:
 	# 0-byte file). So: locate the zstd magic (28 b5 2f fd), decompress from
 	# there with `-f`, and confirm the ELF magic (7f 45 4c 46). `xxd | grep -bo`
 	# gives a hex-nibble offset (byte = /2); `tail -c +N` is 1-indexed (+1).
-	hex_offset = run(
-		"sh",
-		"-c",
-		f"xxd -p '{packed_path}' | tr -d '\\n' | grep -bo '28b52ffd' | head -1 | cut -d: -f1",
+	hex_offset = shell(
+		"xxd -p {} | tr -d '\\n' | grep -bo '28b52ffd' | head -1 | cut -d: -f1",
+		packed_path,
 	).strip()
 	if not hex_offset:
 		sys.exit(f"No zstd magic in kernel image {packed_path}")
 	byte_offset = int(hex_offset) // 2
-	run(
-		"sudo", "sh", "-c", f"tail -c +{byte_offset + 1} '{packed_path}' | zstd -dc -f > '{kernel_path}.part'"
+	inner = _substitute(
+		"tail -c +{} {} | zstd -dc -f > {}", (byte_offset + 1, packed_path, f"{kernel_path}.part")
 	)
-	if run("sh", "-c", f"head -c 4 '{kernel_path}.part' | xxd -p").strip() != "7f454c46":
-		run("sudo", "rm", "-f", f"{kernel_path}.part")
+	run("sudo sh -c {}", inner)
+	if shell("head -c 4 {} | xxd -p", f"{kernel_path}.part").strip() != "7f454c46":
+		run("sudo rm -f {}", f"{kernel_path}.part")
 		sys.exit("Decompressed kernel is not ELF")
-	run("sudo", "mv", f"{kernel_path}.part", kernel_path)
-	run("sudo", "rm", "-f", packed_path)
+	run("sudo mv {} {}", f"{kernel_path}.part", kernel_path)
+	run("sudo rm -f {}", packed_path)
 
 
 def _download_rootfs(inputs: SyncImageInputs, image_dir: str) -> str:
 	# 2. Rootfs. Returns the extracted directory path; caller normalizes + builds.
 	squashfs_path = f"/tmp/atlas-{inputs.image_name}.squashfs"
 	extracted_directory = f"/tmp/atlas-{inputs.image_name}-rootfs"
-	run("sudo", "rm", "-f", f"{squashfs_path}.part", squashfs_path)
-	run("sudo", "rm", "-rf", extracted_directory)
+	run("sudo rm -f {} {}", f"{squashfs_path}.part", squashfs_path)
+	run("sudo rm -rf {}", extracted_directory)
 
-	run("sudo", "curl", "-fsSL", "--output", f"{squashfs_path}.part", inputs.rootfs_url)
-	run_input("sudo", "sha256sum", "-c", "-", stdin=f"{inputs.rootfs_sha256}  {squashfs_path}.part")
-	run("sudo", "mv", f"{squashfs_path}.part", squashfs_path)
+	run("sudo curl -fsSL --output {} {}", f"{squashfs_path}.part", inputs.rootfs_url)
+	run_input("sudo sha256sum -c -", stdin=f"{inputs.rootfs_sha256}  {squashfs_path}.part")
+	run("sudo mv {} {}", f"{squashfs_path}.part", squashfs_path)
 
-	run("sudo", "unsquashfs", "-d", extracted_directory, squashfs_path)
+	run("sudo unsquashfs -d {} {}", extracted_directory, squashfs_path)
 	return extracted_directory
 
 
@@ -185,18 +208,12 @@ def _install_guest_network_unit(inputs: SyncImageInputs, root: str) -> None:
 	install_directory(f"{root}/etc/systemd/system", mode="0755")
 	install_directory(f"{root}/etc/systemd/system/multi-user.target.wants", mode="0755")
 	run(
-		"sudo",
-		"install",
-		"-m",
-		"0644",
+		"sudo install -m 0644 {} {}",
 		inputs.guest_network_unit,
 		f"{root}/etc/systemd/system/atlas-network.service",
 	)
 	run(
-		"sudo",
-		"ln",
-		"-sf",
-		"/etc/systemd/system/atlas-network.service",
+		"sudo ln -sf /etc/systemd/system/atlas-network.service {}",
 		f"{root}/etc/systemd/system/multi-user.target.wants/atlas-network.service",
 	)
 	install_file("", f"{root}/etc/atlas-network.env", mode="0644")
@@ -219,10 +236,10 @@ def _normalize_rootfs(root: str) -> None:
 	# 3a.1 Kill fcnet. This is a Firecracker-CI artifact (phantom IPv4/30 from the
 	#      MAC); the Ubuntu cloud image has none of these files, so every line is a
 	#      no-op today. Kept because `rm -f` is harmless and documents the contract.
-	run("sudo", "rm", "-f", f"{root}/usr/local/bin/fcnet-setup.sh")
-	run("sudo", "rm", "-f", f"{root}/etc/systemd/system/fcnet.service")
-	run("sudo", "rm", "-f", f"{root}/etc/systemd/system/sshd.service.wants/fcnet.service")
-	run("sudo", "rm", "-f", f"{root}/etc/systemd/system/multi-user.target.wants/fcnet.service")
+	run("sudo rm -f {}", f"{root}/usr/local/bin/fcnet-setup.sh")
+	run("sudo rm -f {}", f"{root}/etc/systemd/system/fcnet.service")
+	run("sudo rm -f {}", f"{root}/etc/systemd/system/sshd.service.wants/fcnet.service")
+	run("sudo rm -f {}", f"{root}/etc/systemd/system/multi-user.target.wants/fcnet.service")
 
 	# 3a.1b Neutralize cloud-init and the boot-blocking services. The cloud image
 	#       boots into cloud-init + systemd-networkd-wait-online + snapd seeding,
@@ -233,16 +250,16 @@ def _normalize_rootfs(root: str) -> None:
 	#       cannot start, and set cloud-init's own disable flag for good measure.
 	#       Masking is idempotent and survives even if the package is reinstalled.
 	install_directory(f"{root}/etc/cloud", mode="0755")
-	run("sudo", "touch", f"{root}/etc/cloud/cloud-init.disabled")
+	run("sudo touch {}", f"{root}/etc/cloud/cloud-init.disabled")
 	for unit in _MASKED_UNITS:
-		run("sudo", "ln", "-sf", "/dev/null", f"{root}/etc/systemd/system/{unit}")
+		run("sudo ln -sf /dev/null {}", f"{root}/etc/systemd/system/{unit}")
 
 	# 3a.1c Mask the boot-speed junk units (see _JUNK_UNITS). Same /dev/null symlink
 	#       mechanism as the boot-blockers above; the difference is intent — these
 	#       don't hang boot, they just burn the boot storm. MariaDB/Redis are
 	#       deliberately NOT in the list: a site VM needs them.
 	for unit in _JUNK_UNITS:
-		run("sudo", "ln", "-sf", "/dev/null", f"{root}/etc/systemd/system/{unit}")
+		run("sudo ln -sf /dev/null {}", f"{root}/etc/systemd/system/{unit}")
 
 	# 3a.2 Strip the shipped SSH host keys so every VM doesn't share one
 	#      identity. We do NOT rely on first-boot regeneration (cloud-init is
@@ -250,14 +267,16 @@ def _normalize_rootfs(root: str) -> None:
 	#      fresh per-VM host keys into the mounted rootfs at provision time.
 	#      The shell glob (ssh_host_*_key{,.pub}) is expanded by the shell here so
 	#      the rm only deletes what actually exists (nullglob-safe via `sh -c`).
-	run("sudo", "sh", "-c", f"rm -f '{root}/etc/ssh/ssh_host_'*_key '{root}/etc/ssh/ssh_host_'*_key.pub")
+	ssh_host_key_prefix = f"{root}/etc/ssh/ssh_host_"
+	inner = _substitute("rm -f {}*_key {}*_key.pub", (ssh_host_key_prefix, ssh_host_key_prefix))
+	run("sudo sh -c {}", inner)
 
 	# 3a.3 Force regeneration of machine-id on first boot. systemd
 	#      repopulates an empty /etc/machine-id at boot if it is zero
 	#      bytes (NOT if it is absent — absent triggers a different code
 	#      path that breaks journald).
-	run("sudo", "truncate", "-s", "0", f"{root}/etc/machine-id")
-	run("sudo", "rm", "-f", f"{root}/var/lib/dbus/machine-id")
+	run("sudo truncate -s 0 {}", f"{root}/etc/machine-id")
+	run("sudo rm -f {}", f"{root}/var/lib/dbus/machine-id")
 
 	# 3a.4 Normalize /etc/hosts to a minimal template. Per-VM hostname mapping
 	#      (the 127.0.1.1 line) is added at provision time, not here. Overwriting
@@ -273,7 +292,7 @@ def _normalize_rootfs(root: str) -> None:
 	#       with a regular file carrying the Cloudflare v6 resolver; the guest unit
 	#       re-asserts the same line at every boot. `rm -f` first so install_file
 	#       writes a real file rather than following the symlink.
-	run("sudo", "rm", "-f", f"{root}/etc/resolv.conf")
+	run("sudo rm -f {}", f"{root}/etc/resolv.conf")
 	install_file("nameserver 2606:4700:4700::1111\n", f"{root}/etc/resolv.conf", mode="0644")
 
 	# 3a.5 Lock root password (key-only by contract) and enforce key-only SSH.
@@ -283,7 +302,7 @@ def _normalize_rootfs(root: str) -> None:
 	#      to sshd_config would be overridden by that Include, so we drop our own
 	#      `00-atlas.conf` into the same directory — it sorts first, and first
 	#      match wins per directive, so it beats 60-cloudimg-settings.conf.
-	run("sudo", "sed", "-i", "s|^root:[^:]*:|root:!:|", f"{root}/etc/shadow")
+	run("sudo sed -i s|^root:[^:]*:|root:!:| {}", f"{root}/etc/shadow")
 	install_directory(f"{root}/etc/ssh/sshd_config.d", mode="0755")
 	install_file(_SSHD_DROP_IN, f"{root}/etc/ssh/sshd_config.d/00-atlas.conf", mode="0644")
 
@@ -294,16 +313,14 @@ def _normalize_rootfs(root: str) -> None:
 	#      irrelevant to us; this is a guarded no-op on the cloud image, kept so a
 	#      future image that does ship the dir gets correct ownership.
 	if os.path.isdir(f"{root}/home/ubuntu"):
-		run("sudo", "chown", "-R", "1000:1000", f"{root}/home/ubuntu")
+		run("sudo chown -R 1000:1000 {}", f"{root}/home/ubuntu")
 
 	# 3a.7 Quieten the motd. 60-unminimize prints a "this image is
 	#      minimized" nag on every login; 50-motd-news fetches news
 	#      from Canonical which on v6-only with strict resolv.conf
 	#      hangs briefly.
 	run(
-		"sudo",
-		"rm",
-		"-f",
+		"sudo rm -f {} {}",
 		f"{root}/etc/update-motd.d/50-motd-news",
 		f"{root}/etc/update-motd.d/60-unminimize",
 	)
@@ -325,22 +342,14 @@ def _build_ext4(root: str, rootfs_path: str, disk_gb: int) -> None:
 	# a pool copy, costing ~1.7s per provision. With the seed baked into the
 	# base image, the UUID change is a single superblock write (~9ms) on every
 	# snapshot. Measured 185x: 1.673s -> 0.009s.
-	run("sudo", "chown", "-R", "root:root", root)
-	run("sudo", "truncate", "-s", f"{disk_gb}G", f"{rootfs_path}.part")
+	run("sudo chown -R root:root {}", root)
+	run("sudo truncate -s {} {}", f"{disk_gb}G", f"{rootfs_path}.part")
 	run(
-		"sudo",
-		"mkfs.ext4",
-		"-q",
-		"-O",
-		"metadata_csum_seed",
-		"-L",
-		"atlas-root",
-		"-d",
+		"sudo mkfs.ext4 -q -O metadata_csum_seed -L atlas-root -d {} -F {}",
 		root,
-		"-F",
 		f"{rootfs_path}.part",
 	)
-	run("sudo", "mv", f"{rootfs_path}.part", rootfs_path)
+	run("sudo mv {} {}", f"{rootfs_path}.part", rootfs_path)
 
 
 def main() -> None:
@@ -364,7 +373,7 @@ def main() -> None:
 	_build_ext4(extracted, rootfs_path, inputs.default_disk_gb)
 
 	squashfs_path = f"/tmp/atlas-{inputs.image_name}.squashfs"
-	run("sudo", "rm", "-rf", extracted, squashfs_path)
+	run("sudo rm -rf {} {}", extracted, squashfs_path)
 
 	# 5. Base image as a read-only thin LV. Per-VM disks are instant CoW snapshots
 	#    of this LV instead of full file copies; the pristine ext4 file stays on

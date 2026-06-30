@@ -30,7 +30,7 @@ def main() -> None:
 	inputs = StopInputs.from_args()
 	paths = VirtualMachinePaths(inputs.virtual_machine_name)
 
-	run("sudo", "systemctl", "stop", paths.systemd_unit)
+	run("sudo systemctl stop {}", paths.systemd_unit)
 
 	print(f"Stopped {inputs.virtual_machine_name}.")
 

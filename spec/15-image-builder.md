@@ -360,14 +360,12 @@ this layer just exposes the button.
   `bench-nightly`) when the recipe sets one, else `<recipe>-<build name>`. Both
   entry points funnel through the one snapshot method, so the warm-reject and every
   guard (not-Available, duplicate/invalid name, missing source kernel) live once.
-- **The series name is the load-bearing link to Central.** Central's
-  `upsert_central_images` links a `Central Image` to a `Virtual Machine Image` of
-  the **exact same name** (name-match, [16-central.md](./16-central.md)). Promoting a
-  versioned bench golden to `bench-v15` / `bench-v16` / `bench-nightly` and running
-  **Fetch Images** flips the matching `Central Image.bake_status` to **Baked** and
-  links `local_image`; customers then pick the version through the ordinary VM
-  `image` field. A name mismatch leaves the `Central Image` orphaned at `Expected`,
-  so the promote defaulting to the series name is what closes the loop.
+- **The series name is how a version is selected.** Promoting a versioned bench
+  golden to `bench-v15` / `bench-v16` / `bench-nightly` makes a `Virtual Machine
+  Image` of that exact name; Central then picks the version per VM through the
+  ordinary `image` field on `create_vm` ([16-central.md](./16-central.md)). The
+  promote defaulting to the series name is what makes the right image available
+  under the name Central asks for.
 - A **warm** bake's snapshot cannot be promoted (its value is the frozen memory
   pair a cold-booting base image discards); the button surfaces the same clean
   refusal from the snapshot method. Promote a cold bake; clone the warm one. (The

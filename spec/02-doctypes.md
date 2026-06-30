@@ -127,12 +127,12 @@ The compute-provider actions live here (there is no `Provider` form):
   dialog schema:
   - **DigitalOcean**: `size` (Link → Provider Size, filtered to
     `provider_type=DigitalOcean, enabled=1`), `image` (Link → Provider
-    Image, same filter), defaulting to `DigitalOcean Settings.default_size`
-    / `default_image`. Then `confirm_cost` ("Create a billable
-    droplet?") before the DO API call.
+    Image, same filter), defaulting to the `Provider Size` / `Provider
+    Image` row marked `is_default` for the provider type. Then
+    `confirm_cost` ("Create a billable droplet?") before the DO API call.
   - **Scaleway**: identical to DigitalOcean — `size` / `image` Links
-    filtered to `provider_type=Scaleway, enabled=1`, defaulting to
-    `Scaleway Settings.default_size` / `default_image`, then `confirm_cost`.
+    filtered to `provider_type=Scaleway, enabled=1`, defaulting to the
+    `is_default` catalog rows, then `confirm_cost`.
     Scaleway is "a vendor with an API," so it takes the same dialog path as
     DigitalOcean; only the catalog filter and the cost copy differ. Provision
     is async (the Elastic Metal create returns `delivering`; the worker polls
@@ -189,8 +189,12 @@ A Single DocType. Only fields that DigitalOcean's API needs.
 | `api_token`     | Password              | Y    | `set_only_once`. DigitalOcean personal access token. Rotate by clearing the field via `db.set_value`, then re-saving. |
 | `region`        | Data                  | Y    | DO is multi-region; Atlas is single-region. Pick one (`blr1`, `nyc3`, …). `provision_server` throws if the dialog overrides this. |
 | `ssh_key_id`    | Data                  |      | DO's handle for the uploaded SSH key, installed on each new droplet. Accepts the key's numeric id or its SHA-256 fingerprint. Passed through to the provider as `SshKey.vendor_id`; `get_ssh_key()` reads it from here when DO is active. Vendor-specific — meaningless to other providers. |
-| `default_size`  | Link → Provider Size  | Y    | Filtered to `provider_type=DigitalOcean, enabled=1`. Default selection in the Provision dialog. |
-| `default_image` | Link → Provider Image | Y    | Same filter as `default_size`.                                     |
+
+The default size/image are **not** fields here. The Provision dialog's default
+comes from the `Provider Size` / `Provider Image` row marked `is_default` (see
+[Provider Size](#provider-size)). `discover()` hints one (`s-2vcpu-4gb-intel` /
+`ubuntu-24-04-x64`); the operator's `atlas_do_default_*` config keys override the
+hint at setup, and the operator can flip the default on the catalog list anytime.
 
 ### Form layout
 
@@ -198,9 +202,6 @@ A Single DocType. Only fields that DigitalOcean's API needs.
 api_token
 region
 ssh_key_id
-── Defaults for new servers ──
-default_size
-| default_image
 ```
 
 ### Buttons
@@ -231,8 +232,12 @@ Mirrors `DigitalOcean Settings` — same shape, vendor-specific fields.
 | `zone`            | Data                  | Y    | Scaleway is multi-zone; Atlas is single-region per vendor. One Elastic Metal zone (`fr-par-1`, `fr-par-2`, `nl-ams-1`, `nl-ams-2`, `pl-waw-2`, `pl-waw-3` — **not** `pl-waw-1`). |
 | `billing`         | Select                |      | `hourly` (default) / `monthly`. Hourly has no upfront fee; monthly is cheaper to run but charges a one-time, non-refundable commitment fee. Hourly and monthly are **distinct offer ids**, so `discover()` filters offers to this mode. |
 | `ssh_key_id`      | Data                  |      | Scaleway's IAM SSH key id, installed on each new Elastic Metal server. Left blank, the provider registers `Atlas Settings.ssh_public_key` with IAM at provision time; an operator with a cached IAM id can set it here to reuse the key. Read as `SshKey.vendor_id` by `get_ssh_key()` when Scaleway is active. Vendor-specific. |
-| `default_size`    | Link → Provider Size  | Y    | Filtered to `provider_type=Scaleway, enabled=1`. |
-| `default_image`   | Link → Provider Image | Y    | Same filter as `default_size`. |
+
+The default size/image are **not** fields here — the Provision dialog's default
+comes from the `is_default` `Provider Size` / `Provider Image` row, exactly as for
+DigitalOcean. `discover()` hints one (cheapest offer / Ubuntu LTS); the operator's
+`atlas_scw_default_*` config keys override the hint at setup, and the operator can
+flip the default on the catalog list anytime.
 
 ### Form layout
 
@@ -243,9 +248,6 @@ organization_id
 zone
 billing
 ssh_key_id
-── Defaults for new servers ──
-default_size
-| default_image
 ```
 
 ### Buttons
@@ -287,13 +289,14 @@ calls `provider.discover()`).
 | `provider_type`     | Select | Y    |           |         | Same options as `Atlas Settings.provider_type`. `set_only_once`.   |
 | `slug`              | Data   | Y    |           |         | Vendor-native slug — the string sent on the API wire (`s-2vcpu-4gb-intel`). `set_only_once`. |
 | `enabled`           | Check  |      |           | 1       | Flipped by `discover()` when the vendor drops a slug. Disabled rows do not appear in the Provision dialog but remain pointable from historical Server rows. |
+| `is_default`        | Check  |      |           |         | The size the Provision Server dialog prefills. **At most one per `provider_type`** — the controller's `validate()` clears `is_default` on every sibling when a row sets it. Filled by `discover()`'s hint into an empty slot, overridden by the `atlas_*_default_size` config key at setup, and flippable by the operator anytime. The resolver (`setup_catalog.default_name`) returns the marked row's `name`. |
 | `monthly_cost_usd`  | Int    |      |           |         | Hand-maintained for vendors without per-size pricing in the API (DO). Renders as "—" when blank. |
 | `provider_metadata` | Code (JSON) |  | Y      |         | Raw vendor response for this size — vCPU count, RAM, disk tier, anything the vendor returns. Read-only on the form. |
 
 ### List view
 
-- Columns: `slug`, `provider_type`, `enabled`, `monthly_cost_usd`.
-- Standard filters: `provider_type`, `enabled`.
+- Columns: `slug`, `provider_type`, `enabled`, `is_default`, `monthly_cost_usd`.
+- Standard filters: `provider_type`, `enabled`, `is_default`.
 
 ---
 
@@ -314,12 +317,13 @@ that runs inside a Firecracker microVM.
 | `provider_type`     | Select | Y    |           |         | `set_only_once`.                                                   |
 | `slug`              | Data   | Y    |           |         | Vendor-native slug (DO `ubuntu-24-04-x64`, future AWS `ami-…`). `set_only_once`. |
 | `enabled`           | Check  |      |           | 1       | Flipped by `discover()`.                                           |
+| `is_default`        | Check  |      |           |         | The image the Provision Server dialog prefills. At most one per `provider_type` — same one-default invariant and precedence as [Provider Size](#provider-size)'s `is_default`. |
 | `provider_metadata` | Code (JSON) |  | Y      |         | Raw vendor response — architecture, distribution, release date, …  |
 
 ### List view
 
-- Columns: `slug`, `provider_type`, `enabled`.
-- Standard filters: `provider_type`, `enabled`.
+- Columns: `slug`, `provider_type`, `enabled`, `is_default`.
+- Standard filters: `provider_type`, `enabled`, `is_default`.
 
 ---
 

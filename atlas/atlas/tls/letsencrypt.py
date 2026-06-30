@@ -27,6 +27,7 @@ LETS_ENCRYPT_PRODUCTION = "https://acme-v02.api.letsencrypt.org/directory"
 @register
 class LetsEncryptProvider(TlsProvider):
 	provider_type = "Let's Encrypt"
+	caa_issuer = "letsencrypt.org"
 
 	def __init__(self) -> None:
 		settings = frappe.get_single("Lets Encrypt Settings")
@@ -54,7 +55,7 @@ class LetsEncryptProvider(TlsProvider):
 			"DNS_AUTHENTICATOR": dns_provider.certbot_authenticator(),
 		}
 		task = run_local_task(
-			script="issue-cert.py",
+			script="issue-cert",
 			variables=variables,
 			env=dns_provider.credential_env(),
 			timeout_seconds=600,

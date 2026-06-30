@@ -26,6 +26,8 @@ zone. The UUIDs are stashed in each Provider Size / Provider Image row's
 
 from __future__ import annotations
 
+import dataclasses
+
 import frappe
 
 from atlas.atlas.providers import register
@@ -77,8 +79,6 @@ class ScalewayProvider(Provider):
 		self.project_id = settings.project_id
 		self.organization_id = settings.organization_id or None
 		self.billing = settings.billing or "hourly"
-		self.default_size = settings.default_size
-		self.default_image = settings.default_image
 		self.client = ScalewayClient(secret_key=secret_key, zone=self.zone)
 
 	def authenticate(self) -> AuthResult:
@@ -90,8 +90,8 @@ class ScalewayProvider(Provider):
 
 	def discover(self) -> Capabilities:
 		offers = self.client.list_offers(subscription_period=self.billing)
-		sizes = tuple(_size_from_offer(offer) for offer in offers)
-		images = tuple(_image_from_os(os_image) for os_image in self.client.list_os())
+		sizes = _hint_default_size(tuple(_size_from_offer(offer) for offer in offers))
+		images = _hint_default_image(tuple(_image_from_os(os_image) for os_image in self.client.list_os()))
 		return Capabilities(sizes=sizes, images=images)
 
 	def provision(self, request: ProvisionRequest) -> ProvisionResult:
@@ -451,6 +451,29 @@ def _size_from_offer(offer: dict) -> SizeInfo:
 		monthly_cost_usd=monthly_cost,
 		provider_metadata=metadata,
 	)
+
+
+def _hint_default_size(sizes: tuple[SizeInfo, ...]) -> tuple[SizeInfo, ...]:
+	"""Mark the cheapest in-catalog offer `is_default` — an opinion the operator's
+	config key / manual flip overrides. `upsert_catalog` only adopts the hint when
+	no Scaleway size is already default. Offers with a 0 monthly cost (hourly, where
+	the monthly price is null) sort last so a priced offer is preferred."""
+	if not sizes:
+		return sizes
+	cheapest = min(sizes, key=lambda s: s.monthly_cost_usd or float("inf"))
+	return tuple(dataclasses.replace(s, is_default=s.slug == cheapest.slug) for s in sizes)
+
+
+def _hint_default_image(images: tuple[ImageInfo, ...]) -> tuple[ImageInfo, ...]:
+	"""Mark an Ubuntu LTS image `is_default` (preferring 24.04), else the first
+	image. Same override rules as `_hint_default_size`."""
+	if not images:
+		return images
+	preferred = next(
+		(i for i in images if i.slug.startswith("Ubuntu_24.04")),
+		next((i for i in images if i.slug.startswith("Ubuntu")), images[0]),
+	)
+	return tuple(dataclasses.replace(i, is_default=i.slug == preferred.slug) for i in images)
 
 
 def _image_from_os(os_image: dict) -> ImageInfo:

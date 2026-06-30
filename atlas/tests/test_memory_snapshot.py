@@ -136,7 +136,9 @@ class TestMemorySnapshotScripts(unittest.TestCase):
 class TestMemorySnapshotWiring(unittest.TestCase):
 	def test_unit_restores_after_start(self) -> None:
 		unit = (_SCRIPTS_DIR / "systemd" / "firecracker-vm@.service").read_text()
-		self.assertIn("ExecStartPost=/usr/bin/python3 /var/lib/atlas/bin/vm-restore.py %i", unit)
+		self.assertIn(
+			"ExecStartPost=/var/lib/atlas/venv/bin/python /var/lib/atlas/bin/vm-restore.py %i", unit
+		)
 		# The pre-start jail cleanup must NOT sweep the snapshot directory, or a
 		# stop-with-snapshot could never be restored.
 		for line in unit.splitlines():
@@ -154,9 +156,10 @@ class TestMemorySnapshotWiring(unittest.TestCase):
 	def test_restore_hook_is_not_a_task(self) -> None:
 		from atlas.atlas import scripts_catalog
 
-		self.assertIn("vm-restore.py", scripts_catalog.SYSTEMD_HOOKS)
-		self.assertNotIn("vm-restore.py", scripts_catalog.allowed_scripts())
+		# SYSTEMD_HOOKS / allowed_scripts() speak VERBS (suffix-less).
+		self.assertIn("vm-restore", scripts_catalog.SYSTEMD_HOOKS)
+		self.assertNotIn("vm-restore", scripts_catalog.allowed_scripts())
 		# The fast stop IS a Task (the controller invokes it), but not one the
 		# Run Task picker should offer.
-		self.assertIn("snapshot-stop-vm.py", scripts_catalog.allowed_scripts())
-		self.assertNotIn("snapshot-stop-vm.py", scripts_catalog.operator_visible_scripts())
+		self.assertIn("snapshot-stop-vm", scripts_catalog.allowed_scripts())
+		self.assertNotIn("snapshot-stop-vm", scripts_catalog.operator_visible_scripts())

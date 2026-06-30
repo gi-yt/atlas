@@ -78,11 +78,10 @@ class ImageRecipe:
 	# Threaded build VM → snapshot → clone → deploy-site.py `--mode`. Empty (proxy)
 	# is treated as the default `site` everywhere it is read.
 	build_mode: str = ""
-	# The base-image name a promoted golden defaults to (the Central Image catalog
-	# links by EXACT name-match — central.upsert_central_images). For the three
-	# customer variants this is the series image name (`bench-v15` / `bench-v16` /
-	# `bench-nightly`) so Fetch Images flips that Central Image to Baked + links it.
-	# Empty falls back to `<recipe>-<build name>` (Image Build.promote's old default).
+	# The base-image name a promoted golden defaults to. For the three customer
+	# variants this is the series image name (`bench-v15` / `bench-v16` /
+	# `bench-nightly`). Empty falls back to `<recipe>-<build name>` (Image
+	# Build.promote's old default).
 	promote_image_name: str = ""
 
 	@property
@@ -177,10 +176,10 @@ def _bench_variant(
 ) -> ImageRecipe:
 	"""A versioned golden bench recipe. The three customer variants (v15/v16/nightly)
 	differ ONLY in their Frappe/ERPNext branch + Python pins, the bake mode, and their
-	promote target image name (= the series name, so Central links it by name-match).
-	Everything else — the committed `bench/` tree, the build-VM sizing, the bench-cli
-	ref, the snapshot/task naming scheme — is shared. `promote_image_name` defaults to
-	the recipe name (`bench-v15` etc.), which IS the Central Image `image_name`."""
+	promote target image name (= the series name). Everything else — the committed
+	`bench/` tree, the build-VM sizing, the bench-cli ref, the snapshot/task naming
+	scheme — is shared. `promote_image_name` defaults to the recipe name
+	(`bench-v15` etc.)."""
 	return ImageRecipe(
 		name=name,
 		title=title,
@@ -206,8 +205,7 @@ def _bench_variant(
 RECIPES: dict[str, "ImageRecipe"] = {
 	# --- The three customer-facing golden bench variants. Baked per Frappe/Bench
 	# release; promoted to a base image named exactly `bench-v<NN>` / `bench-nightly`
-	# so the Central Image catalog links it by name-match and customers pick the
-	# version through the ordinary VM `image` field (spec/15, spec/16). ---
+	# so customers pick the version through the ordinary VM `image` field (spec/15). ---
 	#
 	# v16 is the current/default line: it keeps the warm entrypoint (it doubles as the
 	# self-serve site accelerator base) and `registers_as=default_bench_snapshot`, so

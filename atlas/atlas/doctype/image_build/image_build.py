@@ -137,16 +137,13 @@ class ImageBuild(Document):
 		reject and every guard live once, in the snapshot method, so a warm bake's
 		Image Build surfaces the same clean error.
 
-		The default image NAME is the load-bearing link to the Central Image catalog
-		(spec/16): Central's `upsert_central_images` links a `Central Image` to a
-		`Virtual Machine Image` of the EXACT same name (`central.py` name-match), so a
-		versioned bench recipe defaults its promoted image to the series name it pins
-		(`recipe.promote_image_name` = `bench-v15` / `bench-v16` / `bench-nightly`).
-		Promote that, run Fetch Images, and the matching Central Image flips to Baked
-		and links it — customers then pick the version through the ordinary VM `image`
-		field. A recipe with no series name (proxy, a one-off bench) falls back to the
-		old `<recipe>-<build name>` slug — unique because build names are. An explicit
-		`image_name` always wins. Returns the new image's name."""
+		A versioned bench recipe defaults its promoted image to the series name it
+		pins (`recipe.promote_image_name` = `bench-v15` / `bench-v16` /
+		`bench-nightly`), so customers pick the version through the ordinary VM
+		`image` field (spec/15). A recipe with no series name (proxy, a one-off
+		bench) falls back to the `<recipe>-<build name>` slug — unique because build
+		names are. An explicit `image_name` always wins. Returns the new image's
+		name."""
 		if self.status != "Available":
 			frappe.throw(f"Can only promote an Available build (status is {self.status})")
 		if not self.snapshot:
@@ -354,7 +351,7 @@ def _warm_snapshot(build, recipe, vm_name: str) -> str:
 	memory_directory = f"/var/lib/atlas/snapshots/{snapshot.name}"
 	task = run_task(
 		server=vm.server,
-		script="warm-snapshot-vm.py",
+		script="warm-snapshot-vm",
 		variables={
 			"VIRTUAL_MACHINE_NAME": vm.name,
 			"ATLAS_FC_UID": str(derive_uid(vm.name)),

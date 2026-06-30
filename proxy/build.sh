@@ -139,16 +139,28 @@ apt-get install -y --no-install-recommends \
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
-# fetch <url> <output> — download once, reuse on re-run.
+# fetch <url> <output> — download once, reuse on re-run. Retries a few times so a
+# transient GitHub/codeload blip on a fresh droplet (a single 400/redirect hiccup,
+# the same flaky egress that makes apt time out on first boot) doesn't abort the
+# whole multi-minute bake under `set -e`. Still fails loud once the retries run out.
 fetch() {
-	local url="$1" out="$2"
+	local url="$1" out="$2" attempt
 	if [ -f "$out" ]; then
 		echo "  reuse $out"
 		return
 	fi
 	echo "  fetch $url"
-	curl -fsSL --output "$out.part" "$url"
-	mv "$out.part" "$out"
+	for attempt in 1 2 3 4 5; do
+		if curl -fsSL --retry 3 --retry-all-errors --output "$out.part" "$url"; then
+			mv "$out.part" "$out"
+			return
+		fi
+		echo "  fetch attempt $attempt failed, retrying in $((attempt * 3))s ..." >&2
+		rm -f "$out.part"
+		sleep "$((attempt * 3))"
+	done
+	echo "FATAL: could not fetch $url after 5 attempts" >&2
+	exit 1
 }
 
 # --- 2. OpenResty luajit2. The Lua module REQUIRES this fork, not upstream
@@ -259,12 +271,22 @@ install -m 0644 "$SRC_DIR/conf/nginx.conf"  "$CONF_DIR/nginx.conf"
 install -m 0644 "$SRC_DIR/lua/router.lua"   "$LUA_DIR/router.lua"
 install -m 0644 "$SRC_DIR/lua/admin.lua"    "$LUA_DIR/admin.lua"
 install -m 0644 "$SRC_DIR/lua/persist.lua"  "$LUA_DIR/persist.lua"
+# The custom-domain :80 ACME map (spec/12 § The stream front-door, spec/18 Phase 2):
+# the http{}-side Host fork for a custom domain's HTTP-01 challenge + its persist.
+install -m 0644 "$SRC_DIR/lua/acme_router.lua"  "$LUA_DIR/acme_router.lua"
+install -m 0644 "$SRC_DIR/lua/acme_persist.lua" "$LUA_DIR/acme_persist.lua"
 # The stream{}-side trio (spec/17-tcp-proxy.md): the L4 forwarder's router,
 # line-protocol admin, and persist. Separate files because stream{} Lua runs in a
 # separate subsystem (own lua_shared_dict address space) from the http{} trio.
 install -m 0644 "$SRC_DIR/lua/stream_router.lua"  "$LUA_DIR/stream_router.lua"
 install -m 0644 "$SRC_DIR/lua/stream_admin.lua"   "$LUA_DIR/stream_admin.lua"
 install -m 0644 "$SRC_DIR/lua/stream_persist.lua" "$LUA_DIR/stream_persist.lua"
+# The custom-domain :443 SNI front-door (spec/12 § The stream front-door, spec/18
+# Phase 2): the SNI fork router, the strip-path passthrough router, and the `domains`
+# map persist. Stream-side because ssl_preread is a stream module.
+install -m 0644 "$SRC_DIR/lua/sni_router.lua"      "$LUA_DIR/sni_router.lua"
+install -m 0644 "$SRC_DIR/lua/sni_passthrough.lua" "$LUA_DIR/sni_passthrough.lua"
+install -m 0644 "$SRC_DIR/lua/sni_persist.lua"     "$LUA_DIR/sni_persist.lua"
 install -m 0644 "$SRC_DIR/html/not_found.html" "$HTML_DIR/not_found.html"
 # The nginx.org package drops conf.d/default.conf, included by ITS nginx.conf. Our
 # nginx.conf does NOT include conf.d (see the note there), so it never loads — we

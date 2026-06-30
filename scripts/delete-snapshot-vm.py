@@ -58,7 +58,7 @@ def main() -> None:
 	if inputs.memory_directory:
 		if not inputs.memory_directory.startswith(SNAPSHOTS_DIRECTORY + "/"):
 			sys.exit(f"memory directory must live under {SNAPSHOTS_DIRECTORY}: {inputs.memory_directory}")
-		run("sudo", "rm", "-rf", inputs.memory_directory)
+		run("sudo rm -rf {}", inputs.memory_directory)
 
 	print(f"Deleted snapshot {snapshot.name}.")
 

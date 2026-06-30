@@ -55,33 +55,28 @@ def main() -> None:
 	# The machine config (and possibly the disk) is about to change under any
 	# pending memory snapshot; the saved vmstate would no longer match. Drop it
 	# so the next Start cold-boots with the new config.
-	run("sudo", "rm", "-rf", paths.memory_snapshot_directory)
+	run("sudo rm -rf {}", paths.memory_snapshot_directory)
 
 	# 1. Rewrite machine-config in place. jq edits only the two keys, preserving
 	#    boot-source, drives and network-interfaces. The replacement file is created
 	#    by root; copy the original's owner onto it so the jailed Firecracker (the
 	#    per-VM uid) can still read its config after chroot.
 	new_config = run(
-		"sudo",
-		"jq",
-		"--argjson",
-		"vcpus",
+		"sudo jq --argjson vcpus {} --argjson mem {} {} {}",
 		str(inputs.vcpus),
-		"--argjson",
-		"mem",
 		str(inputs.memory_mb),
 		'."machine-config".vcpu_count = $vcpus | ."machine-config".mem_size_mib = $mem',
 		config_path,
 	)
 	install_file(new_config, f"{config_path}.new", mode="0644")
-	run("sudo", "chown", f"--reference={config_path}", f"{config_path}.new")
-	run("sudo", "mv", f"{config_path}.new", config_path)
+	run("sudo chown {} {}", f"--reference={config_path}", f"{config_path}.new")
+	run("sudo mv {} {}", f"{config_path}.new", config_path)
 
 	# 2. Grow the disk LV to DISK_GB. lvextend -r extends the LV and the ext4 on it
 	#    in one shot. Disk only ever grows (shrink is rejected upstream); lvextend
 	#    refuses to shrink and is a clean no-op when the LV already meets the size,
 	#    so a re-run (or a resize that only changed vCPU/memory) does not error.
-	run("sudo", "lvextend", "-r", "-L", f"{inputs.disk_gb}G", disk.device_path, check=False, quiet=True)
+	run("sudo lvextend -r -L {} {}", f"{inputs.disk_gb}G", disk.device_path, check=False, quiet=True)
 
 	# 3. Grow the data disk (the root disk's peer) when present. Grow-only, same as
 	#    root: -r resizes the ext4 too when formatted, else the block device only.
@@ -91,10 +86,10 @@ def main() -> None:
 	if inputs.data_disk_gb > 0:
 		data_disk = pool.data_disk(inputs.virtual_machine_name)
 		if data_disk.exists:
-			grow = ["sudo", "lvextend"]
-			grow += ["-r"] if inputs.data_disk_format else []
-			grow += ["-L", f"{inputs.data_disk_gb}G", data_disk.device_path]
-			run(*grow, check=False, quiet=True)
+			grow = "sudo lvextend"
+			grow += " -r" if inputs.data_disk_format else ""
+			grow += " -L {} {}"
+			run(grow, f"{inputs.data_disk_gb}G", data_disk.device_path, check=False, quiet=True)
 
 	print(
 		f"Resized {inputs.virtual_machine_name}: "

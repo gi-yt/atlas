@@ -265,6 +265,282 @@ def list() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Component J — host-level queries (wildcard-domains / proxy-servers)
+# ---------------------------------------------------------------------------
+#
+# Two read-only endpoints the `bench-domain-provider` guest binary calls to
+# answer pilot's host-level questions (NOT per-site, no VM in scope, so no caller
+# resolution): which wildcard patterns this host may name sites under, and which
+# edge proxies front it. Both resolve everything controller-side from the single
+# active Root Domain + the `is_proxy` fleet — the guest learns the region wildcard
+# and the proxy IPs without carrying or claiming either (Component E). Audited like
+# every other endpoint (Component I); a blank `vm` (there is no per-call VM) and the
+# source `/128` still record who asked.
+
+
+@frappe.whitelist(allow_guest=True)
+@rate_limit(limit=60, seconds=60)
+def wildcard_domains() -> dict:
+	"""The wildcard pattern(s) sites on this host may be named under (Component J).
+
+	    {"domains": ["*.<active region domain>"]}
+
+	pilot constrains new-site names to these and suggests subdomains in its UI
+	(`matches_wildcard`: a name must END with the suffix and have a label before it).
+	Single-region today → exactly one pattern, `*.<active_root_domain().domain>`,
+	formatted controller-side (the suffix isn't stored in `/etc/atlas-routing.env`).
+	The whole-domain `*.<token>.<region>.<domain>` per-token tier (a billable future,
+	vm-url-tokens §) is NOT emitted here. Read-only, audited; no VM in scope, so the
+	audit row carries a blank vm + the asking source `/128`."""
+	region_domain = active_root_domain().domain
+	_audit("wildcard_domains", "", "ok", business_reject=False, vm="")
+	return {"domains": [f"*.{region_domain}"]}
+
+
+@frappe.whitelist(allow_guest=True)
+@rate_limit(limit=60, seconds=60)
+def proxy_servers() -> dict:
+	"""The regional edge proxies' public IPs that front this host (Component J).
+
+	    {"ips": [<v4 reserved IPs>, ..., <v6 /128s>, ...]}
+
+	When pilot gets a non-empty list it locks the bench nginx down to exactly these
+	(`allow … ; deny all;`), trusts their `X-Forwarded-For`, and forwards it upstream
+	untouched — which **closes the trust-root gap** spec/18 flagged as unbuilt: today
+	caller resolution trusts a leftmost-XFF no edge enforces; `proxy-servers` is how the
+	bench learns which edge to trust. The fleet is every `is_proxy=1` VM; the addresses
+	are the same `wildcard_targets()` the regional wildcard DNS resolves to (A = each
+	proxy's attached Reserved IP, AAAA = each proxy's `/128`). Read-only, audited; no VM
+	in scope, so the audit row carries a blank vm + the asking source `/128`."""
+	from atlas.atlas.proxy import wildcard_targets
+
+	ipv4, ipv6 = wildcard_targets()
+	_audit("proxy_servers", "", "ok", business_reject=False, vm="")
+	return {"ips": [*ipv4, *ipv6]}
+
+
+# ---------------------------------------------------------------------------
+# Component K — the custom-domain DNS recipe (the records the USER adds)
+# ---------------------------------------------------------------------------
+#
+# `generate-dns-records` is purely ADVISORY: Atlas creates nothing in anyone's
+# zone. It answers "which records do I paste into MY DNS provider so my custom
+# domain (shop.acme.com) reaches the site I run on Atlas?" — the Phase-2 custom
+# domain recipe spec/18 deferred. The guest binary formats; this endpoint is the
+# source of truth for the values:
+#
+#   CNAME <custom> -> <the site's REGIONAL FQDN, e.g. app.blr1.frappe.dev>
+#       The preferred record for a subdomain. The custom name aliases the regional
+#       name, which is uniquely RESERVED to this customer (a `Subdomain` row owned
+#       by the caller VM). The regional name already resolves (A/AAAA) to the proxy,
+#       so the customer points once and Atlas can re-IP the proxy fleet without the
+#       customer re-pointing. Crucially this binds the custom domain to the
+#       customer's SITE, not just to the proxy — pointing A/AAAA at the proxy is
+#       something anyone can do (it would not "steal" routing), but a CNAME to the
+#       reserved regional name only routes to the one customer who owns it.
+#   A / AAAA <custom> -> <each proxy's v4 / v6>  (wildcard_targets())
+#       The apex fallback: a zone apex cannot hold a CNAME, so an apex custom domain
+#       must point straight at the proxy IPs. Weaker than the CNAME (no per-site
+#       binding) but unavoidable for an apex.
+#   CAA <custom> 0 issue "<active issuer>"  (the active Root Domain's TLS provider)
+#       Authorizes OUR CA to issue the per-domain cert for the custom name. Omitted
+#       entirely when the active issuer has no public CA identity (Self-Managed).
+
+
+@frappe.whitelist(allow_guest=True)
+@rate_limit(limit=60, seconds=60)
+def dns_records(domain: str, site: str) -> dict:
+	"""The DNS records the customer adds at THEIR provider so `domain` (a custom,
+	non-wildcard name like `shop.acme.com`) reaches their Atlas site (Component K).
+
+	    {"records": [
+	        {"type": "CNAME", "name": "<domain>", "value": "<site regional FQDN>"},
+	        {"type": "A",     "name": "<domain>", "value": "<proxy v4>"}, ...,
+	        {"type": "AAAA",  "name": "<domain>", "value": "<proxy v6>"}, ...,
+	        {"type": "CAA",   "name": "<domain>", "value": "0 issue \\"<issuer>\\""},
+	    ]}
+
+	Read-only and ADVISORY — Atlas writes nothing to any zone; the customer pastes
+	these into their own DNS. Resolves the calling VM by source `/128` (*Caller
+	resolution*) and verifies `site` is a regional FQDN this VM actually OWNS (a
+	`Subdomain` row), so the CNAME target is a name reserved to this customer — the
+	binding that stops another tenant claiming the route by merely pointing at the
+	shared proxy. A `site` the caller does not own, or a `site` not under the active
+	region wildcard, is a clean reject (`frappe.throw`, audited) — we will not advise
+	a CNAME to a name this VM has no claim to.
+
+	The CAA record is omitted when the active issuer has no public-CA identity
+	(Self-Managed `caa_issuer is None`): emitting a CAA with no issuer would forbid
+	all issuance, the opposite of the intent. Audited; the VM is the source address."""
+	from atlas.atlas.proxy import wildcard_targets
+	from atlas.atlas.tls import for_tls_provider_type
+
+	vm = _resolve_caller_vm("dns_records", domain)
+	region_domain = active_root_domain().domain
+	suffix = f".{region_domain}"
+
+	# The CNAME target is the caller's OWN regional FQDN. `site` must be that FQDN
+	# (label under the active wildcard) AND a Subdomain this VM owns — otherwise we
+	# would advise aliasing a name the caller has no claim to.
+	site = (site or "").strip().rstrip(".").lower()
+	label = site[: -len(suffix)] if site.endswith(suffix) else None
+	owned = label and frappe.db.exists("Subdomain", {"subdomain": label, "virtual_machine": vm.name})
+	if not owned:
+		_audit("dns_records", domain, "unowned_site", business_reject=True, vm=vm.name)
+		frappe.throw(f"{site!r} is not a routable site this VM owns")
+
+	ipv4, ipv6 = wildcard_targets()
+	records = [{"type": "CNAME", "name": domain, "value": f"{label}{suffix}"}]
+	records += [{"type": "A", "name": domain, "value": ip} for ip in ipv4]
+	records += [{"type": "AAAA", "name": domain, "value": ip} for ip in ipv6]
+
+	issuer = for_tls_provider_type(active_root_domain().tls_provider_type).caa_issuer
+	if issuer:
+		records.append({"type": "CAA", "name": domain, "value": f'0 issue "{issuer}"'})
+
+	_audit("dns_records", domain, "ok", business_reject=False, vm=vm.name)
+	return {"records": records}
+
+
+# ---------------------------------------------------------------------------
+# Component L — custom-domain register / deregister (spec/18 Phase 2)
+# ---------------------------------------------------------------------------
+#
+# The full-FQDN siblings of `register`/`deregister`. A wildcard subdomain rides
+# `register(label)` (one label, terminated at the proxy under the regional wildcard
+# cert); an arbitrary external domain (`shop.acme.com`) the customer already owns rides
+# these endpoints — a separate `Custom Domain` row keyed on the WHOLE host. Same trust
+# root (caller resolution by source /128), same audit, same arbitration (fleet-wide
+# uniqueness via the Custom Domain unique key); the per-VM cap and the dot ban stay on
+# `Subdomain` and do NOT apply here (custom domains are a distinct namespace the customer
+# owns externally).
+#
+# **TLS is SNI PASSTHROUGH — Atlas issues no per-domain cert.** The proxy reads the SNI
+# at L4 (`ssl_preread`) and forwards the RAW TLS stream straight to the backend site VM's
+# `:443`; the BENCH terminates TLS with its OWN cert (pilot's `setup-letsencrypt`, run
+# after `register` succeeds, obtains it). So the proxy holds only the regional wildcard
+# cert (for the subdomain path) and never a customer cert. `register_custom_domain` just
+# reserves the row (fail-closed on the reservation): its `after_insert` reconciles the
+# proxy's custom-domain SNI map so the route is live the moment the row exists, no cert
+# step on our side. `status` (Active/Failed) is informational — a registered domain is
+# Active and in the :443 SNI map immediately; if the VM's cert isn't issued yet the
+# proxy just forwards a handshake the VM can't complete (a transient TLS error that
+# self-heals once the cert lands), no Atlas-side gate.
+
+
+@frappe.whitelist(allow_guest=True)
+@rate_limit(limit=60, seconds=60)
+def register_custom_domain(domain: str) -> dict:
+	"""Claim and provision an arbitrary external domain for the caller VM (Component L).
+
+	    {"status": "ok" | "taken" | "invalid"}
+
+	Resolves the calling VM by source `/128` (*Caller resolution*), validates `domain` as a
+	well-formed external FQDN NOT under the regional wildcard (`validate_custom_domain`),
+	checks fleet-wide uniqueness (the `Custom Domain` unique key is the atomic arbiter), and
+	inserts `Custom Domain(domain, virtual_machine=<resolved vm>, active=1)` whose
+	`after_insert` reconciles the proxy fleet's custom-domain SNI map — so the route is live
+	the moment the row exists. There is NO cert step on Atlas's side: the proxy passes the
+	TLS stream through to the backend, which terminates with its own cert.
+
+	A `DuplicateEntryError` (two benches racing the same name, or a name already claimed)
+	maps to `taken`; a malformed / wildcard-shadowing name is `invalid` with a verbatim
+	`reason`. Idempotent on the caller's OWN row — a retry is a clean `ok`. Carries NO
+	VM-identifying argument; the row's `virtual_machine` is the source-resolved VM. Audited
+	on every path. The matching `register(label)` wildcard path is unchanged."""
+	from atlas.atlas.custom_domain_label import normalize_domain
+
+	domain = normalize_domain(domain)
+	vm = _resolve_caller_vm("register_custom_domain", domain)
+	region_domain = active_root_domain().domain
+
+	invalid = _custom_domain_invalid_reason(domain, region_domain)
+	if invalid is not None:
+		_audit("register_custom_domain", domain, "invalid", business_reject=True, vm=vm.name)
+		return {"status": "invalid", "reason": invalid}
+
+	# Idempotent on the caller's OWN row: a retry for a domain this VM already owns is a clean
+	# ok (the route is already live). Checked before the fleet-availability gate so an own-row
+	# retry never trips "taken" against itself.
+	if frappe.db.exists("Custom Domain", {"domain": domain, "virtual_machine": vm.name}):
+		_audit("register_custom_domain", domain, "ok", business_reject=False, vm=vm.name)
+		return {"status": "ok"}
+
+	if frappe.db.exists("Custom Domain", domain):
+		_audit("register_custom_domain", domain, "taken", business_reject=True, vm=vm.name)
+		return {"status": "taken"}
+
+	# The atomic arbiter: the Custom Domain unique key (autoname field:domain → PRIMARY).
+	# status=Active: the row enters BOTH the :80 ACME-passthrough map AND the :443 SNI
+	# passthrough map immediately (spec/13 § Custom domains). There is no readiness gate —
+	# if the VM's cert isn't issued yet, the proxy forwards a TLS handshake the VM can't
+	# complete (a transient client-side cert error that self-heals the moment the cert
+	# lands), which is harmless: pure SNI passthrough, no cross-tenant effect.
+	try:
+		frappe.get_doc(
+			{
+				"doctype": "Custom Domain",
+				"domain": domain,
+				"virtual_machine": vm.name,
+				"site": _caller_site_fqdn(vm.name, region_domain),
+				"status": "Active",
+				"active": 1,
+			}
+		).insert(ignore_permissions=True)
+	except (frappe.DuplicateEntryError, frappe.UniqueValidationError):
+		_audit("register_custom_domain", domain, "taken", business_reject=True, vm=vm.name)
+		return {"status": "taken"}
+
+	_audit("register_custom_domain", domain, "ok", business_reject=False, vm=vm.name)
+	return {"status": "ok"}
+
+
+@frappe.whitelist(allow_guest=True)
+@rate_limit(limit=60, seconds=60)
+def deregister_custom_domain(domain: str) -> dict:
+	"""Tear down a custom-domain route (Component L), the full-FQDN twin of `deregister`.
+
+	    {"status": "ok"}
+
+	Resolves the calling VM, finds its `Custom Domain(domain, virtual_machine=<vm>)`, and
+	deletes it — its `on_trash` deconverges the proxy's custom-domain SNI map. Scoped to the
+	caller's OWN VM (a guest can never deregister another VM's custom domain). Idempotent: an
+	absent row is a clean `ok` (a double drop, a replayed POST, a rollback for a create that
+	itself failed). Audited."""
+	from atlas.atlas.custom_domain_label import normalize_domain
+
+	domain = normalize_domain(domain)
+	vm = _resolve_caller_vm("deregister_custom_domain", domain)
+	name = frappe.db.get_value("Custom Domain", {"domain": domain, "virtual_machine": vm.name})
+	if name:
+		frappe.delete_doc("Custom Domain", name, ignore_permissions=True)
+	_audit("deregister_custom_domain", domain, "ok", business_reject=False, vm=vm.name)
+	return {"status": "ok"}
+
+
+def _custom_domain_invalid_reason(domain: str, region_domain: str) -> str | None:
+	"""The operator-facing message if `domain` fails the custom-domain shape rules
+	(`validate_custom_domain`), else None — returned as a typed `invalid` result, not an
+	HTTP error, so the guest hook surfaces it verbatim."""
+	from atlas.atlas.custom_domain_label import validate_custom_domain
+
+	try:
+		validate_custom_domain(domain, region_domain)
+	except frappe.ValidationError as exception:
+		return str(exception)
+	return None
+
+
+def _caller_site_fqdn(vm_name: str, region_domain: str) -> str:
+	"""The caller VM's own regional site FQDN, for the Custom Domain `site` provenance field
+	(the name a customer CNAMEs to). A VM may own several Subdomains; we record its first as
+	the canonical site. Blank if the VM owns no Subdomain yet (the custom domain still routes
+	to the VM directly by /128 — `site` is provenance, not the routing target)."""
+	label = frappe.db.get_value("Subdomain", {"virtual_machine": vm_name}, "subdomain")
+	return f"{label}.{region_domain}" if label else ""
+
+
+# ---------------------------------------------------------------------------
 # Caller resolution (the VM is the source address, never a parameter)
 # ---------------------------------------------------------------------------
 

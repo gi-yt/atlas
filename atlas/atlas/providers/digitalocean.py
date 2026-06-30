@@ -55,10 +55,12 @@ DIGITALOCEAN_MONTHLY_COST_USD: dict[str, int] = {
 
 KNOWN_DIGITALOCEAN_SIZES: tuple[str, ...] = tuple(DIGITALOCEAN_MONTHLY_COST_USD.keys())
 
-KNOWN_DIGITALOCEAN_IMAGES: tuple[str, ...] = (
-	"ubuntu-24-04-x64",
-	"ubuntu-22-04-x64",
-)
+KNOWN_DIGITALOCEAN_IMAGES: tuple[str, ...] = ("ubuntu-24-04-x64",)
+
+# The opinionated default discover() hints when no row is already marked default
+# (an operator/config choice overrides it). 4 GB Intel + Ubuntu 24.04 LTS.
+DEFAULT_DIGITALOCEAN_SIZE: str = "s-2vcpu-4gb-intel"
+DEFAULT_DIGITALOCEAN_IMAGE: str = "ubuntu-24-04-x64"
 
 
 @register
@@ -70,8 +72,6 @@ class DigitalOceanProvider(Provider):
 		token = get_secret("DigitalOcean Settings", "DigitalOcean Settings", "api_token")
 		self.client = DigitalOceanClient(token=token)
 		self.region = settings.region
-		self.default_size = settings.default_size
-		self.default_image = settings.default_image
 
 	def authenticate(self) -> AuthResult:
 		try:
@@ -87,10 +87,17 @@ class DigitalOceanProvider(Provider):
 
 	def discover(self) -> Capabilities:
 		sizes = tuple(
-			SizeInfo(slug=slug, monthly_cost_usd=DIGITALOCEAN_MONTHLY_COST_USD.get(slug))
+			SizeInfo(
+				slug=slug,
+				monthly_cost_usd=DIGITALOCEAN_MONTHLY_COST_USD.get(slug),
+				is_default=slug == DEFAULT_DIGITALOCEAN_SIZE,
+			)
 			for slug in KNOWN_DIGITALOCEAN_SIZES
 		)
-		images = tuple(ImageInfo(slug=slug) for slug in KNOWN_DIGITALOCEAN_IMAGES)
+		images = tuple(
+			ImageInfo(slug=slug, is_default=slug == DEFAULT_DIGITALOCEAN_IMAGE)
+			for slug in KNOWN_DIGITALOCEAN_IMAGES
+		)
 		return Capabilities(sizes=sizes, images=images)
 
 	def provision(self, request: ProvisionRequest) -> ProvisionResult:

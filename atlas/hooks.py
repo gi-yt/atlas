@@ -68,8 +68,6 @@ doctype_js = {
 	"Root Domain": "public/js/atlas_form_overrides.js",
 	"TLS Certificate": "public/js/atlas_form_overrides.js",
 	"Central Settings": "public/js/atlas_form_overrides.js",
-	"Central Size": "public/js/atlas_form_overrides.js",
-	"Central Image": "public/js/atlas_form_overrides.js",
 }
 
 # Note: redirecting `/desk` → `/app/atlas` is non-trivial (Frappe hardcodes

@@ -85,7 +85,7 @@ def main() -> None:
 			f"source image kernel not found: {source_kernel}; the snapshot's source "
 			f"image '{inputs.source_image}' must be synced to this server first"
 		)
-	run("sudo", "ln", "-f", source_kernel, dest_kernel)
+	run("sudo ln -f {} {}", source_kernel, dest_kernel)
 
 	# 2b. The rootfs presence sentinel. provision-vm.py only stat-probes this file;
 	#     the disk bytes are the base LV (1). An empty file documents "the rootfs

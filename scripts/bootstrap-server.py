@@ -19,10 +19,11 @@ from dataclasses import dataclass
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 
-from atlas._run import install_directory, install_file, run, run_input, run_ok
+from atlas._run import _substitute, install_directory, install_file, run, run_input, run_ok
 from atlas._task import TaskInputs, TaskResult
 from atlas.lvm import ThinPool
 from atlas.network_env import default_route_device
+from atlas.paths import ATLAS_PYTHON
 
 # --- the big sysctl drop-in, verbatim from the shell heredoc (step 4) ---
 SYSCTL_CONF = """\
@@ -132,6 +133,29 @@ APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 """
 
+# --- per-VM Firecracker log rotation (prod-host-setup.md "Log files"/"8250
+# Serial Device") ---
+# Firecracker emits log data the GUEST can influence the volume of; the systemd
+# unit `append:`s each VM's stdout+stderr to a per-VM file with no bound. A
+# malicious or merely chatty guest could otherwise fill host storage. logrotate
+# is in the stock Ubuntu cron/timer set, so a drop-in here is the whole fix.
+# copytruncate (not the default move-then-reopen): systemd holds the log file
+# open for the unit's lifetime and there is no signal to make it reopen, so we
+# rotate by copying then truncating the open file in place. Bounded to 7 daily
+# files; a wildcard covers every present and future VM directory.
+LOGROTATE_CONF = """\
+/var/lib/atlas/virtual-machines/*/log/firecracker.log {
+    daily
+    rotate 7
+    maxsize 100M
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+}
+"""
+
 # Step 2 package set, verbatim.
 PACKAGES = [
 	"ca-certificates",
@@ -146,14 +170,22 @@ PACKAGES = [
 	"wireguard-tools",
 ]
 
+# The host's Atlas interpreter — a uv-managed venv on a controlled CPython — is
+# created by scripts/install.sh, which the controller runs over SSH BEFORE this
+# Task (Server.bootstrap, right after the upload). install.sh is the SINGLE SOURCE
+# OF TRUTH for UV_VERSION / PY_VERSION and runs the deep sanity gate. By the time
+# this script runs, the venv + `atlas` console script exist, so bootstrap-server
+# is a normal `atlas <verb>` on the venv — no carve-out. ATLAS_PYTHON (from
+# atlas.paths) is the venv python; we read its --version live for the log line.
+
 
 @dataclass(frozen=True)
 class BootstrapInputs(TaskInputs):
 	"""Turn a fresh Ubuntu 24.04 host into a Firecracker host (idempotent)."""
 
 	command: typing.ClassVar[str] = "bootstrap-server"
-	firecracker_version: str  # e.g. v1.15.1
 	sshpiper_version: str  # e.g. v1.15.1
+	firecracker_version: str  # e.g. v1.16.0
 	architecture: str  # e.g. x86_64 (must match `uname -m`)
 	atlas_url: str
 	sshpiper_lookup_server: str
@@ -167,11 +199,17 @@ class BootstrapResult(TaskResult):
 	jailer_version: str
 	kernel_version: str
 	architecture: str
+	# The resolved Atlas venv python (`/var/lib/atlas/venv/bin/python --version`).
+	# Carried on the BootstrapResult line so the bootstrap log shows which CPython
+	# the host's Tasks now run under. It is DERIVED state — no Server doctype field
+	# backs it (the venv + install.sh's PY_VERSION constant are live truth), so the
+	# controller reads it for display only, never persists it.
+	python_version: str
 
 
 def _uname(flag: str) -> str:
 	"""`uname -m` / `uname -r` as a stripped string."""
-	return run("uname", flag).strip()
+	return run("uname {}", flag).strip()
 
 
 def _binary_version(binary: str) -> str:
@@ -185,7 +223,7 @@ def _binary_version(binary: str) -> str:
 	Catch it here so absence is the empty string, matching the docstring and the
 	version gate's "absent or wrong-version → reinstall" contract."""
 	try:
-		out = run(binary, "--version", check=False, quiet=True)
+		out = run("{} --version", binary, check=False, quiet=True)
 	except FileNotFoundError:
 		return ""
 	first = out.splitlines()[0] if out else ""
@@ -200,7 +238,8 @@ def _wait_for_apt_locks() -> None:
 	hang."""
 	deadline = time.monotonic() + 300
 	locks = ["/var/lib/apt/lists/lock", "/var/lib/dpkg/lock-frontend", "/var/lib/dpkg/lock"]
-	while run_ok("sudo", "fuser", *locks):
+	fuser = _substitute("fuser " + " ".join("{}" for _ in locks), tuple(locks))
+	while run_ok("sudo " + fuser):
 		if time.monotonic() >= deadline:
 			sys.exit("apt/dpkg lock still held after 300s; aborting bootstrap")
 		print("waiting for apt/dpkg lock to be released...", file=sys.stderr)
@@ -224,27 +263,19 @@ def _install_firecracker(version: str, architecture: str) -> None:
 		f"https://github.com/firecracker-microvm/firecracker/releases/download/"
 		f"{version}/firecracker-{version}-{architecture}.tgz"
 	)
-	run("sudo", "rm", "-rf", "/tmp/firecracker-install")
-	run("mkdir", "/tmp/firecracker-install")
+	run("sudo rm -rf /tmp/firecracker-install")
+	run("mkdir /tmp/firecracker-install")
 	# curl … | tar -xz, run from the install dir.
-	run("sudo", "sh", "-c", f"cd /tmp/firecracker-install && curl -fsSL {url!r} | tar -xz")
+	run("sudo sh -c {}", _substitute("cd /tmp/firecracker-install && curl -fsSL {} | tar -xz", (url,)))
 	run(
-		"sudo",
-		"install",
-		"-m",
-		"0755",
+		"sudo install -m 0755 {} /usr/local/bin/firecracker",
 		f"/tmp/firecracker-install/{release}/firecracker-{version}-{architecture}",
-		"/usr/local/bin/firecracker",
 	)
 	run(
-		"sudo",
-		"install",
-		"-m",
-		"0755",
+		"sudo install -m 0755 {} /usr/local/bin/jailer",
 		f"/tmp/firecracker-install/{release}/jailer-{version}-{architecture}",
-		"/usr/local/bin/jailer",
 	)
-	run("sudo", "rm", "-rf", "/tmp/firecracker-install")
+	run("sudo rm -rf /tmp/firecracker-install")
 
 def _install_sshpiper(version: str, architecture: str) -> None:
 	installed_sshpiper = _binary_version("/usr/local/bin/sshpiperd")
@@ -297,12 +328,13 @@ def main() -> None:
 
 	# cloud-init owns the first-boot apt run; block until it's done (best-effort —
 	# `status --wait` returns promptly if cloud-init isn't present or already done).
-	run("sudo", "cloud-init", "status", "--wait", check=False, quiet=True)
+	run("sudo cloud-init status --wait", check=False, quiet=True)
 
 	_wait_for_apt_locks()
 
-	run("sudo", "apt-get", "-o", "DPkg::Lock::Timeout=300", "update")
-	run("sudo", "apt-get", "-o", "DPkg::Lock::Timeout=300", "install", "-y", *PACKAGES)
+	run("sudo apt-get -o DPkg::Lock::Timeout=300 update")
+	packages = _substitute(" ".join("{}" for _ in PACKAGES), tuple(PACKAGES))
+	run("sudo apt-get -o DPkg::Lock::Timeout=300 install -y " + packages)
 
 	# 3A Install Firecracker + jailer (version-gated).
 	_install_firecracker(inputs.firecracker_version, inputs.architecture)
@@ -328,7 +360,7 @@ def main() -> None:
 	#    the `inet atlas` nft chains, not here. The remaining lines are CIS 3.3
 	#    controls that a routing host still wants.
 	install_file(SYSCTL_CONF, "/etc/sysctl.d/60-atlas.conf", mode="0644")
-	run("sudo", "sysctl", "--system", quiet=True)
+	run("sudo sysctl --system", quiet=True)
 
 	# 5. sshd hardening (CIS 5.1). A drop-in so we never edit the stock config and
 	#    survive package upgrades. Atlas connects key-only as root, so these only
@@ -338,8 +370,8 @@ def main() -> None:
 	#    deviation, see spec/03-bootstrapping.md "Host hardening").
 	install_file(SSHD_CONF, "/etc/ssh/sshd_config.d/60-atlas.conf", mode="0644")
 	# Validate BEFORE reload so a bad drop-in can never brick SSH (fail loud).
-	run("sudo", "sshd", "-t")
-	run("sudo", "systemctl", "reload", "ssh")
+	run("sudo sshd -t")
+	run("sudo systemctl reload ssh")
 
 	# 6. Kernel-module blocklist (CIS 1.1.1 filesystems + 3.2 network protocols).
 	#    `install <m> /bin/false` defeats modprobe; `blacklist` covers autoload.
@@ -353,8 +385,15 @@ def main() -> None:
 	#    want a feature kernel rolling under a running Firecracker host. No auto
 	#    reboot: a security kernel needs a reboot to take effect, but an unattended
 	#    reboot would kill every running VM; the operator reboots on a window.
-	run("sudo", "apt-get", "-o", "DPkg::Lock::Timeout=300", "install", "-y", "unattended-upgrades")
+	run("sudo apt-get -o DPkg::Lock::Timeout=300 install -y unattended-upgrades")
 	install_file(UNATTENDED_CONF, "/etc/apt/apt.conf.d/60-atlas-unattended.conf", mode="0644")
+
+	# 7a. Bound the per-VM Firecracker logs (prod-host-setup.md "Log files"). The
+	#     systemd unit `append:`s each VM's stdout+stderr to an unbounded per-VM
+	#     file; a guest can influence the volume. logrotate ships with Ubuntu's
+	#     stock daily timer, so this drop-in is the whole fix — no service to
+	#     enable.
+	install_file(LOGROTATE_CONF, "/etc/logrotate.d/60-atlas-firecracker", mode="0644")
 
 	# 8. Firecracker host controls (prod-host-setup.md): no cross-VM memory side
 	#    channel, no guest RAM on disk. Both idempotent; guarded for absence.
@@ -365,49 +404,50 @@ def main() -> None:
 	#    (`echo 0 > …`); the in-place Python equivalent is `tee` (truncating open),
 	#    not install_file. Same reason the LVM nodes use mknod, not install.
 	if os.access("/sys/kernel/mm/ksm/run", os.W_OK):
-		run_input("sudo", "tee", "/sys/kernel/mm/ksm/run", stdin="0\n")
+		run_input("sudo tee /sys/kernel/mm/ksm/run", stdin="0\n")
 	# Swap lets guest memory hit disk (data remanence). DO droplets are typically
 	# swapless; swapoff -a is idempotent and a no-op when there is no swap.
-	run("sudo", "swapoff", "-a")
+	run("sudo swapoff -a")
 
 	# 9. nftables scaffold. Two-shot: create-if-missing, then ensure chains exist.
 	#    One inet table holds both the v6 forward chain and the v4 egress NAT.
-	if not run_ok("sudo", "nft", "list", "table", "inet", "atlas"):
-		run("sudo", "nft", "add", "table", "inet", "atlas")
-	if not run_ok("sudo", "nft", "list", "chain", "inet", "atlas", "forward"):
+	if not run_ok("sudo nft list table inet atlas"):
+		run("sudo nft add table inet atlas")
+	if not run_ok("sudo nft list chain inet atlas forward"):
 		run(
-			"sudo",
-			"nft",
-			"add chain inet atlas forward { type filter hook forward priority filter; policy accept; }",
+			"sudo nft add chain inet atlas forward {}",
+			"{ type filter hook forward priority filter; policy accept; }",
 		)
+
+	# 9-imds. Drop guest traffic to the cloud metadata endpoint (169.254.169.254).
+	#     prod-host-setup.md "Filtering Guest Egress Network Traffic": a guest must
+	#     not reach the HOST's IMDS, which on DigitalOcean serves the droplet's own
+	#     metadata (userdata, vendor credentials). The forward chain's policy is
+	#     accept, so without an explicit drop a guest's packet to 169.254.169.254 is
+	#     forwarded out the veth and answered by the host's metadata service. One
+	#     host-wide rule covers every VM (the destination is fixed); vm-network-up.py
+	#     re-asserts it after a reboot, exactly like the masquerade rule. The guest's
+	#     OWN metadata (MMDS) also lives at 169.254.169.254 but is served by
+	#     Firecracker on the tap INSIDE the netns — it never traverses this host
+	#     forward chain, so dropping here does not touch it.
+	if "ip daddr 169.254.169.254" not in run("sudo nft list chain inet atlas forward"):
+		run("sudo nft add rule inet atlas forward ip daddr 169.254.169.254 drop")
 
 	# 9a. IPv4 egress: masquerade the per-VM private /30s (carved from
 	#     100.64.0.0/16) out the host's public uplink. One host-wide rule covers
 	#     every VM — the source range is fixed, so no per-VM NAT churn. The guest
 	#     is reachable from outside over IPv6 only; this gives it *outbound* v4.
 	uplink = default_route_device()
-	if not run_ok("sudo", "nft", "list", "chain", "inet", "atlas", "postrouting"):
+	if not run_ok("sudo nft list chain inet atlas postrouting"):
 		run(
-			"sudo",
-			"nft",
-			"add chain inet atlas postrouting { type nat hook postrouting priority srcnat; policy accept; }",
+			"sudo nft add chain inet atlas postrouting {}",
+			"{ type nat hook postrouting priority srcnat; policy accept; }",
 		)
-	postrouting = run("sudo", "nft", "list", "chain", "inet", "atlas", "postrouting")
+	postrouting = run("sudo nft list chain inet atlas postrouting")
 	if "ip saddr 100.64.0.0/16" not in postrouting:
 		run(
-			"sudo",
-			"nft",
-			"add",
-			"rule",
-			"inet",
-			"atlas",
-			"postrouting",
-			"ip",
-			"saddr",
-			"100.64.0.0/16",
-			"oifname",
+			"sudo nft add rule inet atlas postrouting ip saddr 100.64.0.0/16 oifname {} masquerade",
 			uplink,
-			"masquerade",
 		)
 
 	# 10. Directories.
@@ -416,6 +456,16 @@ def main() -> None:
 	install_directory("/var/lib/atlas/virtual-machines", mode="0700")
 	install_directory("/var/lib/atlas/run", mode="0700")
 	install_directory("/var/lib/atlas/bin", mode="0755")
+
+	# 10a. The Atlas venv (uv-managed CPython) already exists: scripts/install.sh
+	#      created it + ran the deep sanity gate over SSH BEFORE this Task
+	#      (Server.bootstrap, right after the upload), so by the time this script
+	#      runs — itself as `atlas bootstrap-server` on that venv — the interpreter
+	#      the units will use is already proven. Read its --version live for the log
+	#      line on BootstrapResult; it is derived state the controller never
+	#      persists. No `sudo`: the venv python is root-readable and --version only
+	#      reads it.
+	python_version = run("{} --version", ATLAS_PYTHON).strip()
 
 	# 11. Helper scripts and systemd unit are uploaded alongside this script by
 	#     the caller, into /var/lib/atlas/bin/ and /etc/systemd/system/. See
@@ -430,20 +480,10 @@ def main() -> None:
 	#     passed literally to chmod and fails the whole bootstrap, which is exactly
 	#     how the stale `*.sh` glob bricked a fresh host. `find` no-ops on absence.
 	run(
-		"sudo",
-		"find",
-		"/var/lib/atlas/bin",
-		"-maxdepth",
-		"1",
-		"-name",
-		"*.py",
-		"-exec",
-		"chmod",
-		"0755",
+		"sudo find /var/lib/atlas/bin -maxdepth 1 -name *.py -exec chmod 0755 {} +",
 		"{}",
-		"+",
 	)
-	run("sudo", "systemctl", "daemon-reload")
+	run("sudo systemctl daemon-reload")
 
 	# 11a. LVM thin pool for VM disks. Per-VM disks are thin CoW snapshots of a
 	#      read-only base image LV instead of full file copies. The pool's PV is
@@ -458,10 +498,10 @@ def main() -> None:
 	#      (idempotent) does the pv/vg/pool work; atlas-pool.service re-asserts the
 	#      backing (re-binding the loop device for the file backing; a real-device
 	#      PV needs nothing) after a reboot since bootstrap is not re-run on boot.
-	run("sudo", "modprobe", "dm_thin_pool")
+	run("sudo modprobe dm_thin_pool")
 	install_file("dm_thin_pool\n", "/etc/modules-load.d/60-atlas-lvm.conf", mode="0644")
 	ThinPool().ensure()
-	run("sudo", "systemctl", "enable", "atlas-pool.service", check=False, quiet=True)
+	run("sudo systemctl enable atlas-pool.service", check=False, quiet=True)
 
 	# Generate root ssh key for use by sshpiper
 	run("sudo", "bash", "-c", "[ -e '/root/.ssh/id_ed25519' ] || ssh-keygen -t ed25519 -f '/root/.ssh/id_ed25519' -q -N ''")
@@ -476,6 +516,7 @@ def main() -> None:
 		sshpiper_version=_binary_version("/usr/local/bin/sshpiperd"),
 		kernel_version=_uname("-r"),
 		architecture=_uname("-m"),
+		python_version=python_version,
 	)
 	install_directory("/var/lib/atlas", mode="0755")
 	install_file(_bootstrap_json(result), "/var/lib/atlas/bootstrap.json", mode="0644")
@@ -485,8 +526,9 @@ def main() -> None:
 
 
 def _bootstrap_json(result: BootstrapResult) -> str:
-	"""The canonical /var/lib/atlas/bootstrap.json bytes — the same four keys the
-	shell `jq -nc` wrote, kept as the on-disk source of truth."""
+	"""The canonical /var/lib/atlas/bootstrap.json bytes — the four keys the shell
+	`jq -nc` wrote (firecracker/jailer/kernel/architecture) plus the resolved
+	pinned `python_version`, kept as the on-disk source of truth."""
 	return json.dumps(dataclasses.asdict(result))
 
 

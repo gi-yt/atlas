@@ -62,7 +62,7 @@ def main() -> None:
 		remove_tunnel(inputs.interface)
 		# Best-effort — a revoke may run after terminate already rm -rf'd the dir.
 		for path in (env_path, key_path):
-			run("sudo", "rm", "-f", path, check=False)
+			run("sudo rm -f {}", path, check=False)
 		print(f"Tunnel {inputs.interface} down on {inputs.virtual_machine_name}.")
 		TunnelResult(server_public_key="").emit()
 		return
@@ -97,9 +97,9 @@ def _ensure_host_key(key_path: str) -> str:
 		with open(key_path) as handle:
 			private_key = handle.read().strip()
 	else:
-		private_key = run("wg", "genkey").strip()
+		private_key = run("wg genkey").strip()
 		install_file(private_key + "\n", key_path, mode="0600")
-	return run_input("wg", "pubkey", stdin=private_key + "\n").strip()
+	return run_input("wg pubkey", stdin=private_key + "\n").strip()
 
 
 if __name__ == "__main__":

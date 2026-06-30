@@ -199,7 +199,7 @@ class TestWarmScripts(unittest.TestCase):
 			signature["cpu_flags_sha256"],
 			hostinfo.parse_cpu_signature(reordered)["cpu_flags_sha256"],
 		)
-		self.assertEqual(hostinfo.parse_firecracker_version("Firecracker v1.15.1\n"), "v1.15.1")
+		self.assertEqual(hostinfo.parse_firecracker_version("Firecracker v1.16.0\n"), "v1.16.0")
 
 
 class TestGuestWarmTooling(unittest.TestCase):
@@ -443,7 +443,7 @@ class TestWarmSnapshotAction(IntegrationTestCase):
 		self.assertEqual(snapshot.rootfs_path, f"/dev/atlas/atlas-snap-{snapshot_name}")
 		self.assertEqual(snapshot.memory_directory, f"/var/lib/atlas/snapshots/{snapshot_name}")
 		# The capture ran warm-snapshot-vm.py with the durable artifact targets.
-		self.assertEqual(mocked.call_args.kwargs["script"], "warm-snapshot-vm.py")
+		self.assertEqual(mocked.call_args.kwargs["script"], "warm-snapshot-vm")
 		variables = mocked.call_args.kwargs["variables"]
 		self.assertEqual(variables["VIRTUAL_MACHINE_NAME"], vm.name)
 		self.assertEqual(variables["SNAPSHOT_ROOTFS_PATH"], snapshot.rootfs_path)

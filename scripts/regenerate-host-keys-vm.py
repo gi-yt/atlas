@@ -41,7 +41,7 @@ def main() -> None:
 
 	# The rootfs is about to change under any pending memory snapshot; saved RAM
 	# referencing the old disk must never be restored over the new one.
-	run("sudo", "rm", "-rf", VirtualMachinePaths(inputs.virtual_machine_name).memory_snapshot_directory)
+	run("sudo rm -rf {}", VirtualMachinePaths(inputs.virtual_machine_name).memory_snapshot_directory)
 
 	# Activate (idempotent) before mounting — a Stopped VM's thin snapshot LV may
 	# be deactivated. The key comment mirrors the per-VM hostname (atlas-<uuid8>),

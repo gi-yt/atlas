@@ -72,8 +72,8 @@ def main() -> None:
 		_plain_stop(paths, f"snapshot failed: {error}")
 		return
 
-	run("sudo", "systemctl", "stop", paths.systemd_unit)
-	mem_bytes = int(run("sudo", "stat", "-c", "%s", paths.memory_snapshot_mem).strip())
+	run("sudo systemctl stop {}", paths.systemd_unit)
+	mem_bytes = int(run("sudo stat -c %s {}", paths.memory_snapshot_mem).strip())
 	SnapshotStopResult(memory_snapshot=True, memory_snapshot_bytes=mem_bytes).emit()
 	print(f"Stopped {inputs.virtual_machine_name} with a memory snapshot.")
 
@@ -83,19 +83,19 @@ def _preflight(paths: VirtualMachinePaths) -> str:
 	# A launcher generated before this feature always passes --config-file, so a
 	# marker would strand the next start (snapshot loaded over a booted guest is
 	# refused). Re-provisioning regenerates the launcher.
-	if not run_ok("sudo", "grep", "-q", "snapshot/READY", paths.jailer_launch):
+	if not run_ok("sudo grep -q snapshot/READY {}", paths.jailer_launch):
 		return "launcher predates memory snapshots; re-provision the VM to enable fast start"
 	if not os.path.exists(paths.api_socket):
 		return "API socket missing; is the VM running?"
 	# The memory file is RAM-sized. Drop the previous snapshot first (its space
 	# is reclaimed, and a stale marker must not survive a failure below), then
 	# require the worst case plus margin to be free.
-	run("sudo", "rm", "-rf", paths.memory_snapshot_directory)
+	run("sudo rm -rf {}", paths.memory_snapshot_directory)
 	mem_size_mib = int(
-		run("sudo", "jq", "-r", '."machine-config".mem_size_mib', paths.firecracker_config).strip()
+		run("sudo jq -r {} {}", '."machine-config".mem_size_mib', paths.firecracker_config).strip()
 	)
 	needed = mem_size_mib * 1024 * 1024 + FREE_SPACE_MARGIN_BYTES
-	available = int(run("df", "--output=avail", "-B1", ATLAS_ROOT).splitlines()[1].strip())
+	available = int(run("df --output=avail -B1 {}", ATLAS_ROOT).splitlines()[1].strip())
 	if available < needed:
 		return f"not enough free space for a {mem_size_mib} MiB memory file ({available} B available)"
 	return ""
@@ -105,7 +105,7 @@ def _create_snapshot(paths: VirtualMachinePaths, uid: int) -> None:
 	# The jailed Firecracker (per-VM uid) writes the snapshot pair, so the
 	# directory must exist inside the jail and be owned by that uid.
 	install_directory(paths.memory_snapshot_directory, mode="0700")
-	run("sudo", "chown", f"{uid}:{uid}", paths.memory_snapshot_directory)
+	run("sudo chown {} {}", f"{uid}:{uid}", paths.memory_snapshot_directory)
 	firecracker_api(paths.api_socket_directory, paths.api_socket_name, "PATCH", "/vm", '{"state": "Paused"}')
 	firecracker_api(
 		paths.api_socket_directory,
@@ -123,16 +123,16 @@ def _create_snapshot(paths: VirtualMachinePaths, uid: int) -> None:
 	# Belt and suspenders: the marker asserts a COMPLETE pair, so verify both
 	# files landed non-empty before writing it.
 	for snapshot_file in (paths.memory_snapshot_vmstate, paths.memory_snapshot_mem):
-		if not run_ok("sudo", "test", "-s", snapshot_file):
+		if not run_ok("sudo test -s {}", snapshot_file):
 			raise CommandError(["test", "-s", snapshot_file], 1, "snapshot file missing or empty")
-	run("sudo", "touch", paths.memory_snapshot_marker)
+	run("sudo touch {}", paths.memory_snapshot_marker)
 
 
 def _plain_stop(paths: VirtualMachinePaths, reason: str) -> None:
 	"""The default path: no marker may survive (a partial snapshot must never be
 	restored), then the ordinary unit stop."""
-	run("sudo", "rm", "-f", paths.memory_snapshot_marker)
-	run("sudo", "systemctl", "stop", paths.systemd_unit)
+	run("sudo rm -f {}", paths.memory_snapshot_marker)
+	run("sudo systemctl stop {}", paths.systemd_unit)
 	SnapshotStopResult(memory_snapshot=False, reason=reason).emit()
 	print(f"Stopped {paths.uuid} without a memory snapshot: {reason}")
 

@@ -139,7 +139,7 @@ class TestRecipeRegistry(IntegrationTestCase):
 			self.assertEqual(r.task_script, "bench-build")
 
 	def test_versioned_recipes_promote_to_series_image_name(self) -> None:
-		# The promote default name == the recipe name == the Central Image image_name.
+		# The promote default name == the recipe name (the series image name).
 		for name in ("bench-v15", "bench-v16", "bench-nightly"):
 			self.assertEqual(RECIPES[name].promote_image_name, name)
 
@@ -218,6 +218,10 @@ class TestRunBuild(IntegrationTestCase):
 		_ensure_test_server()
 		_ensure_test_image()
 		_purge()
+		# The proxy finalize recipe reads Atlas Settings.region (no per-VM region
+		# field anymore) to write the region + name the cert dir. Pin it so the
+		# finalize command carries "blr1" and atlas_region() doesn't throw.
+		frappe.db.set_single_value("Atlas Settings", "region", "blr1")
 
 	def test_uploads_tree_then_runs_detached_and_records_task(self) -> None:
 		vm = _new_vm()

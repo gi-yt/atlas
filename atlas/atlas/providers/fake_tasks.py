@@ -165,10 +165,14 @@ def _fake_stdout(script: str, variables: dict) -> str:
 
 def _bootstrap_result(_variables: dict) -> dict:
 	return {
-		"firecracker_version": "v1.15.1",
-		"jailer_version": "v1.15.1",
+		"firecracker_version": "v1.16.0",
+		"jailer_version": "v1.16.0",
 		"kernel_version": "6.1.0-fake",
 		"architecture": "x86_64",
+		# The Atlas venv python the real bootstrap resolves (display-only — no
+		# Server field backs it). Mirror the real BootstrapResult shape so a fake
+		# host's result line is byte-shaped like a real one.
+		"python_version": "Python 3.14.3",
 	}
 
 
@@ -192,7 +196,7 @@ def _warm_snapshot_result(variables: dict) -> dict:
 				"flags": "fake",
 				"microcode": "0x0",
 				"kernel": "6.1.0-fake",
-				"firecracker": "v1.15.1",
+				"firecracker": "v1.16.0",
 			}
 		),
 	}
@@ -208,8 +212,8 @@ def _fake_disk_bytes(variables: dict) -> int:
 
 
 _RESULT_BUILDERS = {
-	"bootstrap-server.py": _bootstrap_result,
-	"snapshot-vm.py": _snapshot_result,
-	"snapshot-stop-vm.py": _snapshot_stop_result,
-	"warm-snapshot-vm.py": _warm_snapshot_result,
+	"bootstrap-server": _bootstrap_result,
+	"snapshot-vm": _snapshot_result,
+	"snapshot-stop-vm": _snapshot_stop_result,
+	"warm-snapshot-vm": _warm_snapshot_result,
 }

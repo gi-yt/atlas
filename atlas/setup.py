@@ -30,16 +30,16 @@ step, then layers the provisioning on top.
             "digitalocean": {
                 "api_token": "dop_v1_…",
                 "region": "blr1",  # DO's OWN API region (not Atlas Settings.region)
-                "default_size": "s-2vcpu-4gb-intel",
-                "default_image": "ubuntu-24-04-x64",
+                "default_size": "s-2vcpu-4gb-intel",  # optional; else discover() hint
+                "default_image": "ubuntu-24-04-x64",  # optional; else discover() hint
                 "ssh_key_id": "12345678",
             },
             "scaleway": {
                 "secret_key": "…",
                 "project_id": "…",
                 "zone": "fr-par-2",  # Scaleway's OWN zone
-                "default_size": "EM-A610R-NVME",
-                "default_image": "Ubuntu_24.04",
+                "default_size": "EM-A610R-NVME",  # optional; else discover() hint
+                "default_image": "Ubuntu_24.04",  # optional; else discover() hint
                 "organization_id": "…",  # optional
                 "billing": "hourly",  # optional
                 "ssh_key_id": "…",  # optional
@@ -96,8 +96,8 @@ def run(config: dict) -> dict:
 		frappe.get_single("DigitalOcean Settings").setup(
 			api_token=do["api_token"],
 			region=do["region"],
-			default_size=do["default_size"],
-			default_image=do["default_image"],
+			default_size=do.get("default_size"),
+			default_image=do.get("default_image"),
 			ssh_key_id=do.get("ssh_key_id") or None,
 		)
 	elif provider_type == "Scaleway":
@@ -106,12 +106,14 @@ def run(config: dict) -> dict:
 			secret_key=scw["secret_key"],
 			project_id=scw["project_id"],
 			zone=scw["zone"],
-			default_size=scw["default_size"],
-			default_image=scw["default_image"],
+			default_size=scw.get("default_size"),
+			default_image=scw.get("default_image"),
 			organization_id=scw.get("organization_id"),
 			billing=scw.get("billing", "hourly"),
 			ssh_key_id=scw.get("ssh_key_id"),
 		)
+	elif provider_type == "Fake":
+		_seed_fake_catalog()
 	# Self-Managed has no vendor Single — its networking rides the provision payload.
 
 	summary = {"provider_type": provider_type}
@@ -212,8 +214,9 @@ def from_site_config() -> dict:
 		provider["digitalocean"] = {
 			"api_token": require_config("atlas_do_token"),
 			"region": require_config("atlas_do_region"),
-			"default_size": require_config("atlas_do_default_size"),
-			"default_image": require_config("atlas_do_default_image"),
+			# Optional: omit to take the provider's discover() default hint.
+			"default_size": frappe.conf.get("atlas_do_default_size"),
+			"default_image": frappe.conf.get("atlas_do_default_image"),
 			"ssh_key_id": frappe.conf.get("atlas_ssh_key_id"),
 		}
 	elif provider_type == "Scaleway":
@@ -221,8 +224,9 @@ def from_site_config() -> dict:
 			"secret_key": require_config("atlas_scw_secret_key"),
 			"project_id": require_config("atlas_scw_project_id"),
 			"zone": require_config("atlas_scw_zone"),
-			"default_size": require_config("atlas_scw_default_size"),
-			"default_image": require_config("atlas_scw_default_image"),
+			# Optional: omit to take the provider's discover() default hint.
+			"default_size": frappe.conf.get("atlas_scw_default_size"),
+			"default_image": frappe.conf.get("atlas_scw_default_image"),
 			"organization_id": frappe.conf.get("atlas_scw_organization_id"),
 			"billing": frappe.conf.get("atlas_scw_billing") or "hourly",
 			"ssh_key_id": frappe.conf.get("atlas_ssh_key_id"),
@@ -291,8 +295,6 @@ def _stage_provider(args: dict) -> None:
 		frappe.get_single("DigitalOcean Settings").setup(
 			api_token=args.get("do_api_token"),
 			region=args.get("do_region"),
-			default_size=args.get("do_default_size"),
-			default_image=args.get("do_default_image"),
 			ssh_key_id=args.get("do_ssh_key_id") or None,
 		)
 	elif provider_type == "Scaleway":
@@ -300,12 +302,24 @@ def _stage_provider(args: dict) -> None:
 			secret_key=args.get("scw_secret_key"),
 			project_id=args.get("scw_project_id"),
 			zone=args.get("scw_zone"),
-			default_size=args.get("scw_default_size"),
-			default_image=args.get("scw_default_image"),
 			organization_id=args.get("scw_organization_id") or None,
 			billing=args.get("scw_billing") or "hourly",
 			ssh_key_id=args.get("scw_ssh_key_id") or None,
 		)
+	elif provider_type == "Fake":
+		_seed_fake_catalog()
+
+
+def _seed_fake_catalog() -> None:
+	"""Seed the Fake provider's synthetic Provider Size / Provider Image catalog.
+
+	Fake has no vendor Single, so neither `run()` nor the wizard's `_stage_provider`
+	writes one — but the Provision dialog still needs catalog rows. Seed them at
+	setup time (the desk Refresh Catalog button does the same later)."""
+	from atlas.atlas import provisioning
+	from atlas.atlas.providers.fake import FakeProvider
+
+	provisioning.upsert_catalog("Fake", FakeProvider().discover())
 
 
 LETS_ENCRYPT_PRODUCTION = "https://acme-v02.api.letsencrypt.org/directory"
@@ -337,8 +351,18 @@ def _resolve_acme_url(args: dict) -> str | None:
 
 
 def on_complete(args: dict | None = None) -> None:
-	"""`setup_wizard_complete` hook — runs after all stages commit. No-op today (the
-	Singles are configured; the operator drives provisioning from Atlas Settings)."""
+	"""`setup_wizard_complete` hook — runs after all stages commit, so Atlas Settings
+	is already configured. The only post-setup action: if the operator picked the Fake
+	provider and ticked "Generate demo data after setup", enqueue the demo fleet
+	(`atlas.atlas.demo.run`) so the desk is populated immediately. Otherwise a no-op —
+	provisioning is operator-driven from Atlas Settings."""
+	args = args or {}
+	if (
+		args.get("provider_type") == "Fake"
+		and _truthy(args.get("fake_generate_demo_data"))
+		and frappe.conf.developer_mode
+	):
+		frappe.enqueue("atlas.atlas.demo.run", queue="long", timeout=1800)
 
 
 def _truthy(value: object) -> bool:
@@ -353,14 +377,25 @@ def _truthy(value: object) -> bool:
 def wizard_discover(provider_type: str, credentials: dict | str | None = None) -> dict:
 	"""Probe the vendor with the credentials the operator JUST TYPED (not yet saved)
 	and return its live catalog, so the wizard can turn free-text slug boxes into
-	pick-lists and show a connection result — BEFORE Complete Setup writes anything.
+	pick-lists and show a connection result.
 
 	Talks to the vendor *client* directly with the ad-hoc creds rather than the
-	Provider (which reads the saved Singles). Returns a plain dict:
+	Provider (which reads the saved Singles). On a SUCCESSFUL probe it also upserts
+	the catalog into Provider Size / Provider Image (via `_persist_catalog`, the same
+	`upsert_catalog` the desk Refresh Catalog button drives) — so the rows exist the
+	moment Test Connection goes green, not only after a later Refresh. The vendor
+	Singles are still untouched until Complete Setup.
+
+	If `credentials.ssh_private_key_path` is given (the controller key from the Atlas
+	slide), the probe derives its public half and **find-or-registers it with the
+	vendor**, returning the resolved key id as `matched_ssh_key_id` — so after a green
+	Test Connection the wizard always has a concrete vendor SSH key, whether it already
+	existed or was just uploaded. Returns a plain dict:
 
 	    {"ok": bool, "account_label": str|None, "error": str|None,
 	     "sizes":  [{"value","label"}], "images": [{"value","label"}],
-	     "ssh_keys": [{"value","label"}], "projects": [{"value","label"}]}
+	     "ssh_keys": [{"value","label"}], "projects": [{"value","label"}],
+	     "matched_ssh_key_id": str|None}
 
 	`sizes`/`images` use the vendor-native slug as `value` (what the slug fields
 	store). Never raises — a bad credential comes back as `{"ok": False, "error": …}`
@@ -384,11 +419,43 @@ def wizard_discover(provider_type: str, credentials: dict | str | None = None) -
 		"images": [],
 		"ssh_keys": [],
 		"projects": [],
+		"matched_ssh_key_id": None,
 	}
+
+
+def _controller_public_key(credentials: dict) -> str | None:
+	"""The controller's OpenSSH public key, derived from the `ssh_private_key_path`
+	the operator gave on the Atlas slide (passed through `credentials`). None when no
+	path was given or the key can't be read — the probe then just lists vendor keys
+	without auto-resolving one (operator picks/uploads later, as before)."""
+	import os
+
+	from atlas.atlas.doctype.atlas_settings.atlas_settings import AtlasSettings
+
+	path = (credentials.get("ssh_private_key_path") or "").strip()
+	if not path:
+		return None
+	return AtlasSettings._derive_public_key(os.path.expanduser(path))
+
+
+def _persist_catalog(provider_type: str, sizes, images) -> None:
+	"""Upsert the discovered catalog into Provider Size / Provider Image at Test
+	Connection time, reusing the same `upsert_catalog` the desk Refresh Catalog
+	button drives. Best-effort: a write hiccup must NOT turn a successful probe into
+	a red toast, so swallow + log rather than propagate (this whole path never
+	tracebacks at the operator)."""
+	from atlas.atlas import provisioning
+	from atlas.atlas.providers.base import Capabilities
+
+	try:
+		provisioning.upsert_catalog(provider_type, Capabilities(sizes=tuple(sizes), images=tuple(images)))
+	except Exception:
+		frappe.log_error(title=f"wizard_discover catalog upsert ({provider_type})")
 
 
 def _discover_digitalocean(credentials: dict) -> dict:
 	from atlas.atlas.digitalocean import DigitalOceanClient
+	from atlas.atlas.providers.base import ImageInfo, SizeInfo
 	from atlas.atlas.providers.digitalocean import (
 		DIGITALOCEAN_MONTHLY_COST_USD,
 		KNOWN_DIGITALOCEAN_IMAGES,
@@ -408,6 +475,7 @@ def _discover_digitalocean(credentials: dict) -> dict:
 		"images": [{"value": slug, "label": slug} for slug in KNOWN_DIGITALOCEAN_IMAGES],
 		"ssh_keys": [],
 		"projects": [],
+		"matched_ssh_key_id": None,
 	}
 	token = credentials.get("api_token")
 	if not token:
@@ -420,10 +488,25 @@ def _discover_digitalocean(credentials: dict) -> dict:
 			{"value": str(key["id"]), "label": key.get("name") or str(key["id"])}
 			for key in client.list_ssh_keys()
 		]
+		# Resolve the controller key to a concrete vendor key: ensure_ssh_key matches
+		# the existing one by identity or uploads it, so the wizard never leaves it blank.
+		public_key = _controller_public_key(credentials)
+		if public_key:
+			result["matched_ssh_key_id"] = client.ensure_ssh_key("atlas-controller", public_key)
 	except Exception as exception:  # any failure becomes a red toast, never a traceback
 		result["error"] = str(exception)
 		return result
 	result["ok"] = True
+	# Credentials check out — persist the catalog now (the lists above are static DO
+	# constants, valid regardless of the token; the auth gate just earned the write).
+	_persist_catalog(
+		"DigitalOcean",
+		[
+			SizeInfo(slug=slug, monthly_cost_usd=DIGITALOCEAN_MONTHLY_COST_USD.get(slug))
+			for slug in KNOWN_DIGITALOCEAN_SIZES
+		],
+		[ImageInfo(slug=slug) for slug in KNOWN_DIGITALOCEAN_IMAGES],
+	)
 	rate = (
 		f" · {auth['rate_remaining']}/{auth['rate_limit']} API calls left"
 		if auth.get("rate_remaining") is not None
@@ -445,6 +528,7 @@ def _discover_scaleway(credentials: dict) -> dict:
 		"images": [],
 		"ssh_keys": [],
 		"projects": [],
+		"matched_ssh_key_id": None,
 	}
 	secret_key = credentials.get("secret_key")
 	zone = credentials.get("zone")
@@ -461,24 +545,42 @@ def _discover_scaleway(credentials: dict) -> dict:
 			{"value": project["id"], "label": project.get("name") or project["id"]}
 			for project in client.list_projects(organization_id)
 		]
-		result["sizes"] = [
-			_size_label_dict(_size_from_offer(offer))
-			for offer in client.list_offers(subscription_period=billing)
-		]
-		result["images"] = [
-			{"value": img.slug, "label": img.slug} for img in map(_image_from_os, client.list_os())
-		]
+		sizes = [_size_from_offer(offer) for offer in client.list_offers(subscription_period=billing)]
+		images = [_image_from_os(os_image) for os_image in client.list_os()]
+		result["sizes"] = [_size_label_dict(size) for size in sizes]
+		result["images"] = [{"value": img.slug, "label": img.slug} for img in images]
+		# SSH keys are project-scoped on Scaleway — only resolvable once a project is picked.
 		if project_id:
-			result["ssh_keys"] = [
-				{"value": key["id"], "label": key.get("name") or key["id"]}
-				for key in client.list_ssh_keys(project_id)
-			]
+			keys = client.list_ssh_keys(project_id)
+			result["ssh_keys"] = [{"value": key["id"], "label": key.get("name") or key["id"]} for key in keys]
+			# Resolve the controller key to a concrete IAM key: reuse one matched by
+			# identity, else register it — so the wizard never leaves it blank.
+			public_key = _controller_public_key(credentials)
+			if public_key:
+				result["matched_ssh_key_id"] = _scw_ensure_ssh_key(client, keys, public_key, project_id)
 	except Exception as exception:  # any failure becomes a red toast, never a traceback
 		result["error"] = str(exception)
 		return result
 	result["ok"] = True
+	# Live catalog verified — persist it (mirrors the desk Refresh Catalog button).
+	_persist_catalog("Scaleway", sizes, images)
 	result["account_label"] = auth.get("account_label") or _("Scaleway")
 	return result
+
+
+def _scw_ensure_ssh_key(client, keys: list[dict], public_key: str, project_id: str) -> str:
+	"""Return the Scaleway IAM key id for `public_key`, registering it if absent.
+
+	Matched on the `<type> <base64>` identity (the same primitive the provider's
+	`_find_ssh_key_id` uses) against the project's already-listed `keys`, so a differing
+	comment doesn't cause a duplicate upload."""
+	from atlas.atlas.providers.scaleway import _ssh_key_identity
+
+	wanted = _ssh_key_identity(public_key)
+	for key in keys:
+		if _ssh_key_identity(key.get("public_key") or "") == wanted:
+			return key["id"]
+	return client.register_ssh_key("atlas-controller", public_key, project_id)["id"]
 
 
 def _size_label(slug: str, monthly_cost_usd: int | None) -> str:

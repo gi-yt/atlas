@@ -54,7 +54,7 @@ def main() -> None:
 
 	# Proxy-NDP entry on the uplink.
 	if virtual_machine_ipv6 and uplink:
-		run("sudo", "ip", "-6", "neigh", "del", "proxy", virtual_machine_ipv6, "dev", uplink, check=False)
+		run("sudo ip -6 neigh del proxy {} dev {}", virtual_machine_ipv6, uplink, check=False)
 
 	# Host-side routes into the namespace (v6 /128 and the guest's v4 /32). The
 	# tap, its IPv4 /30 host address, and the namespace-side veth all live inside
@@ -64,29 +64,19 @@ def main() -> None:
 	# for the next VM, exactly like the v6 forward chain scaffold.
 	if host_veth:
 		if virtual_machine_ipv6:
-			run(
-				"sudo",
-				"ip",
-				"-6",
-				"route",
-				"del",
-				f"{virtual_machine_ipv6}/128",
-				"dev",
-				host_veth,
-				check=False,
-			)
+			run("sudo ip -6 route del {} dev {}", f"{virtual_machine_ipv6}/128", host_veth, check=False)
 		if ipv4_guest_cidr:
 			# ${IPV4_GUEST_CIDR%/*}/32 — strip the original prefix, route the /32.
 			guest_v4 = ipv4_guest_cidr.split("/", 1)[0]
-			run("sudo", "ip", "-4", "route", "del", f"{guest_v4}/32", "dev", host_veth, check=False)
+			run("sudo ip -4 route del {} dev {}", f"{guest_v4}/32", host_veth, check=False)
 
 	# The namespace owns the tap and the namespace-side veth; deleting it takes both.
 	if atlas_netns:
-		run("sudo", "ip", "netns", "del", atlas_netns, check=False)
+		run("sudo ip netns del {}", atlas_netns, check=False)
 
 	# The host-side veth end (its peer went with the namespace, but delete defensively).
 	if host_veth:
-		run("sudo", "ip", "link", "del", host_veth, check=False)
+		run("sudo ip link del {}", host_veth, check=False)
 
 	# Delete the two nft rules by handle. Look them up by VM IPv6.
 	if virtual_machine_ipv6:
@@ -94,13 +84,13 @@ def main() -> None:
 		#     | awk -v ip="$VIRTUAL_MACHINE_IPV6" '$0 ~ ip {print $NF}')"
 		# List the chain (tolerate absence), then in Python find every rule line
 		# mentioning this VM's IPv6 and take its trailing handle number.
-		chain = run("sudo", "nft", "-a", "list", "chain", "inet", "atlas", "forward", check=False)
+		chain = run("sudo nft -a list chain inet atlas forward", check=False)
 		handles = []
 		for line in chain.splitlines():
 			if virtual_machine_ipv6 in line:
 				handles.append(line.split()[-1])
 		for handle in handles:
-			run("sudo", "nft", "delete", "rule", "inet", "atlas", "forward", "handle", handle, check=False)
+			run("sudo nft delete rule inet atlas forward handle {}", handle, check=False)
 
 		# The public-ingress firewall block lives in its own higher-priority chain
 		# (spec/20-firewall.md), in the host root netns — the namespace delete above

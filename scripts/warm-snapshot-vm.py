@@ -83,7 +83,7 @@ def main() -> None:
 	signature = host_signature()
 	_stage_durable(paths, inputs.memory_directory, signature)
 
-	mem_bytes = int(run("sudo", "stat", "-c", "%s", f"{inputs.memory_directory}/mem.bin").strip())
+	mem_bytes = int(run("sudo stat -c %s {}", f"{inputs.memory_directory}/mem.bin").strip())
 	WarmSnapshotResult(
 		size_bytes=snapshot.size_bytes,
 		memory_bytes=mem_bytes,
@@ -100,12 +100,12 @@ def _preflight(inputs: "WarmSnapshotInputs", paths: VirtualMachinePaths, pool: T
 	if pool.usage.too_full_to_snapshot:
 		sys.exit(f"thin pool {pool.pool_name} too full for a safe snapshot ({pool.usage})")
 	# The memory file is RAM-sized; require the worst case plus margin free.
-	run("sudo", "rm", "-rf", paths.memory_snapshot_directory)
+	run("sudo rm -rf {}", paths.memory_snapshot_directory)
 	mem_size_mib = int(
-		run("sudo", "jq", "-r", '."machine-config".mem_size_mib', paths.firecracker_config).strip()
+		run("sudo jq -r {} {}", '."machine-config".mem_size_mib', paths.firecracker_config).strip()
 	)
 	needed = mem_size_mib * 1024 * 1024 + FREE_SPACE_MARGIN_BYTES
-	available = int(run("df", "--output=avail", "-B1", ATLAS_ROOT).splitlines()[1].strip())
+	available = int(run("df --output=avail -B1 {}", ATLAS_ROOT).splitlines()[1].strip())
 	if available < needed:
 		sys.exit(f"not enough free space for a {mem_size_mib} MiB memory file ({available} B available)")
 
@@ -114,7 +114,7 @@ def _create_memory_pair(paths: VirtualMachinePaths, uid: int) -> None:
 	"""PUT /snapshot/create into the jail (the only place the jailed Firecracker
 	can write), then verify both files landed non-empty."""
 	install_directory(paths.memory_snapshot_directory, mode="0700")
-	run("sudo", "chown", f"{uid}:{uid}", paths.memory_snapshot_directory)
+	run("sudo chown {} {}", f"{uid}:{uid}", paths.memory_snapshot_directory)
 	firecracker_api(
 		paths.api_socket_directory,
 		paths.api_socket_name,
@@ -129,7 +129,7 @@ def _create_memory_pair(paths: VirtualMachinePaths, uid: int) -> None:
 		),
 	)
 	for snapshot_file in (paths.memory_snapshot_vmstate, paths.memory_snapshot_mem):
-		if not run_ok("sudo", "test", "-s", snapshot_file):
+		if not run_ok("sudo test -s {}", snapshot_file):
 			raise CommandError(["test", "-s", snapshot_file], 1, "snapshot file missing or empty")
 
 
@@ -142,11 +142,11 @@ def _stage_durable(paths: VirtualMachinePaths, memory_directory: str, signature:
 	written, so the golden VM can never resume from it."""
 	install_directory(memory_directory, mode="0755")
 	for name in ("vmstate.bin", "mem.bin"):
-		run("sudo", "mv", f"{paths.memory_snapshot_directory}/{name}", f"{memory_directory}/{name}")
-		run("sudo", "chown", "root:root", f"{memory_directory}/{name}")
-		run("sudo", "chmod", "0644", f"{memory_directory}/{name}")
+		run("sudo mv {} {}", f"{paths.memory_snapshot_directory}/{name}", f"{memory_directory}/{name}")
+		run("sudo chown root:root {}", f"{memory_directory}/{name}")
+		run("sudo chmod 0644 {}", f"{memory_directory}/{name}")
 	install_file(json.dumps(signature, indent=1) + "\n", f"{memory_directory}/host-signature.json")
-	run("sudo", "rm", "-rf", paths.memory_snapshot_directory)
+	run("sudo rm -rf {}", paths.memory_snapshot_directory)
 
 
 if __name__ == "__main__":

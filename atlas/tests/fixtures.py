@@ -98,13 +98,10 @@ def set_atlas_settings(
 def set_digitalocean_settings(
 	api_token: str = "dop_v1_fake",
 	region: str = "blr1",
-	default_size: str = DEFAULT_DIGITALOCEAN_SIZE,
-	default_image: str = DEFAULT_DIGITALOCEAN_IMAGE,
 ) -> None:
-	"""Write DigitalOcean Settings Single."""
+	"""Write DigitalOcean Settings Single. The default size/image are no longer
+	fields here — `seed_catalogs()` marks the default catalog rows instead."""
 	frappe.db.set_single_value("DigitalOcean Settings", "region", region, update_modified=False)
-	frappe.db.set_single_value("DigitalOcean Settings", "default_size", default_size, update_modified=False)
-	frappe.db.set_single_value("DigitalOcean Settings", "default_image", default_image, update_modified=False)
 	# api_token is a Password field; route through the encryption helper.
 	frappe.utils.password.set_encrypted_password(
 		"DigitalOcean Settings", "DigitalOcean Settings", api_token, "api_token"
@@ -146,6 +143,15 @@ def seed_catalogs() -> None:
 				"provider_metadata": json.dumps({}),
 			}
 		).insert(ignore_permissions=True)
+
+	# Mark the canonical default so provisioning's catalog fallback resolves (the
+	# desk modal and provision_server both read the is_default row). Idempotent.
+	from atlas.atlas.setup_catalog import set_default
+
+	if not frappe.db.get_value("Provider Size", {"provider_type": "DigitalOcean", "is_default": 1}, "name"):
+		set_default("Provider Size", "DigitalOcean", DEFAULT_DIGITALOCEAN_SIZE.split("/", 1)[1])
+	if not frappe.db.get_value("Provider Image", {"provider_type": "DigitalOcean", "is_default": 1}, "name"):
+		set_default("Provider Image", "DigitalOcean", DEFAULT_DIGITALOCEAN_IMAGE.split("/", 1)[1])
 
 
 def make_provider(name: str = "test-provider", **overrides: Any) -> _ProviderStub:

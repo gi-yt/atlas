@@ -158,7 +158,7 @@ class VirtualMachine(Document):
 			frappe.throw(f"Cannot provision from {self.status}")
 		task = run_task(
 			server=self.server,
-			script="provision-vm.py",
+			script="provision-vm",
 			variables=self._provision_variables(),
 			virtual_machine=self.name,
 			timeout_seconds=30,
@@ -180,7 +180,7 @@ class VirtualMachine(Document):
 			frappe.throw(f"Cannot start from {self.status}")
 		task = run_task(
 			server=self.server,
-			script="start-vm.py",
+			script="start-vm",
 			variables={"VIRTUAL_MACHINE_NAME": self.name},
 			virtual_machine=self.name,
 			timeout_seconds=30,
@@ -216,7 +216,7 @@ class VirtualMachine(Document):
 			# 30s a plain systemctl stop needs.
 			task = run_task(
 				server=self.server,
-				script="snapshot-stop-vm.py",
+				script="snapshot-stop-vm",
 				variables={
 					"VIRTUAL_MACHINE_NAME": self.name,
 					"ATLAS_FC_UID": str(derive_uid(self.name)),
@@ -228,7 +228,7 @@ class VirtualMachine(Document):
 		else:
 			task = run_task(
 				server=self.server,
-				script="stop-vm.py",
+				script="stop-vm",
 				variables={"VIRTUAL_MACHINE_NAME": self.name},
 				virtual_machine=self.name,
 				timeout_seconds=30,
@@ -266,7 +266,7 @@ class VirtualMachine(Document):
 			frappe.throw(f"Cannot pause from {self.status}")
 		task = run_task(
 			server=self.server,
-			script="pause-vm.py",
+			script="pause-vm",
 			variables={"VIRTUAL_MACHINE_NAME": self.name},
 			virtual_machine=self.name,
 			timeout_seconds=30,
@@ -282,7 +282,7 @@ class VirtualMachine(Document):
 			frappe.throw(f"Cannot resume from {self.status}")
 		task = run_task(
 			server=self.server,
-			script="resume-vm.py",
+			script="resume-vm",
 			variables={"VIRTUAL_MACHINE_NAME": self.name},
 			virtual_machine=self.name,
 			timeout_seconds=30,
@@ -367,7 +367,7 @@ class VirtualMachine(Document):
 			variables["DATA_SNAPSHOT_ROOTFS_PATH"] = data_rootfs_path
 		task = run_task(
 			server=self.server,
-			script="snapshot-vm.py",
+			script="snapshot-vm",
 			variables=variables,
 			virtual_machine=self.name,
 			timeout_seconds=300,
@@ -453,7 +453,7 @@ class VirtualMachine(Document):
 		memory_directory = f"/var/lib/atlas/snapshots/{snapshot.name}"
 		task = run_task(
 			server=self.server,
-			script="warm-snapshot-vm.py",
+			script="warm-snapshot-vm",
 			variables={
 				"VIRTUAL_MACHINE_NAME": self.name,
 				"ATLAS_FC_UID": str(derive_uid(self.name)),
@@ -493,7 +493,7 @@ class VirtualMachine(Document):
 		variables = self._rebuild_variables(source_type, source)
 		task = run_task(
 			server=self.server,
-			script="rebuild-vm.py",
+			script="rebuild-vm",
 			variables=variables,
 			virtual_machine=self.name,
 			timeout_seconds=300,
@@ -618,7 +618,7 @@ class VirtualMachine(Document):
 			variables["DATA_DISK_FORMAT"] = "1" if self.data_disk_format_and_mount else "0"
 		task = run_task(
 			server=self.server,
-			script="resize-vm.py",
+			script="resize-vm",
 			variables=variables,
 			virtual_machine=self.name,
 			timeout_seconds=120,
@@ -663,7 +663,7 @@ class VirtualMachine(Document):
 			frappe.throw(f"Stop the VM before regenerating host keys (status is {self.status})")
 		task = run_task(
 			server=self.server,
-			script="regenerate-host-keys-vm.py",
+			script="regenerate-host-keys-vm",
 			variables={"VIRTUAL_MACHINE_NAME": self.name},
 			virtual_machine=self.name,
 			timeout_seconds=60,
@@ -681,7 +681,7 @@ class VirtualMachine(Document):
 			frappe.throw(_("Disable termination protection before terminating this VM"))
 		task = run_task(
 			server=self.server,
-			script="terminate-vm.py",
+			script="terminate-vm",
 			variables={"VIRTUAL_MACHINE_NAME": self.name},
 			virtual_machine=self.name,
 			timeout_seconds=60,
@@ -691,6 +691,7 @@ class VirtualMachine(Document):
 		self._detach_reserved_ip()
 		self._revoke_tunnels()
 		self._delete_subdomains()
+		self._delete_custom_domains()
 		self._delete_snapshots()
 		return task.name
 
@@ -733,6 +734,17 @@ class VirtualMachine(Document):
 		outlives its VM's address, so the case a sweeper would catch is closed here."""
 		for name in frappe.get_all("Subdomain", filters={"virtual_machine": self.name}, pluck="name"):
 			frappe.delete_doc("Subdomain", name, ignore_permissions=True)
+
+	def _delete_custom_domains(self) -> None:
+		"""Drop every Custom Domain that routes to this VM, so terminating it stops routing
+		(each row's on_trash deconverges the regional proxy fleet's custom-domain map). The
+		full-FQDN sibling of `_delete_subdomains` (spec/18 Phase 2): a custom domain is the
+		LINKER (its `virtual_machine` points AT this VM), so deletion is unobstructed by the
+		link-integrity guard. Idempotent: a VM with no Custom Domains is a no-op. Like the
+		Subdomain teardown, this is part of the SAME teardown that releases the VM's /128, so
+		a custom-domain route never outlives its VM's address (Component F)."""
+		for name in frappe.get_all("Custom Domain", filters={"virtual_machine": self.name}, pluck="name"):
+			frappe.delete_doc("Custom Domain", name, ignore_permissions=True)
 
 	def _delete_snapshots(self) -> None:
 		"""Drop this VM's snapshot rows after terminate. Each row's on_trash

@@ -93,7 +93,7 @@ def main() -> None:
 
 	# The disk is about to change under any pending memory snapshot; saved RAM
 	# referencing the old disk must never be restored over the new one.
-	run("sudo", "rm", "-rf", paths.memory_snapshot_directory)
+	run("sudo rm -rf {}", paths.memory_snapshot_directory)
 
 	# Replace the existing disk: drop the old VM LV, then recreate it as a fresh
 	# CoW snapshot of the origin. prepare_lv no-ops when the LV exists, so the
