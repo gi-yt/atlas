@@ -71,9 +71,13 @@ class VirtualMachine(Document):
 		data_disk_gigabytes: DF.Int
 		data_disk_mount_point: DF.Data | None
 		disk_gigabytes: DF.Int
+		egress_nat44: DF.Check
+		garage_configured: DF.Check
+		garage_type: DF.Literal["gateway", "data"]
 		has_memory_snapshot: DF.Check
 		image: DF.Link
 		ipv6_address: DF.Data | None
+		is_garage: DF.Check
 		is_gateway: DF.Check
 		is_proxy: DF.Check
 		is_sshpiper: DF.Check
@@ -82,13 +86,17 @@ class VirtualMachine(Document):
 		mac_address: DF.Data | None
 		memory_megabytes: DF.Int
 		memory_snapshot_on_stop: DF.Check
-		public_ipv4: DF.Data | None
-		server: DF.Link
+		peer_id: DF.Data | None
 		pilot_credential_id: DF.Data | None
+		private_address: DF.Data | None
+		public_ipv4: DF.Data | None
+		public_networking: DF.Check
+		routing_subdomains: DF.SmallText | None
+		server: DF.Link
 		size_preset: DF.Literal["Custom", "Shared 1x", "Shared 2x", "Shared 4x", "Shared 8x", "Dedicated 1x"]
+		ssh_public_key: DF.LongText
 		sshpiper_api_key: DF.Password | None
 		sshpiper_configured: DF.Check
-		ssh_public_key: DF.LongText
 		status: DF.Literal["Pending", "Running", "Paused", "Stopped", "Failed", "Terminated"]
 		stop_protection: DF.Check
 		tap_device: DF.Data | None
@@ -274,6 +282,13 @@ class VirtualMachine(Document):
 		from atlas.atlas.sshpiper import configure_gateway
 
 		return configure_gateway(self.name)
+
+	@frappe.whitelist()
+	def configure_garage(self) -> str:
+		"""Inject this ingress VM's garage credentials and start garage."""
+		from atlas.atlas.garage import configure_garage
+
+		return configure_garage(self.name)
 
 	@frappe.whitelist()
 	def provision(self) -> str:

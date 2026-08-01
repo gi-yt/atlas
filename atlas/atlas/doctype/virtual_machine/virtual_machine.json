@@ -57,6 +57,12 @@
   "is_sshpiper",
   "sshpiper_api_key",
   "sshpiper_configured",
+  "column_break_garage",
+  "section_break_garage",
+  "is_garage",
+  "garage_type",
+  "garage_configured",
+  "peer_id",
   "section_break_activity",
   "last_started",
   "column_break_activity",
@@ -362,7 +368,7 @@
    "read_only": 1
   },
   {
-   "description": "Set after a keep-address migration: the source Server whose host still receives this VM's /128 and forwards it here over a per-VM tunnel (spec/19 §2.9). While set, the VM depends on that host being up; the operator can collapse the forward (falling back to a new address) from the VM form. Empty for a VM that has never been migrated keep-address, or after the forward is collapsed.",
+   "description": "Set after a keep-address migration: the source Server whose host still receives this VM's /128 and forwards it here over a per-VM tunnel (spec/19 \u00a72.9). While set, the VM depends on that host being up; the operator can collapse the forward (falling back to a new address) from the VM form. Empty for a VM that has never been migrated keep-address, or after the forward is collapsed.",
    "fieldname": "traffic_forwarded_from",
    "fieldtype": "Link",
    "label": "Traffic Forwarded From",
@@ -461,15 +467,52 @@
    "read_only": 1
   },
   {
+   "description": "Central-minted per-pilot credential id, copied from the owning Site. Echoed to Central on vm.* events so Central links/revokes the credential.",
    "fieldname": "pilot_credential_id",
    "fieldtype": "Data",
    "label": "Pilot Credential ID",
-   "read_only": 1,
-   "description": "Central-minted per-pilot credential id, copied from the owning Site. Echoed to Central on vm.* events so Central links/revokes the credential."
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_garage",
+   "fieldtype": "Section Break",
+   "label": "Garage"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_garage",
+   "fieldtype": "Check",
+   "label": "Is Garage"
+  },
+  {
+   "fieldname": "garage_type",
+   "fieldtype": "Select",
+   "label": "Garage Type",
+   "options": "gateway\ndata",
+   "set_only_once": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "garage_configured",
+   "fieldtype": "Check",
+   "label": "Garage Configured",
+   "read_only": 1
+  },
+  {
+   "fieldname": "peer_id",
+   "fieldtype": "Data",
+   "label": "Peer ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_garage",
+   "fieldtype": "Column Break",
+   "label": "Garage"
   }
  ],
  "links": [],
- "modified": "2026-07-05 13:09:02.108483",
+ "modified": "2026-08-01 23:39:16.982837",
  "modified_by": "Administrator",
  "module": "Atlas",
  "name": "Virtual Machine",
