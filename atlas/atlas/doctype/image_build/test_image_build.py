@@ -64,6 +64,10 @@ class TestImageBuildInsert(IntegrationTestCase):
 		build = _new_build("sshpiper")
 		self.assertEqual(build.title, "SSHPiper ingress image")
 
+	def test_garage_recipe_inserts(self) -> None:
+		build = _new_build("garage")
+		self.assertEqual(build.title, "garage ingress image")
+
 	def test_after_insert_enqueues_run(self) -> None:
 		with patch.object(image_build_module.frappe, "enqueue") as enqueue:
 			frappe.get_doc(
@@ -266,6 +270,19 @@ class TestImageBuildRun(IntegrationTestCase):
 		enqueue.assert_not_called()
 		vm = frappe.get_doc("Virtual Machine", vm_name)
 		self.assertTrue(vm.is_sshpiper)
+		self.assertFalse(vm.is_proxy)
+
+	def test_provision_build_vm_garage_has_gateway_role(self) -> None:
+		from atlas.atlas.image_recipes import get_recipe
+
+		frappe.db.set_single_value("Atlas Settings", "ssh_public_key", "ssh-ed25519 AAAA test")
+		build = _new_build("garage")
+		with patch.object(image_build_module.frappe, "enqueue") as enqueue:
+			vm_name = image_build_module._provision_build_vm(build, get_recipe("garage"))
+		enqueue.assert_not_called()
+		vm = frappe.get_doc("Virtual Machine", vm_name)
+		self.assertTrue(vm.is_garage)
+		self.assertFalse(vm.is_sshpiper)
 		self.assertFalse(vm.is_proxy)
 
 	def test_provision_boots_build_vm_at_fat_build_memory(self) -> None:

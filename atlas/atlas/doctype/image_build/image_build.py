@@ -51,16 +51,7 @@ class ImageBuild(Document):
 		build_task: DF.Link | None
 		build_virtual_machine: DF.Link | None
 		error: DF.SmallText | None
-		recipe: DF.Literal[
-			"bench-v16",
-			"bench-v15",
-			"bench-nightly",
-			"bench-v16-admin",
-			"bench-v15-admin",
-			"bench-nightly-admin",
-			"proxy",
-			"sshpiper",
-		]
+		recipe: DF.Literal["bench-v16", "bench-v15", "bench-nightly", "bench-v16-admin", "bench-v15-admin", "bench-nightly-admin", "proxy", "sshpiper", "garage"]
 		server: DF.Link
 		snapshot: DF.Link | None
 		status: DF.Literal["Draft", "Provisioning", "Building", "Snapshotting", "Available", "Failed"]
@@ -217,7 +208,7 @@ def run(image_build_name: str) -> None:
 		# would otherwise snapshot clean and break a customer at first login. A miss
 		# raises → the except below marks the build Failed, no snapshot. Proxy builds
 		# bake no Frappe site, so they keep their own in-build health check.
-		if not (recipe.is_proxy or recipe.is_sshpiper):
+		if not (recipe.is_proxy or recipe.is_sshpiper or recipe.is_garage):
 			bench_image.sanity_check(vm_name)
 		# The build VM may have booted FAT (recipe.build_memory_megabytes, so the
 		# Node-asset build had headroom); a clone must restore SMALL. Firecracker
@@ -333,6 +324,7 @@ def _provision_build_vm(build, recipe) -> str:
 			"ssh_public_key": ssh_public_key,
 			"is_proxy": 1 if recipe.is_proxy else 0,
 			"is_sshpiper": 1 if recipe.is_sshpiper else 0,
+			"is_garage": 1 if recipe.is_garage else 0,
 			# Stamp the bake mode (bench recipes only; empty for proxy). It rides the
 			# build VM → its snapshot → a clone, so a customer VM's first boot maps its
 			# FQDN to the baked site (site) or the admin console (admin) — spec/08.

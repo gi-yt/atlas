@@ -63,6 +63,7 @@ class ImageRecipe:
 	registers_as: str | None = None
 	is_proxy: bool = False
 	is_sshpiper: bool = False
+	is_garage: bool = False
 	# The in-guest script (inside source_directory, like build_entrypoint) that
 	# arms a WARM bake: bring the production stack up, pre-warm it with real
 	# HTTP, and install the identity freshen unit — run right before the paused
@@ -131,6 +132,15 @@ def _finalize_sshpiper(virtual_machine, connection, key_path) -> tuple[str, str,
 		"systemctl mask ssh.socket >/dev/null && "
 		"systemctl enable --now ssh.service >/dev/null && "
 		"ss -ltnH 'sport = :222' | grep -q LISTEN",
+		timeout_seconds=60,
+	)
+
+def _finalize_garage(virtual_machine, connection, key_path) -> tuple[str, str, int]:
+	"""Move the baked gateway's management sshd to 222 after build polling ends."""
+	return run_ssh(
+		connection,
+		key_path,
+		"/usr/local/bin/garage --version",
 		timeout_seconds=60,
 	)
 
@@ -376,6 +386,21 @@ RECIPES: dict[str, "ImageRecipe"] = {
 		exclude=("test",),
 		finalize=_finalize_sshpiper,
 		is_sshpiper=True,
+	),
+	"garage": ImageRecipe(
+		name="garage",
+		title="Garage ingress image",
+		source_directory="garage",
+		build_entrypoint="build.sh",
+		remote_directory="/tmp/garage-build",
+		disk_gigabytes=10,
+		memory_megabytes=512,
+		vcpus=1,
+		snapshot_title="garage-image",
+		task_script="garage-build",
+		exclude=("test",),
+		finalize=_finalize_garage,
+		is_garage=True,
 	),
 }
 

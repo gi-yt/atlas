@@ -1,10 +1,8 @@
 {
  "actions": [],
- "allow_rename": 0,
  "autoname": "format:IMG-BUILD-{#####}",
- "creation": "2026-06-11 00:00:00.000000",
+ "creation": "2026-06-11 00:00:00",
  "doctype": "DocType",
- "editable_grid": 0,
  "engine": "InnoDB",
  "field_order": [
   "tab_overview",
@@ -33,13 +31,13 @@
    "label": "Overview"
   },
   {
-   "description": "Which image to bake. The recipe names the committed source tree, the build entrypoint, the build-VM sizing, and (bench variants) the Frappe/ERPNext/Python version pins (atlas.atlas.image_recipes). bench-v16 is the current site line; bench-v15/-nightly are the other site versions; the -admin variants bake the bench-cli admin console (no site); proxy is the reverse-proxy image; sshpiper is the dedicated SSH ingress image. Keep in lockstep with image_recipes.recipe_names().",
+   "description": "Which image to bake. The recipe names the committed source tree, the build entrypoint, the build-VM sizing, and (bench variants) the Frappe/ERPNext/Python version pins (atlas.atlas.image_recipes). bench-v16 is the current site line; bench-v15/-nightly are the other site versions; the -admin variants bake the bench-cli admin console (no site); proxy is the reverse-proxy image; sshpiper is the dedicated SSH ingress image. Garage is for S3 Obj Storage. Keep in lockstep with image_recipes.recipe_names().",
    "fieldname": "recipe",
    "fieldtype": "Select",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Recipe",
-   "options": "bench-v16\nbench-v15\nbench-nightly\nbench-v16-admin\nbench-v15-admin\nbench-nightly-admin\nproxy\nsshpiper",
+   "options": "bench-v16\nbench-v15\nbench-nightly\nbench-v16-admin\nbench-v15-admin\nbench-nightly-admin\nproxy\nsshpiper\ngarage",
    "reqd": 1,
    "set_only_once": 1
   },
@@ -163,55 +161,52 @@
   }
  ],
  "links": [],
- "modified": "2026-07-04 18:58:30.812829",
+ "modified": "2026-08-01 23:58:11.437160",
  "modified_by": "Administrator",
  "module": "Atlas",
  "name": "Image Build",
- "naming_rule": "Expression",
+ "naming_rule": "Expression (old style)",
  "owner": "Administrator",
  "permissions": [
   {
-   "amend": 0,
-   "cancel": 0,
    "create": 1,
    "delete": 1,
    "export": 1,
-   "import": 0,
    "read": 1,
    "report": 1,
    "role": "System Manager",
    "share": 1,
-   "submit": 0,
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "search_fields": "recipe,status,snapshot",
  "sort_field": "creation",
  "sort_order": "DESC",
  "states": [
   {
-   "title": "Draft",
-   "color": "Gray"
+   "color": "Gray",
+   "title": "Draft"
   },
   {
-   "title": "Provisioning",
-   "color": "Blue"
+   "color": "Blue",
+   "title": "Provisioning"
   },
   {
-   "title": "Building",
-   "color": "Blue"
+   "color": "Blue",
+   "title": "Building"
   },
   {
-   "title": "Snapshotting",
-   "color": "Blue"
+   "color": "Blue",
+   "title": "Snapshotting"
   },
   {
-   "title": "Available",
-   "color": "Green"
+   "color": "Green",
+   "title": "Available"
   },
   {
-   "title": "Failed",
-   "color": "Red"
+   "color": "Red",
+   "title": "Failed"
   }
  ],
  "title_field": "title",
