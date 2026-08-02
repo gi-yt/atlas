@@ -544,7 +544,7 @@
    "fieldname": "pilot_credential_id",
    "fieldtype": "Data",
    "label": "Pilot Credential ID",
-   "read_only": 1
+   "read_only": 1,
    "description": "Central-minted per-pilot credential id, copied from the owning Site. Echoed to Central on vm.* events so Central links/revokes the credential."
   }
  ],
