@@ -162,7 +162,8 @@ keep it the source of truth.
 28. [Snapshot backup to S3](./29-snapshot-backup.md) — *push a point-in-time snapshot off-host to S3 and rehydrate it back (same-VM rollback)*
 29. [The core ↔ service boundary and the `satellite` app](./30-core-service-boundary.md) — *how service logic (proxy, gateway, mesh, bench/site) leaves core for a separate app via an explicit VM-lifecycle seam*
 30. [SSHPiper — VM SSH ingress](./30-sshpiper.md)
->>>>>>> origin/main
+31. [Distributed network control plane (ANCP)](./31-ancp-network-control-plane.md) — *shipped: the decentralized `atlas-networkd` control plane (gossip + anti-entropy) that replaced the controller-driven WireGuard host mesh of [25](./25-private-networking.md)*
+32. [Sleepy VMs — auto-sleep idle VMs, wake on demand](./32-sleepy-vms.md) — *free host RAM by sleeping idle VMs; wake on operator Start or the first inbound TCP connection (fast resume from a memory snapshot)*
 
 ## First run on a fresh site
 
@@ -224,8 +225,8 @@ call. Requires a `bench worker` running because `provision_server` and
 To put a site behind a real cert, layer the proxy ([12-proxy.md](./12-proxy.md))
 and TLS ([13-tls.md](./13-tls.md)) setup on top:
 
-6. **Route53 Settings** — the DNS account (DNS-01); pick the active DNS vendor
-   on `Atlas Settings.dns_provider_type` (`Route53`).
+6. **DNS Settings** — configure Route53 Settings or PowerDNS Settings; pick the
+   active DNS vendor on `Atlas Settings.dns_provider_type` (`Route53` or `PowerDNS`).
 7. **Lets Encrypt Settings** — the ACME account (directory URL, account
    email); the active issuer is `Atlas Settings.tls_provider_type`.
 8. **Root Domain** — one row per region (`<region>.frappe.dev`, `region`);
@@ -241,7 +242,7 @@ bench --site <site> execute atlas.bootstrap.run_with_proxy
 ```
 
 `run_with_proxy` is `run` plus the TLS tail: it does the compute bootstrap, then
-— only if the `atlas_tls_domain` + Route 53 + ACME config keys are present —
+— only if the `atlas_tls_domain` + DNS provider + ACME config keys are present —
 writes the DNS/TLS vendor types (`Atlas Settings.dns_provider_type`,
 `Atlas Settings.tls_provider_type`), the two per-vendor Settings, and the
 `Root Domain` row, then issues the regional wildcard (defaulting to
@@ -250,7 +251,7 @@ Let's Encrypt **staging** so an unattended run never burns production quota; set
 tail and behaves like `run`. The file's docstring lists every config key.
 
 The TLS layer has a **controller-host dependency**: `certbot`,
-`certbot-dns-route53`, `openssl`, and `boto3` must be installed on the Atlas
+`openssl`, `certbot`, and the selected DNS plugin must be installed on the Atlas
 controller (issuance runs there, not over SSH — see [13-tls.md](./13-tls.md)).
 
 ## Operator use cases
@@ -276,9 +277,10 @@ operator-facing features add to this list; new tests follow it.
 | Back up a snapshot to S3        | `Virtual Machine Snapshot` → **Upload to S3 / Restore from S3** (off-host durable copy via controller-presigned URLs; restore rehydrates the on-host artifacts and, for a cold snapshot, rolls its own VM back) | [29-snapshot-backup.md](./29-snapshot-backup.md) |
 | Attach a public IPv4 to a VM   | `Reserved IP` → **Attach / Detach** (the inbound-v4 primitive: DNAT in, SNAT out) | [06-networking.md](./06-networking.md#ipv4-ingress-reserved-ip) |
 | Broker a VPN tunnel to a VM    | (user/Central-driven) `request_vpc_access` / `revoke` dials the owner in as a peer on their tenant `/48` via the **customer gateway VM** on the mesh — one shared `wg0`, one client `/128` (supersedes the host-terminated broker) | [25-private-networking.md](./25-private-networking.md#the-customer-gateway--external-dial-in-to-the-mesh), [19-vpn-broker.md](./19-vpn-broker.md) |
-| Issue a TLS cert for a region  | `Root Domain` → **Issue / Renew Certificate**; `TLS Certificate` → **Issue/Renew / Push to Proxies**; `Route53 Settings` / `Lets Encrypt Settings` → **Test Connection** | [13-tls.md](./13-tls.md) |
+| Issue a TLS cert for a region  | `Root Domain` → **Issue / Renew Certificate**; `TLS Certificate` → **Issue/Renew / Push to Proxies**; DNS Settings / `Lets Encrypt Settings` → **Test Connection** | [13-tls.md](./13-tls.md) |
 | Route guest-created bench sites | (guest-driven, no operator action) the in-guest `bench-domain-provider register`/`deregister` POSTs reserve/remove a `Subdomain` the controller arbitrates (uniqueness, brand denylist, per-VM cap, own-VM scoping by source `/128`); the `wildcard-domains`/`proxy-servers` queries answer pilot's host-level questions; every call audited; `terminate()` is the only controller-side teardown | [18-bench-self-routing.md](./18-bench-self-routing.md) |
 | Refresh a host's capacity      | `Server` → **Refresh Capacity** (re-measure CPU/RAM/pool totals + fullness and stamp them, no re-bootstrap) | [28-placement.md](./28-placement.md) |
+| Auto-sleep idle VMs             | `Virtual Machine` → enable **`sleep_on_idle`** + set **`idle_timeout_seconds`** (idle VMs sleep to free host RAM; wake on **Start** or the first inbound TCP connection) | [32-sleepy-vms.md](./32-sleepy-vms.md) |
 | Run an ad-hoc task / reboot    | `Server` → **Run Task / Reboot**                        | [04-tasks.md](./04-tasks.md) |
 | Run an ad-hoc command on hosts/guests | `SSH Console` → **Execute** (fan one command across Servers and/or Virtual Machines; per-target output streams back; every run recorded as an `SSH Command Log`), or `Server` / `Virtual Machine` → **Run Command** (pre-targets the console at one row) | [04-tasks.md § The SSH Console](./04-tasks.md#the-ssh-console-ad-hoc-commands) |
 | Click any button on the desk   | every form button driven through `run_doc_method`       | (this section, *Desk-button coverage*) |
@@ -437,7 +439,7 @@ billable provision) on a site without the `atlas_tls_*` config keys. It is
 the only e2e that exercises the real producer chain (Let's Encrypt →
 DNS-01 → certbot → `_push_to_proxies`); `proxy_vm` uses a self-signed
 stand-in cert. It needs the controller-host deps (certbot,
-certbot-dns-route53, openssl, boto3) and fails its preflight with a clear
+certbot, openssl, selected DNS plugin, and Route53's boto3 when applicable) and fails its preflight with a clear
 message if they are absent.
 
 The **self-serve site** use case (`self_serve_site.run_smoke`) is the

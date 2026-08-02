@@ -49,7 +49,8 @@ and [26](./27-docker-compat.md): those describe **`satellite`**, not core Atlas.
 - **Service-role fields**: `is_proxy`, `is_gateway`, `build_mode`, `pilot_credential_id`.
 - **`terminate()` fan-out**: `_deprovision_proxy()`, `_revoke_tunnels()`,
   `_revoke_vpc_peers()`, `_delete_subdomains()`, `_delete_custom_domains()`.
-- **Overlay-networking calls**: `_reconcile_host_mesh()`; `set_private_address()`.
+- **Overlay-networking calls**: `set_private_address()`. (The `_reconcile_host_mesh()` call
+  was deleted when ANCP replaced the controller-driven mesh.)
 - **Service methods**: `validate_infra_role()`, `set_build_mode_default()`,
   `deploy_gateway()`, `read_proxy_maps()`.
 
@@ -60,7 +61,8 @@ core modules still read `is_proxy`/`is_gateway`/`build_mode` until their phase l
 ### 1b. Service modules → `satellite`
 `proxy.py`, `tcp_proxy.py`, `customer_gateway.py`, `bench_routing.py`, `bench_image.py`,
 `deploy_site.py`, `front_door.py`, `image_recipes.py`, `tls/` + `dns/` registries, the
-service half of `api/` (`api/site.py`), and `host_mesh.py`. When they move they keep
+service half of `api/` (`api/site.py`). (`host_mesh.py` was already deleted — ANCP
+replaced it in the core layer before the satellite extraction.) When they move they keep
 their **orchestration** but **rebind their transport**: every `run_task`/SSH call becomes
 a call to satellite's *own* SSH engine (`satellite/ssh.py`). Atlas keeps its SSH/Task
 engine only for its own provisioning — it is no longer a shared executor.
@@ -68,7 +70,7 @@ engine only for its own provisioning — it is no longer a shared executor.
 ### 1c. Service doctypes → `satellite`
 `pilot`, `site`, `site_request`, `subdomain`, `subdomain_denylist`, `custom_domain`,
 `port_mapping`, `root_domain`, `tls_certificate`, `tls_provider`, `lets_encrypt_settings`,
-`route53_settings`, `domain_provider`, `vpn_peer`, `vpn_tunnel`, `bench_routing_audit`.
+`route53_settings`, `powerdns_settings`, `domain_provider`, `vpn_peer`, `vpn_tunnel`, `bench_routing_audit`.
 Every satellite doctype is authored via **bench** (`frappe.get_doc({"doctype":"DocType",…})`
 / the Desk editor), committed as the generated `*.json` + controller — never hand-written.
 Because these names (`Virtual Machine`, `Server`, …) collide with Atlas's, a satellite
@@ -126,12 +128,13 @@ change, ever.
 - **Phase 0 — walking skeleton.** The whole split proven end-to-end with one service
   (mesh), multi-Atlas-ready. **Done + e2e-verified on a real DO host.**
 - **Phase 1** — mesh + gateway/VPN (host-plane overlay): real WireGuard reconcile +
-  `VPN Tunnel/Peer` in satellite; delete `host_mesh.py`/`customer_gateway`/`is_gateway`.
+  `VPN Tunnel/Peer` in satellite; delete `customer_gateway`/`is_gateway`.
+  (`host_mesh.py` was already deleted — ANCP replaced it in the core layer.)
 - **Phase 2** — routing: `Subdomain`, `Custom Domain`, `Port Mapping`, bench-routing.
 - **Phase 3** — proxy: fleet + DNS wildcard + cert push; delete `proxy.py`/`is_proxy`.
 - **Phase 4** — bench/site/pilot: `Site`, `Site Request`, `Pilot`, `Image Build`,
   recipes; delete `build_mode`.
-- **Phase 5** — TLS/DNS/domain: `tls/`, `dns/`, `root_domain`, `tls_certificate`, LE/Route53.
+- **Phase 5** — TLS/DNS/domain: `tls/`, `dns/`, `root_domain`, `tls_certificate`, LE/Route53/PowerDNS.
 
 Each phase relocates the doctype(s), reimplements the logic on satellite's SSH, **deletes
 from Atlas core**, verifies, and stops. Central ([21](./21-tunnel.md)) is a separate,
